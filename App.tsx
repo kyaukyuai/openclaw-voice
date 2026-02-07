@@ -8,6 +8,7 @@ import {
   Image,
   Keyboard,
   KeyboardAvoidingView,
+  LogBox,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
@@ -45,6 +46,13 @@ const REQUESTED_GATEWAY_CLIENT_ID =
 const GATEWAY_DISPLAY_NAME =
   (process.env.EXPO_PUBLIC_GATEWAY_DISPLAY_NAME ?? 'OpenClawVoice').trim() ||
   'OpenClawVoice';
+const ENABLE_DEBUG_WARNINGS = /^(1|true|yes|on)$/i.test(
+  (process.env.EXPO_PUBLIC_DEBUG_MODE ?? '').trim(),
+);
+
+if (__DEV__ && !ENABLE_DEBUG_WARNINGS) {
+  LogBox.ignoreAllLogs(true);
+}
 
 const STORAGE_KEYS = {
   gatewayUrl: 'mobile-openclaw.gateway-url',

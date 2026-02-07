@@ -153,6 +153,7 @@ cp .env.example .env
 - `EXPO_PUBLIC_DEFAULT_THEME` (`light` or `dark`)
 - `EXPO_PUBLIC_GATEWAY_CLIENT_ID` (default: `openclaw-ios`)
 - `EXPO_PUBLIC_GATEWAY_DISPLAY_NAME` (default: `OpenClawVoice`)
+- `EXPO_PUBLIC_DEBUG_MODE` (`true` to show warnings in dev, default: `false`)
 
 ## Connection Defaults
 
