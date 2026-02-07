@@ -1,7 +1,7 @@
 {
   "name": "openclaw-voice",
   "version": "1.0.1",
-  "main": "./dist/package.js",
+  "main": "index.ts",
   "types": "./dist/package.d.ts",
   "exports": {
     ".": {
