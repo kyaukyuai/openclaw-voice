@@ -1,7 +1,8 @@
 {
   "expo": {
     "name": "OpenClawVoice",
-    "slug": "new-project",
+    "slug": "openclaw-voice",
+    "entryPoint": "./index.ts",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -18,7 +19,7 @@
         "NSSpeechRecognitionUsageDescription": "音声入力のために音声認識の使用を許可してください。",
         "NSMicrophoneUsageDescription": "音声入力のためにマイクの使用を許可してください。"
       },
-      "bundleIdentifier": "com.kyaukyuai.new-project"
+      "bundleIdentifier": "com.kyaukyuai.openclawvoice"
     },
     "android": {
       "adaptiveIcon": {
