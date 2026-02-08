@@ -172,7 +172,27 @@ Device identity is generated locally and reused when persistent storage is avail
 - `npm run android` - Build and run Android app
 - `npm run web` - Run web target
 - `npm run typecheck` - Run TypeScript checks
+- `npm run lint` - Run repository lint checks
+- `npm test` - Run manifest switch regression tests
+- `npm run smoke:pack-install` - Pack tarball and verify install/import from a clean temp app
 - `npm run build:package` - Build npm package files to `dist/`
+
+## Local Quality Checks
+
+Run before opening a PR:
+
+```bash
+npm run typecheck
+npm run lint
+npm test
+npm run smoke:pack-install
+```
+
+If your environment cannot access npm network during smoke test:
+
+```bash
+OPENCLAW_SMOKE_SKIP_INSTALL=1 npm run smoke:pack-install
+```
 
 ## Security Notes
 
@@ -197,8 +217,9 @@ GitHub Actions runs on push/PR:
 - Type check (`npm run typecheck`)
 - Package dry-run (`npm pack --dry-run`)
 - Manifest restore check after pack (`package.json.main` stays `index.ts`)
-- Lint (`npm run lint --if-present`)
-- Tests (`npm test --if-present`)
+- Lint (`npm run lint`)
+- Tests (`npm test`)
+- Tarball install smoke test (`npm run smoke:pack-install`)
 
 Issue/PR templates are in `.github/`.
 
