@@ -586,6 +586,7 @@ export default function App() {
   const [isSessionRenameOpen, setIsSessionRenameOpen] = useState(false);
   const [sessionRenameTargetKey, setSessionRenameTargetKey] = useState<string | null>(null);
   const [sessionRenameDraft, setSessionRenameDraft] = useState('');
+  const [isStartupAutoConnecting, setIsStartupAutoConnecting] = useState(false);
   const [settingsSavePendingCount, setSettingsSavePendingCount] = useState(0);
   const [settingsSaveError, setSettingsSaveError] = useState<string | null>(null);
   const [settingsSavedAt, setSettingsSavedAt] = useState<number | null>(null);
@@ -626,6 +627,7 @@ export default function App() {
   const keyboardBarAnim = useRef(new Animated.Value(0)).current;
   const expectedSpeechStopRef = useRef(false);
   const isUnmountingRef = useRef(false);
+  const startupAutoConnectAttemptedRef = useRef(false);
 
   const isGatewayConnected = connectionState === 'connected';
   const isGatewayConnecting =
@@ -1325,15 +1327,22 @@ export default function App() {
     }
   };
 
-  const connectGateway = async () => {
+  const connectGateway = async (options?: { auto?: boolean }) => {
+    const isAutoConnect = options?.auto === true;
     if (!settingsReady) {
       setGatewayError('Initializing. Please wait a few seconds and try again.');
+      if (isAutoConnect) setIsStartupAutoConnecting(false);
       return;
     }
 
     if (!gatewayUrl.trim()) {
       setGatewayError('Please enter a Gateway URL.');
+      if (isAutoConnect) setIsStartupAutoConnecting(false);
       return;
+    }
+
+    if (isAutoConnect) {
+      setIsStartupAutoConnecting(true);
     }
 
     const connectOnce = async (clientId: string) => {
@@ -1391,8 +1400,21 @@ export default function App() {
     } catch (err) {
       disconnectGateway();
       setGatewayError(`Gateway connection failed: ${errorMessage(err)}`);
+    } finally {
+      if (isAutoConnect) {
+        setIsStartupAutoConnecting(false);
+      }
     }
   };
+
+  useEffect(() => {
+    if (!settingsReady) return;
+    if (startupAutoConnectAttemptedRef.current) return;
+    if (!gatewayUrl.trim()) return;
+    if (connectionState !== 'disconnected') return;
+    startupAutoConnectAttemptedRef.current = true;
+    void connectGateway({ auto: true });
+  }, [connectionState, gatewayUrl, settingsReady]);
 
   useEffect(() => {
     return () => {
@@ -1587,6 +1609,7 @@ export default function App() {
   const showQuickTextRightTooltip =
     quickTextTooltipSide === 'right' && canUseQuickTextRight;
   const isTranscriptEditingWithKeyboard = isKeyboardVisible && isTranscriptFocused;
+  const isTranscriptExpanded = isTranscriptFocused || isRecognizing;
   const sendDisabledReason = !hasDraft
     ? 'No text to send.'
     : !isGatewayConnected
@@ -2253,6 +2276,20 @@ export default function App() {
                         </Text>
                       </Pressable>
                     </View>
+                    {isStartupAutoConnecting ? (
+                      <View style={styles.autoConnectLoadingRow}>
+                        <ActivityIndicator
+                          size="small"
+                          color={isDarkTheme ? '#9ec0ff' : '#2563EB'}
+                        />
+                        <Text
+                          style={styles.autoConnectLoadingText}
+                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                        >
+                          Connecting to saved Gateway...
+                        </Text>
+                      </View>
+                    ) : null}
                   </View>
 
                   <View style={[styles.settingsSection, styles.settingsSectionSpaced]}>
@@ -3000,12 +3037,14 @@ export default function App() {
               styles.card,
               isRecognizing && styles.recordingCard,
               isTranscriptEditingWithKeyboard && styles.transcriptCardExpanded,
+              !isTranscriptExpanded && styles.transcriptCardCompact,
             ]}
           >
             <View
               style={[
                 styles.transcriptEditor,
                 isTranscriptEditingWithKeyboard && styles.transcriptEditorExpanded,
+                !isTranscriptExpanded && styles.transcriptEditorCompact,
               ]}
             >
               <TextInput
@@ -3014,6 +3053,7 @@ export default function App() {
                   focusedField === 'transcript' && styles.inputFocused,
                   isRecognizing && styles.transcriptInputDisabled,
                   isTranscriptEditingWithKeyboard && styles.transcriptInputExpanded,
+                  !isTranscriptExpanded && styles.transcriptInputCompact,
                 ]}
                 maxFontSizeMultiplier={MAX_TEXT_SCALE}
                 value={transcript}
@@ -4008,6 +4048,17 @@ function createStyles(isDarkTheme: boolean) {
       alignItems: 'stretch',
       width: '100%',
     },
+    autoConnectLoadingRow: {
+      marginTop: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    autoConnectLoadingText: {
+      fontSize: 11,
+      color: colors.loading,
+      fontWeight: '600',
+    },
     smallButton: {
       borderRadius: 9,
       minHeight: 40,
@@ -4073,9 +4124,17 @@ function createStyles(isDarkTheme: boolean) {
       flex: 1,
       minHeight: 0,
     },
+    transcriptCardCompact: {
+      paddingTop: 10,
+      paddingBottom: 10,
+    },
     transcriptEditor: {
       minHeight: 96,
       gap: 6,
+    },
+    transcriptEditorCompact: {
+      minHeight: 56,
+      gap: 0,
     },
     transcriptEditorExpanded: {
       flex: 1,
@@ -4092,6 +4151,10 @@ function createStyles(isDarkTheme: boolean) {
       paddingVertical: 0,
       fontSize: 15,
       lineHeight: 22,
+    },
+    transcriptInputCompact: {
+      minHeight: 44,
+      lineHeight: 20,
     },
     transcriptInputExpanded: {
       flex: 1,
