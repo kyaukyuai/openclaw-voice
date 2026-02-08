@@ -64,6 +64,7 @@ const STORAGE_KEYS = {
   speechLang: 'mobile-openclaw.speech-lang',
   sessionKey: 'mobile-openclaw.session-key',
   sessionPrefs: 'mobile-openclaw.session-prefs',
+  quickSessionBar: 'mobile-openclaw.quick-session-bar',
 };
 
 const OPENCLAW_IDENTITY_STORAGE_KEY = 'openclaw_device_identity';
@@ -594,6 +595,7 @@ export default function App() {
           savedSpeechLang,
           savedSessionKey,
           savedSessionPrefs,
+          savedQuickSessionBar,
         ] = await Promise.all([
           kvStore.getItemAsync(STORAGE_KEYS.gatewayUrl),
           kvStore.getItemAsync(STORAGE_KEYS.authToken),
@@ -602,6 +604,7 @@ export default function App() {
           kvStore.getItemAsync(STORAGE_KEYS.speechLang),
           kvStore.getItemAsync(STORAGE_KEYS.sessionKey),
           kvStore.getItemAsync(STORAGE_KEYS.sessionPrefs),
+          kvStore.getItemAsync(STORAGE_KEYS.quickSessionBar),
         ]);
         if (!alive) return;
 
@@ -617,6 +620,9 @@ export default function App() {
           setActiveSessionKey(savedSessionKey.trim());
         }
         setSessionPreferences(parseSessionPreferences(savedSessionPrefs));
+        if (savedQuickSessionBar === '0' || savedQuickSessionBar === 'false') {
+          setIsSessionQuickPanelOpen(false);
+        }
         if (savedIdentity) {
           openClawIdentityMemory.set(
             OPENCLAW_IDENTITY_STORAGE_KEY,
@@ -699,6 +705,17 @@ export default function App() {
       );
     });
   }, [persistSetting, sessionPreferences, settingsReady]);
+
+  useEffect(() => {
+    if (!settingsReady) return;
+    persistSetting(async () => {
+      if (isSessionQuickPanelOpen) {
+        await kvStore.setItemAsync(STORAGE_KEYS.quickSessionBar, '1');
+      } else {
+        await kvStore.setItemAsync(STORAGE_KEYS.quickSessionBar, '0');
+      }
+    });
+  }, [isSessionQuickPanelOpen, persistSetting, settingsReady]);
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -1694,36 +1711,6 @@ export default function App() {
             <Pressable
               style={[
                 styles.iconButton,
-                isSessionQuickPanelOpen && styles.iconButtonActive,
-                !isGatewayConnected && styles.iconButtonDisabled,
-              ]}
-              hitSlop={7}
-              accessibilityRole="button"
-              accessibilityLabel={
-                isSessionQuickPanelOpen
-                  ? 'Hide quick session switcher'
-                  : 'Show quick session switcher'
-              }
-              onPress={() => {
-                if (!isGatewayConnected) return;
-                Keyboard.dismiss();
-                setFocusedField(null);
-                if (!isSessionQuickPanelOpen) {
-                  void refreshSessions();
-                }
-                setIsSessionQuickPanelOpen((current) => !current);
-              }}
-              disabled={!isGatewayConnected}
-            >
-              <Ionicons
-                name={isSessionQuickPanelOpen ? 'albums' : 'albums-outline'}
-                size={18}
-                color={isDarkTheme ? '#bccae2' : '#707070'}
-              />
-            </Pressable>
-            <Pressable
-              style={[
-                styles.iconButton,
                 isSettingsPanelOpen && styles.iconButtonActive,
                 !isGatewayConnected && styles.iconButtonDisabled,
               ]}
@@ -1746,21 +1733,6 @@ export default function App() {
                 name="settings-outline"
                 size={18}
                 color={isDarkTheme ? '#bccae2' : '#707070'}
-              />
-            </Pressable>
-            <Pressable
-              style={styles.iconButton}
-              hitSlop={7}
-              accessibilityRole="button"
-              accessibilityLabel={isDarkTheme ? 'Switch to light theme' : 'Switch to dark theme'}
-              onPress={() => {
-                setTheme((current) => (current === 'dark' ? 'light' : 'dark'));
-              }}
-            >
-              <Ionicons
-                name={isDarkTheme ? 'sunny-outline' : 'moon-outline'}
-                size={18}
-                color={isDarkTheme ? '#bccae2' : '#999999'}
               />
             </Pressable>
           </View>
@@ -2075,6 +2047,124 @@ export default function App() {
                             : isGatewayConnecting
                               ? 'Connecting...'
                               : 'Connect'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
+
+                  <View style={[styles.settingsSection, styles.settingsSectionSpaced]}>
+                    <Text
+                      style={styles.settingsSectionTitle}
+                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                    >
+                      Appearance
+                    </Text>
+                    <Text
+                      style={styles.settingsSectionDescription}
+                      maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                    >
+                      Choose visual theme and home layout options.
+                    </Text>
+                    <Text style={styles.label} maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}>
+                      Theme
+                    </Text>
+                    <View style={styles.settingsOptionRow}>
+                      <Pressable
+                        style={[
+                          styles.settingsOptionButton,
+                          theme === 'light' && styles.settingsOptionButtonSelected,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel="Set theme to light"
+                        onPress={() => {
+                          setTheme('light');
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.settingsOptionLabel,
+                            theme === 'light' && styles.settingsOptionLabelSelected,
+                          ]}
+                          maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                        >
+                          Light
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        style={[
+                          styles.settingsOptionButton,
+                          theme === 'dark' && styles.settingsOptionButtonSelected,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel="Set theme to dark"
+                        onPress={() => {
+                          setTheme('dark');
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.settingsOptionLabel,
+                            theme === 'dark' && styles.settingsOptionLabelSelected,
+                          ]}
+                          maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                        >
+                          Dark
+                        </Text>
+                      </Pressable>
+                    </View>
+
+                    <Text
+                      style={[styles.label, styles.labelSpacing]}
+                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                    >
+                      Quick Sessions Bar
+                    </Text>
+                    <View style={styles.settingsOptionRow}>
+                      <Pressable
+                        style={[
+                          styles.settingsOptionButton,
+                          isSessionQuickPanelOpen && styles.settingsOptionButtonSelected,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel="Show quick sessions bar on home screen"
+                        onPress={() => {
+                          if (!isSessionQuickPanelOpen) {
+                            void refreshSessions();
+                          }
+                          setIsSessionQuickPanelOpen(true);
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.settingsOptionLabel,
+                            isSessionQuickPanelOpen &&
+                              styles.settingsOptionLabelSelected,
+                          ]}
+                          maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                        >
+                          Show
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        style={[
+                          styles.settingsOptionButton,
+                          !isSessionQuickPanelOpen && styles.settingsOptionButtonSelected,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel="Hide quick sessions bar on home screen"
+                        onPress={() => {
+                          setIsSessionQuickPanelOpen(false);
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.settingsOptionLabel,
+                            !isSessionQuickPanelOpen &&
+                              styles.settingsOptionLabelSelected,
+                          ]}
+                          maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                        >
+                          Hide
                         </Text>
                       </Pressable>
                     </View>
@@ -3179,6 +3269,36 @@ function createStyles(isDarkTheme: boolean) {
       color: colors.label,
       lineHeight: 17,
       marginBottom: 8,
+    },
+    settingsOptionRow: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    settingsOptionButton: {
+      flex: 1,
+      borderWidth: 1.5,
+      borderColor: colors.inputBorder,
+      borderRadius: 10,
+      backgroundColor: colors.inputBg,
+      alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: 40,
+      paddingVertical: 6,
+      paddingHorizontal: 10,
+    },
+    settingsOptionButtonSelected: {
+      borderColor: colors.inputBorderFocused,
+      backgroundColor: isDarkTheme
+        ? 'rgba(37,99,235,0.24)'
+        : 'rgba(37,99,235,0.10)',
+    },
+    settingsOptionLabel: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.textSecondary,
+    },
+    settingsOptionLabelSelected: {
+      color: colors.textPrimary,
     },
     label: {
       fontSize: 12,
