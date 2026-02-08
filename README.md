@@ -195,6 +195,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 GitHub Actions runs on push/PR:
 
 - Type check (`npm run typecheck`)
+- Package dry-run (`npm pack --dry-run`)
+- Manifest restore check after pack (`package.json.main` stays `index.ts`)
 - Lint (`npm run lint --if-present`)
 - Tests (`npm test --if-present`)
 
@@ -202,9 +204,26 @@ Issue/PR templates are in `.github/`.
 
 ## Publish to npm
 
+This repo uses two entry contexts:
+
+- App runtime: `package.json.main = index.ts`
+- npm package tarball: `main = ./dist/package.js` (switched automatically during pack/publish)
+
+Release steps:
+
 ```bash
-npm run build:package
+npm version patch --no-git-tag-version
+git add package.json package-lock.json
+git commit -m "chore(release): bump version to x.y.z"
+
+# Runs prepack/postpack hooks automatically:
+# - prepack: build + switch manifest for package publish
+# - postpack: restore app manifest
 npm publish --access public
+
+git tag vX.Y.Z
+git push -u origin main
+git push origin vX.Y.Z
 ```
 
 ## Acknowledgements
