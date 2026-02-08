@@ -1781,10 +1781,47 @@ export default function App() {
         marginTop: 0,
         marginBottom: 0,
       },
+      text: {
+        color: isDarkTheme ? '#f8fbff' : '#1A1A1A',
+        fontSize: 14,
+        lineHeight: 20,
+      },
       paragraph: {
         color: isDarkTheme ? '#f8fbff' : '#1A1A1A',
         marginTop: 0,
         marginBottom: 0,
+      },
+      heading1: {
+        color: isDarkTheme ? '#ffffff' : '#111827',
+        fontSize: 24,
+        lineHeight: 30,
+        fontWeight: '800' as const,
+        marginTop: 8,
+        marginBottom: 8,
+      },
+      heading2: {
+        color: isDarkTheme ? '#f5f8ff' : '#111827',
+        fontSize: 20,
+        lineHeight: 26,
+        fontWeight: '700' as const,
+        marginTop: 8,
+        marginBottom: 6,
+      },
+      heading3: {
+        color: isDarkTheme ? '#ecf2ff' : '#1f2937',
+        fontSize: 17,
+        lineHeight: 23,
+        fontWeight: '700' as const,
+        marginTop: 6,
+        marginBottom: 4,
+      },
+      heading4: {
+        color: isDarkTheme ? '#e6efff' : '#1f2937',
+        fontSize: 16,
+        lineHeight: 22,
+        fontWeight: '700' as const,
+        marginTop: 4,
+        marginBottom: 2,
       },
       strong: {
         color: isDarkTheme ? '#ffffff' : '#111827',
@@ -1852,8 +1889,28 @@ export default function App() {
         ...(markdownStyles.body ?? {}),
         color: isDarkTheme ? '#ffb0b0' : '#DC2626',
       },
+      text: {
+        ...(markdownStyles.text ?? {}),
+        color: isDarkTheme ? '#ffb0b0' : '#DC2626',
+      },
       paragraph: {
         ...(markdownStyles.paragraph ?? {}),
+        color: isDarkTheme ? '#ffb0b0' : '#DC2626',
+      },
+      heading1: {
+        ...(markdownStyles.heading1 ?? {}),
+        color: isDarkTheme ? '#ffb0b0' : '#DC2626',
+      },
+      heading2: {
+        ...(markdownStyles.heading2 ?? {}),
+        color: isDarkTheme ? '#ffb0b0' : '#DC2626',
+      },
+      heading3: {
+        ...(markdownStyles.heading3 ?? {}),
+        color: isDarkTheme ? '#ffb0b0' : '#DC2626',
+      },
+      heading4: {
+        ...(markdownStyles.heading4 ?? {}),
         color: isDarkTheme ? '#ffb0b0' : '#DC2626',
       },
       link: {
