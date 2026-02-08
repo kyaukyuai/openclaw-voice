@@ -118,6 +118,19 @@ type ChatTurn = {
   createdAt: number;
 };
 
+type HistoryListItem =
+  | {
+      kind: 'date';
+      id: string;
+      label: string;
+    }
+  | {
+      kind: 'turn';
+      id: string;
+      turn: ChatTurn;
+      isLast: boolean;
+    };
+
 type AppTheme = 'dark' | 'light';
 type SpeechLang = 'ja-JP' | 'en-US';
 type FocusField = 'gateway-url' | 'auth-token' | 'transcript' | null;
@@ -125,6 +138,8 @@ const DEFAULT_GATEWAY_URL = (process.env.EXPO_PUBLIC_DEFAULT_GATEWAY_URL ?? '').
 const DEFAULT_THEME: AppTheme =
   process.env.EXPO_PUBLIC_DEFAULT_THEME === 'dark' ? 'dark' : 'light';
 const DEFAULT_SPEECH_LANG: SpeechLang = 'ja-JP';
+const MAX_TEXT_SCALE = 1.35;
+const MAX_TEXT_SCALE_TIGHT = 1.15;
 const SPEECH_LANG_OPTIONS: Array<{ value: SpeechLang; label: string }> = [
   { value: 'ja-JP', label: '日本語' },
   { value: 'en-US', label: 'English' },
@@ -273,6 +288,45 @@ function errorMessage(err: unknown): string {
 
 function createTurnId(): string {
   return `turn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+const WAITING_TURN_STATES = new Set(['sending', 'queued', 'delta', 'streaming']);
+
+function isTurnWaitingState(state: string): boolean {
+  return WAITING_TURN_STATES.has(state);
+}
+
+function isTurnErrorState(state: string): boolean {
+  return state === 'error' || state === 'aborted';
+}
+
+function getHistoryDayKey(timestamp: number): string {
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getHistoryDayLabel(timestamp: number): string {
+  const targetDate = new Date(timestamp);
+  targetDate.setHours(0, 0, 0, 0);
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+
+  if (targetDate.getTime() === today.getTime()) return 'Today';
+  if (targetDate.getTime() === yesterday.getTime()) return 'Yesterday';
+
+  const withYear = targetDate.getFullYear() !== today.getFullYear();
+  return new Date(timestamp).toLocaleDateString(undefined, {
+    year: withYear ? 'numeric' : undefined,
+    month: 'short',
+    day: 'numeric',
+  });
 }
 
 export default function App() {
@@ -804,27 +858,6 @@ export default function App() {
     ExpoSpeechRecognitionModule.stop();
   };
 
-  const clearHistory = () => {
-    Keyboard.dismiss();
-    setFocusedField(null);
-    setChatTurns([]);
-    runIdToTurnIdRef.current.clear();
-    pendingTurnIdRef.current = null;
-    activeRunIdRef.current = null;
-    setGatewayError(null);
-    setGatewayEventState('idle');
-  };
-
-  const clearResult = () => {
-    Keyboard.dismiss();
-    setFocusedField(null);
-    transcriptRef.current = '';
-    interimTranscriptRef.current = '';
-    setTranscript('');
-    setInterimTranscript('');
-    setSpeechError(null);
-  };
-
   const formatTurnTime = (createdAt: number): string =>
     new Date(createdAt).toLocaleTimeString('ja-JP', {
       hour: '2-digit',
@@ -859,6 +892,65 @@ export default function App() {
       : isGatewayConnected
         ? 'Hold to record'
         : 'Please connect';
+  const historyItems = useMemo<HistoryListItem[]>(() => {
+    if (chatTurns.length === 0) return [];
+
+    const items: HistoryListItem[] = [];
+    let previousDayKey: string | null = null;
+
+    chatTurns.forEach((turn, index) => {
+      const dayKey = getHistoryDayKey(turn.createdAt);
+      if (dayKey !== previousDayKey) {
+        items.push({
+          kind: 'date',
+          id: `date-${dayKey}`,
+          label: getHistoryDayLabel(turn.createdAt),
+        });
+        previousDayKey = dayKey;
+      }
+
+      items.push({
+        kind: 'turn',
+        id: turn.id,
+        turn,
+        isLast: index === chatTurns.length - 1,
+      });
+    });
+
+    return items;
+  }, [chatTurns]);
+  const latestRetryText = useMemo(() => {
+    const currentDraft = (transcript.trim() || interimTranscript.trim()).trim();
+    if (currentDraft) return currentDraft;
+
+    for (let index = chatTurns.length - 1; index >= 0; index -= 1) {
+      const turn = chatTurns[index];
+      if (
+        (turn.state === 'error' || turn.state === 'aborted') &&
+        turn.userText.trim()
+      ) {
+        return turn.userText.trim();
+      }
+    }
+    return '';
+  }, [chatTurns, interimTranscript, transcript]);
+  const canReconnectFromError = settingsReady && !isGatewayConnecting;
+  const canRetryFromError =
+    Boolean(latestRetryText) && !isSending && isGatewayConnected;
+
+  const handleReconnectFromError = () => {
+    if (!canReconnectFromError) return;
+    Keyboard.dismiss();
+    setFocusedField(null);
+    void connectGateway();
+  };
+
+  const handleRetryFromError = () => {
+    if (!canRetryFromError) return;
+    Keyboard.dismiss();
+    setFocusedField(null);
+    void sendToGateway(latestRetryText);
+  };
 
   const handleHoldToTalkPressIn = () => {
     if (isRecognizing || isSending) return;
@@ -1030,7 +1122,9 @@ export default function App() {
                 style={styles.logoBadgeImage}
               />
             </View>
-            <Text style={styles.headerTitle}>OpenClawVoice</Text>
+            <Text style={styles.headerTitle} maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}>
+              OpenClawVoice
+            </Text>
           </View>
           <View style={styles.headerRight}>
             <View
@@ -1062,6 +1156,7 @@ export default function App() {
                       ? styles.statusChipTextConnecting
                       : styles.statusChipTextDisconnected,
                 ]}
+                maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
               >
                 {CONNECTION_LABELS[connectionState]}
               </Text>
@@ -1072,6 +1167,7 @@ export default function App() {
                 isSettingsPanelOpen && styles.iconButtonActive,
                 !isGatewayConnected && styles.iconButtonDisabled,
               ]}
+              hitSlop={7}
               accessibilityRole="button"
               accessibilityLabel={
                 isSettingsPanelOpen
@@ -1094,6 +1190,7 @@ export default function App() {
             </Pressable>
             <Pressable
               style={styles.iconButton}
+              hitSlop={7}
               accessibilityRole="button"
               accessibilityLabel={isDarkTheme ? 'Switch to light theme' : 'Switch to dark theme'}
               onPress={() => {
@@ -1111,12 +1208,15 @@ export default function App() {
 
         {shouldShowGatewayPanel ? (
           <View style={styles.gatewayPanel}>
-            <Text style={styles.label}>Gateway URL</Text>
+            <Text style={styles.label} maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}>
+              Gateway URL
+            </Text>
             <TextInput
               style={[
                 styles.input,
                 focusedField === 'gateway-url' && styles.inputFocused,
               ]}
+              maxFontSizeMultiplier={MAX_TEXT_SCALE}
               value={gatewayUrl}
               onChangeText={setGatewayUrl}
               placeholder="wss://your-openclaw-gateway.example.com"
@@ -1134,7 +1234,10 @@ export default function App() {
               }
             />
 
-            <Text style={[styles.label, styles.labelSpacing]}>
+            <Text
+              style={[styles.label, styles.labelSpacing]}
+              maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+            >
               Token / Password (Optional)
             </Text>
             <TextInput
@@ -1142,6 +1245,7 @@ export default function App() {
                 styles.input,
                 focusedField === 'auth-token' && styles.inputFocused,
               ]}
+              maxFontSizeMultiplier={MAX_TEXT_SCALE}
               value={authToken}
               onChangeText={setAuthToken}
               placeholder="gateway token or password"
@@ -1159,7 +1263,12 @@ export default function App() {
               }
             />
 
-            <Text style={[styles.label, styles.labelSpacing]}>Speech Language</Text>
+            <Text
+              style={[styles.label, styles.labelSpacing]}
+              maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+            >
+              Speech Language
+            </Text>
             <View style={styles.languagePickerRow}>
               {SPEECH_LANG_OPTIONS.map((option) => {
                 const selected = speechLang === option.value;
@@ -1183,6 +1292,7 @@ export default function App() {
                         styles.languageOptionLabel,
                         selected && styles.languageOptionLabelSelected,
                       ]}
+                      maxFontSizeMultiplier={MAX_TEXT_SCALE}
                     >
                       {option.label}
                     </Text>
@@ -1191,6 +1301,7 @@ export default function App() {
                         styles.languageOptionCode,
                         selected && styles.languageOptionCodeSelected,
                       ]}
+                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
                     >
                       {option.value}
                     </Text>
@@ -1213,7 +1324,10 @@ export default function App() {
                 }}
                 disabled={isGatewayConnecting || !settingsReady}
               >
-                <Text style={styles.smallButtonText}>
+                <Text
+                  style={styles.smallButtonText}
+                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                >
                   {!settingsReady
                     ? 'Initializing...'
                     : isGatewayConnecting
@@ -1226,23 +1340,22 @@ export default function App() {
         ) : null}
         <View style={styles.main}>
           {!isTranscriptEditingWithKeyboard ? (
-            <View style={[styles.card, styles.historyCard]}>
-              <View style={styles.cardHeaderEnd}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Clear conversation history"
-                  onPress={clearHistory}
-                >
-                  <Text style={styles.cardActionText}>Clear</Text>
-                </Pressable>
-              </View>
+            <View style={[styles.card, styles.historyCard, styles.historyCardFlat]}>
+              <Text style={styles.historyTitle} maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}>
+                History
+              </Text>
               {isSending ? (
                 <View style={styles.loadingRow}>
                   <ActivityIndicator
                     size="small"
                     color={isDarkTheme ? '#9ec0ff' : '#2563EB'}
                   />
-                  <Text style={styles.loadingText}>Responding... ({gatewayEventState})</Text>
+                  <Text
+                    style={styles.loadingText}
+                    maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                  >
+                    Responding... ({gatewayEventState})
+                  </Text>
                 </View>
               ) : null}
               <ScrollView
@@ -1259,64 +1372,96 @@ export default function App() {
                 }}
               >
                 {chatTurns.length === 0 ? (
-                  <Text style={styles.placeholder}>Conversation history appears here.</Text>
+                  <Text
+                    style={styles.placeholder}
+                    maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                  >
+                    Conversation history appears here.
+                  </Text>
                 ) : (
-                  chatTurns.map((turn, index) => (
-                    <View
-                      key={turn.id}
-                      style={[
-                        styles.turnBlock,
-                        index === chatTurns.length - 1 && styles.turnBlockLast,
-                      ]}
-                    >
-                      <View style={styles.turnMetaRow}>
-                        <Text style={styles.turnMeta}>{formatTurnTime(turn.createdAt)}</Text>
-                        {turn.state === 'error' ? (
-                          <View style={[styles.turnTag, styles.turnTagError]}>
-                            <Text style={[styles.turnTagText, styles.turnTagTextError]}>
-                              ERR
-                            </Text>
-                          </View>
-                        ) : turn.state === 'sending' ||
-                          turn.state === 'queued' ||
-                          turn.state === 'delta' ||
-                          turn.state === 'streaming' ? (
-                          <View style={[styles.turnTag, styles.turnTagWaiting]}>
-                            <Text style={[styles.turnTagText, styles.turnTagTextWaiting]}>
-                              WAIT
-                            </Text>
-                          </View>
-                        ) : (
-                          <View style={[styles.turnTag, styles.turnTagOk]}>
-                            <Text style={[styles.turnTagText, styles.turnTagTextOk]}>OK</Text>
-                          </View>
-                        )}
-                      </View>
-                      <View style={styles.turnUserBubble}>
-                        <Text style={styles.turnUser}>{turn.userText}</Text>
-                      </View>
+                  historyItems.map((item) => {
+                    if (item.kind === 'date') {
+                      return (
+                        <View key={item.id} style={styles.historyDateRow}>
+                          <View style={styles.historyDateLine} />
+                          <Text
+                            style={styles.historyDateText}
+                            maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                          >
+                            {item.label}
+                          </Text>
+                          <View style={styles.historyDateLine} />
+                        </View>
+                      );
+                    }
+
+                    const turn = item.turn;
+                    const waiting = isTurnWaitingState(turn.state);
+                    const error = isTurnErrorState(turn.state);
+                    const assistantText =
+                      turn.assistantText ||
+                      (waiting ? 'Responding...' : 'No response');
+
+                    return (
                       <View
+                        key={item.id}
                         style={[
-                          styles.turnAssistantBubble,
-                          turn.state === 'error' && styles.turnAssistantBubbleError,
+                          styles.historyTurnGroup,
+                          item.isLast && styles.historyTurnGroupLast,
                         ]}
                       >
-                        <Markdown
-                          style={
-                            turn.state === 'error' ? markdownErrorStyles : markdownStyles
-                          }
-                        >
-                          {turn.assistantText ||
-                            (turn.state === 'sending' ||
-                            turn.state === 'queued' ||
-                            turn.state === 'delta' ||
-                            turn.state === 'streaming'
-                              ? 'Responding...'
-                              : 'No response')}
-                        </Markdown>
+                        <View style={styles.historyUserRow}>
+                          <View style={styles.turnUserBubble}>
+                            <Text
+                              style={styles.turnUser}
+                              maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                            >
+                              {turn.userText}
+                            </Text>
+                          </View>
+                        </View>
+                        <View style={styles.historyAssistantRow}>
+                          <View style={styles.assistantAvatar}>
+                            <Ionicons
+                              name="flash"
+                              size={11}
+                              color={isDarkTheme ? '#ffffff' : '#1d4ed8'}
+                            />
+                          </View>
+                          <View
+                            style={[
+                              styles.turnAssistantBubble,
+                              error && styles.turnAssistantBubbleError,
+                            ]}
+                          >
+                            <Markdown
+                              style={error ? markdownErrorStyles : markdownStyles}
+                            >
+                              {assistantText}
+                            </Markdown>
+                          </View>
+                        </View>
+                        <View style={styles.historyMetaRow}>
+                          <View
+                            style={[
+                              styles.historyMetaDot,
+                              waiting
+                                ? styles.historyMetaDotWaiting
+                                : error
+                                  ? styles.historyMetaDotError
+                                  : styles.historyMetaDotOk,
+                            ]}
+                          />
+                          <Text
+                            style={styles.historyMetaText}
+                            maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                          >
+                            {formatTurnTime(turn.createdAt)}
+                          </Text>
+                        </View>
                       </View>
-                    </View>
-                  ))
+                    );
+                  })
                 )}
               </ScrollView>
             </View>
@@ -1328,15 +1473,6 @@ export default function App() {
               isTranscriptEditingWithKeyboard && styles.transcriptCardExpanded,
             ]}
           >
-            <View style={styles.cardHeaderEnd}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Clear transcript"
-                onPress={clearResult}
-              >
-                <Text style={styles.cardActionText}>Clear</Text>
-              </Pressable>
-            </View>
             <View
               style={[
                 styles.transcriptEditor,
@@ -1350,6 +1486,7 @@ export default function App() {
                   isRecognizing && styles.transcriptInputDisabled,
                   isTranscriptEditingWithKeyboard && styles.transcriptInputExpanded,
                 ]}
+                maxFontSizeMultiplier={MAX_TEXT_SCALE}
                 value={transcript}
                 onChangeText={(value) => {
                   setTranscript(value);
@@ -1368,7 +1505,9 @@ export default function App() {
                 }
               />
               {interimTranscript ? (
-                <Text style={styles.interimText}>Live: {interimTranscript}</Text>
+                <Text style={styles.interimText} maxFontSizeMultiplier={MAX_TEXT_SCALE}>
+                  Live: {interimTranscript}
+                </Text>
               ) : null}
             </View>
           </View>
@@ -1377,13 +1516,69 @@ export default function App() {
         {speechError || gatewayError ? (
           <View style={styles.errorStack}>
             {speechError ? (
-              <View style={styles.errorBox}>
-                <Text style={styles.errorText}>{speechError}</Text>
+              <View
+                style={styles.errorBox}
+                accessibilityRole="alert"
+                accessibilityLiveRegion="polite"
+              >
+                <Text style={styles.errorText} maxFontSizeMultiplier={MAX_TEXT_SCALE}>
+                  {speechError}
+                </Text>
               </View>
             ) : null}
             {gatewayError ? (
-              <View style={styles.errorBox}>
-                <Text style={styles.errorText}>{gatewayError}</Text>
+              <View
+                style={styles.errorBox}
+                accessibilityRole="alert"
+                accessibilityLiveRegion="polite"
+              >
+                <Text style={styles.errorText} maxFontSizeMultiplier={MAX_TEXT_SCALE}>
+                  {gatewayError}
+                </Text>
+                <View style={styles.errorActionRow}>
+                  <Pressable
+                    style={[
+                      styles.errorActionButton,
+                      styles.errorActionButtonSecondary,
+                      !canReconnectFromError && styles.errorActionButtonDisabled,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Reconnect to Gateway"
+                    onPress={handleReconnectFromError}
+                    disabled={!canReconnectFromError}
+                  >
+                    <Text
+                      style={[
+                        styles.errorActionButtonText,
+                        styles.errorActionButtonTextSecondary,
+                      ]}
+                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                    >
+                      Reconnect
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={[
+                      styles.errorActionButton,
+                      styles.errorActionButtonPrimary,
+                      !canRetryFromError && styles.errorActionButtonDisabled,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Retry sending the latest message"
+                    onPress={handleRetryFromError}
+                    disabled={!canRetryFromError}
+                  >
+                    <Text
+                      style={[
+                        styles.errorActionButtonText,
+                        styles.errorActionButtonTextPrimary,
+                      ]}
+                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                    >
+                      Retry Send
+                    </Text>
+                  </Pressable>
+                </View>
               </View>
             ) : null}
           </View>
@@ -1427,7 +1622,12 @@ export default function App() {
                   setFocusedField(null);
                 }}
               >
-                <Text style={styles.keyboardActionButtonText}>Done</Text>
+                <Text
+                  style={styles.keyboardActionButtonText}
+                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                >
+                  Done
+                </Text>
               </Pressable>
               {!showDoneOnlyAction ? (
                 <Pressable
@@ -1454,6 +1654,7 @@ export default function App() {
                       styles.keyboardActionButtonText,
                       styles.keyboardSendActionButtonText,
                     ]}
+                    maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
                   >
                     Send
                   </Text>
@@ -1521,7 +1722,7 @@ export default function App() {
             </Pressable>
           )}
           {isKeyboardBarMounted ? null : (
-            <Text style={styles.bottomHint}>
+            <Text style={styles.bottomHint} maxFontSizeMultiplier={MAX_TEXT_SCALE}>
               {bottomHintText}
             </Text>
           )}
@@ -1559,14 +1760,16 @@ function createStyles(isDarkTheme: boolean) {
         cardBg: '#12214a',
         cardBorder: 'rgba(255,255,255,0.12)',
         recordingBorder: 'rgba(220,38,38,0.28)',
-        action: '#9ec0ff',
         textPrimary: '#ffffff',
         textSecondary: '#b8c9e6',
         placeholder: '#95a8ca',
         loading: '#b8c9e6',
-        turnBg: 'transparent',
-        turnBorder: 'rgba(255,255,255,0.11)',
-        turnMeta: '#8ea4c7',
+        historyDateLine: 'rgba(255,255,255,0.14)',
+        historyDateText: '#95a8ca',
+        historyMetaText: '#95a8ca',
+        historyWaitingDot: '#2563EB',
+        assistantAvatarBg: 'rgba(37,99,235,0.42)',
+        assistantAvatarBorder: 'transparent',
         turnUser: '#ffffff',
         turnUserBubbleBg: '#2563EB',
         turnUserBubbleBorder: 'rgba(37,99,235,0.45)',
@@ -1582,6 +1785,11 @@ function createStyles(isDarkTheme: boolean) {
         errorBg: '#15213f',
         errorBorder: '#DC2626',
         errorText: '#ffb0b0',
+        errorActionPrimaryBg: '#2563EB',
+        errorActionPrimaryText: '#ffffff',
+        errorActionSecondaryBg: 'rgba(255,255,255,0.10)',
+        errorActionSecondaryBorder: 'rgba(255,255,255,0.22)',
+        errorActionSecondaryText: '#dbe7ff',
         roundBorder: 'transparent',
         micRound: '#2563EB',
         recordingRound: '#DC2626',
@@ -1594,7 +1802,7 @@ function createStyles(isDarkTheme: boolean) {
     : {
         page: '#F5F5F0',
         headerTitle: '#1A1A1A',
-        iconBorder: 'rgba(0,0,0,0.06)',
+        iconBorder: 'rgba(0,0,0,0.12)',
         iconBg: '#EEEEEA',
         dotConnected: '#059669',
         dotConnecting: '#D97706',
@@ -1604,10 +1812,10 @@ function createStyles(isDarkTheme: boolean) {
         chipConnectingBg: 'rgba(217,119,6,0.07)',
         chipConnectingText: '#D97706',
         chipDisconnectedBg: 'rgba(0,0,0,0.03)',
-        chipDisconnectedText: '#999999',
+        chipDisconnectedText: '#5C5C5C',
         panelBg: '#FFFFFF',
         panelBorder: 'rgba(0,0,0,0.05)',
-        label: '#999999',
+        label: '#70706A',
         inputBorder: 'rgba(0,0,0,0.06)',
         inputBorderFocused: '#2563EB',
         inputBg: '#EEEEEA',
@@ -1617,14 +1825,16 @@ function createStyles(isDarkTheme: boolean) {
         cardBg: '#FFFFFF',
         cardBorder: 'rgba(0,0,0,0.05)',
         recordingBorder: 'rgba(220,38,38,0.18)',
-        action: '#2563EB',
         textPrimary: '#1A1A1A',
         textSecondary: '#5C5C5C',
-        placeholder: '#C4C4C0',
+        placeholder: '#A1A19B',
         loading: '#5C5C5C',
-        turnBg: 'transparent',
-        turnBorder: 'rgba(0,0,0,0.06)',
-        turnMeta: '#999999',
+        historyDateLine: 'rgba(0,0,0,0.06)',
+        historyDateText: '#A1A19B',
+        historyMetaText: '#999999',
+        historyWaitingDot: '#2563EB',
+        assistantAvatarBg: 'rgba(37,99,235,0.14)',
+        assistantAvatarBorder: 'transparent',
         turnUser: '#FFFFFF',
         turnUserBubbleBg: '#2563EB',
         turnUserBubbleBorder: 'rgba(37,99,235,0.18)',
@@ -1640,6 +1850,11 @@ function createStyles(isDarkTheme: boolean) {
         errorBg: '#FFFFFF',
         errorBorder: '#DC2626',
         errorText: '#DC2626',
+        errorActionPrimaryBg: '#2563EB',
+        errorActionPrimaryText: '#ffffff',
+        errorActionSecondaryBg: '#F2F6FF',
+        errorActionSecondaryBorder: 'rgba(37,99,235,0.32)',
+        errorActionSecondaryText: '#1D4ED8',
         roundBorder: 'transparent',
         micRound: '#2563EB',
         recordingRound: '#DC2626',
@@ -1903,20 +2118,29 @@ function createStyles(isDarkTheme: boolean) {
       flex: 1,
       minHeight: 220,
     },
+    historyCardFlat: {
+      backgroundColor: 'transparent',
+      borderWidth: 0,
+      borderColor: 'transparent',
+      paddingHorizontal: 0,
+      paddingTop: 0,
+      paddingBottom: 0,
+      shadowOpacity: 0,
+      shadowRadius: 0,
+      elevation: 0,
+    },
+    historyTitle: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: colors.historyDateText,
+      textTransform: 'uppercase',
+      letterSpacing: 0.8,
+      marginBottom: 6,
+      paddingHorizontal: 2,
+    },
     transcriptCardExpanded: {
       flex: 1,
       minHeight: 0,
-    },
-    cardHeaderEnd: {
-      flexDirection: 'row',
-      justifyContent: 'flex-end',
-      alignItems: 'center',
-      marginBottom: 8,
-    },
-    cardActionText: {
-      fontSize: 12,
-      fontWeight: '500',
-      color: colors.action,
     },
     transcriptEditor: {
       minHeight: 120,
@@ -1928,13 +2152,13 @@ function createStyles(isDarkTheme: boolean) {
     },
     transcriptInput: {
       minHeight: 100,
-      borderRadius: 10,
-      borderWidth: 1.5,
-      borderColor: colors.inputBorder,
-      backgroundColor: colors.inputBg,
+      borderRadius: 0,
+      borderWidth: 0,
+      borderColor: 'transparent',
+      backgroundColor: 'transparent',
       color: colors.textPrimary,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
+      paddingHorizontal: 2,
+      paddingVertical: 0,
       fontSize: 15,
       lineHeight: 22,
     },
@@ -1956,12 +2180,14 @@ function createStyles(isDarkTheme: boolean) {
       fontSize: 14,
       lineHeight: 20,
       color: colors.placeholder,
+      textAlign: 'center',
+      paddingVertical: 48,
     },
     loadingRow: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
-      marginBottom: 6,
+      marginBottom: 10,
     },
     loadingText: {
       fontSize: 12,
@@ -1971,90 +2197,109 @@ function createStyles(isDarkTheme: boolean) {
       paddingBottom: 10,
       gap: 0,
     },
-    turnBlock: {
-      borderRadius: 0,
-      backgroundColor: colors.turnBg,
-      borderWidth: 0,
-      borderColor: colors.turnBorder,
-      paddingHorizontal: 2,
-      paddingVertical: 10,
-      gap: 8,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.turnBorder,
-    },
-    turnBlockLast: {
-      borderBottomWidth: 0,
-    },
-    turnMetaRow: {
+    historyDateRow: {
       flexDirection: 'row',
-      justifyContent: 'space-between',
       alignItems: 'center',
+      gap: 10,
+      paddingTop: 12,
+      paddingBottom: 8,
     },
-    turnMeta: {
-      fontSize: 10,
-      color: colors.turnMeta,
+    historyDateLine: {
+      flex: 1,
+      height: 1,
+      backgroundColor: colors.historyDateLine,
     },
-    turnTag: {
-      borderRadius: 999,
-      paddingHorizontal: 6,
-      paddingVertical: 1,
-    },
-    turnTagOk: {
-      backgroundColor: colors.tagOkBg,
-    },
-    turnTagWaiting: {
-      backgroundColor: colors.tagWaitingBg,
-    },
-    turnTagError: {
-      backgroundColor: colors.tagErrorBg,
-    },
-    turnTagText: {
-      fontSize: 10,
+    historyDateText: {
+      fontSize: 11,
       fontWeight: '600',
+      color: colors.historyDateText,
     },
-    turnTagTextOk: {
-      color: colors.tagOkText,
+    historyTurnGroup: {
+      marginBottom: 12,
+      gap: 0,
     },
-    turnTagTextWaiting: {
-      color: colors.tagWaitingText,
+    historyTurnGroupLast: {
+      marginBottom: 0,
     },
-    turnTagTextError: {
-      color: colors.tagErrorText,
+    historyUserRow: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      marginBottom: 4,
+    },
+    historyAssistantRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      gap: 6,
+      marginBottom: 2,
+    },
+    assistantAvatar: {
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.assistantAvatarBg,
+      borderWidth: 1,
+      borderColor: colors.assistantAvatarBorder,
+    },
+    historyMetaRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingTop: 0,
+    },
+    historyMetaDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+    },
+    historyMetaDotOk: {
+      backgroundColor: colors.dotConnected,
+    },
+    historyMetaDotWaiting: {
+      backgroundColor: colors.historyWaitingDot,
+    },
+    historyMetaDotError: {
+      backgroundColor: colors.errorBorder,
+    },
+    historyMetaText: {
+      fontSize: 10,
+      color: colors.historyMetaText,
     },
     turnUser: {
       color: colors.turnUser,
       fontSize: 14,
       lineHeight: 20,
-      fontWeight: '600',
+      fontWeight: '500',
     },
     turnUserBubble: {
-      alignSelf: 'flex-end',
-      maxWidth: '92%',
+      maxWidth: '78%',
       backgroundColor: colors.turnUserBubbleBg,
-      borderWidth: 1.5,
-      borderColor: colors.turnUserBubbleBorder,
+      borderWidth: 0,
+      borderColor: 'transparent',
       borderTopLeftRadius: 18,
       borderTopRightRadius: 18,
       borderBottomRightRadius: 4,
       borderBottomLeftRadius: 18,
       paddingHorizontal: 12,
-      paddingVertical: 9,
+      paddingVertical: 10,
     },
     turnAssistantBubble: {
-      alignSelf: 'flex-start',
-      maxWidth: '92%',
+      flexShrink: 1,
+      maxWidth: '78%',
       backgroundColor: colors.turnAssistantBubbleBg,
-      borderWidth: 1.5,
-      borderColor: colors.turnAssistantBubbleBorder,
+      borderWidth: 0,
+      borderColor: 'transparent',
       borderTopLeftRadius: 18,
       borderTopRightRadius: 18,
       borderBottomRightRadius: 18,
       borderBottomLeftRadius: 4,
       paddingHorizontal: 12,
-      paddingVertical: 9,
+      paddingVertical: 10,
       ...surfaceShadow,
     },
     turnAssistantBubbleError: {
+      borderWidth: 1.5,
       borderColor: colors.turnAssistantErrorBorder,
     },
     errorStack: {
@@ -2072,6 +2317,42 @@ function createStyles(isDarkTheme: boolean) {
       color: colors.errorText,
       fontSize: 13,
       lineHeight: 18,
+    },
+    errorActionRow: {
+      marginTop: 10,
+      flexDirection: 'row',
+      gap: 8,
+    },
+    errorActionButton: {
+      flex: 1,
+      minHeight: 44,
+      borderRadius: 12,
+      borderWidth: 1.5,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+    },
+    errorActionButtonPrimary: {
+      backgroundColor: colors.errorActionPrimaryBg,
+      borderColor: 'transparent',
+    },
+    errorActionButtonSecondary: {
+      backgroundColor: colors.errorActionSecondaryBg,
+      borderColor: colors.errorActionSecondaryBorder,
+    },
+    errorActionButtonDisabled: {
+      opacity: 0.56,
+    },
+    errorActionButtonText: {
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    errorActionButtonTextPrimary: {
+      color: colors.errorActionPrimaryText,
+    },
+    errorActionButtonTextSecondary: {
+      color: colors.errorActionSecondaryText,
     },
     bottomDock: {
       alignItems: 'center',
@@ -2101,7 +2382,7 @@ function createStyles(isDarkTheme: boolean) {
       gap: 8,
     },
     keyboardActionButton: {
-      minHeight: 40,
+      minHeight: 44,
       borderRadius: 14,
       borderWidth: 1.5,
       borderColor: colors.inputBorder,
