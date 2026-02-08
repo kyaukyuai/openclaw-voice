@@ -10,6 +10,7 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   LogBox,
+  Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
@@ -528,7 +529,7 @@ export default function App() {
   const isGatewayConnected = connectionState === 'connected';
   const isGatewayConnecting =
     connectionState === 'connecting' || connectionState === 'reconnecting';
-  const shouldShowGatewayPanel = !isGatewayConnected || isSettingsPanelOpen;
+  const shouldShowSettingsScreen = !isGatewayConnected || isSettingsPanelOpen;
   const isDarkTheme = theme === 'dark';
 
   useEffect(() => {
@@ -1736,8 +1737,8 @@ export default function App() {
               accessibilityRole="button"
               accessibilityLabel={
                 isSettingsPanelOpen
-                  ? 'Hide settings panel'
-                  : 'Show settings panel'
+                  ? 'Hide settings screen'
+                  : 'Show settings screen'
               }
               onPress={() => {
                 if (!isGatewayConnected) return;
@@ -1890,8 +1891,59 @@ export default function App() {
           </View>
         ) : null}
 
-        {shouldShowGatewayPanel ? (
-          <View style={styles.gatewayPanel}>
+        <Modal
+          visible={shouldShowSettingsScreen}
+          animationType="slide"
+          presentationStyle="fullScreen"
+          onRequestClose={() => {
+            if (!isGatewayConnected) return;
+            setIsSettingsPanelOpen(false);
+            setFocusedField(null);
+            Keyboard.dismiss();
+          }}
+        >
+          <SafeAreaView style={styles.settingsScreenContainer}>
+            <View style={styles.settingsScreenHeader}>
+              <Text
+                style={styles.settingsScreenTitle}
+                maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+              >
+                Settings
+              </Text>
+              <Pressable
+                style={[
+                  styles.iconButton,
+                  !isGatewayConnected && styles.iconButtonDisabled,
+                ]}
+                hitSlop={7}
+                accessibilityRole="button"
+                accessibilityLabel="Close settings screen"
+                onPress={() => {
+                  if (!isGatewayConnected) return;
+                  setIsSettingsPanelOpen(false);
+                  setFocusedField(null);
+                  Keyboard.dismiss();
+                }}
+                disabled={!isGatewayConnected}
+              >
+                <Ionicons
+                  name="close"
+                  size={18}
+                  color={isDarkTheme ? '#bccae2' : '#707070'}
+                />
+              </Pressable>
+            </View>
+            <KeyboardAvoidingView
+              style={styles.settingsScreenKeyboardWrap}
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            >
+              <ScrollView
+                style={styles.settingsScreenScroll}
+                contentContainerStyle={styles.settingsScreenScrollContent}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
+              >
+                <View style={styles.gatewayPanel}>
             <Text style={styles.label} maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}>
               Gateway URL
             </Text>
@@ -2237,34 +2289,37 @@ export default function App() {
               </Text>
             )}
 
-            <View style={styles.connectionRow}>
-              <Pressable
-                style={[
-                  styles.smallButton,
-                  styles.connectButton,
-                  (isGatewayConnecting || !settingsReady) && styles.smallButtonDisabled,
-                ]}
-                onPress={() => {
-                  Keyboard.dismiss();
-                  setFocusedField(null);
-                  void connectGateway();
-                }}
-                disabled={isGatewayConnecting || !settingsReady}
-              >
-                <Text
-                  style={styles.smallButtonText}
-                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                >
-                  {!settingsReady
-                    ? 'Initializing...'
-                    : isGatewayConnecting
-                      ? 'Connecting...'
-                      : 'Connect'}
-                </Text>
-              </Pressable>
-            </View>
-          </View>
-        ) : null}
+                <View style={styles.connectionRow}>
+                  <Pressable
+                    style={[
+                      styles.smallButton,
+                      styles.connectButton,
+                      (isGatewayConnecting || !settingsReady) && styles.smallButtonDisabled,
+                    ]}
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      setFocusedField(null);
+                      void connectGateway();
+                    }}
+                    disabled={isGatewayConnecting || !settingsReady}
+                  >
+                    <Text
+                      style={styles.smallButtonText}
+                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                    >
+                      {!settingsReady
+                        ? 'Initializing...'
+                        : isGatewayConnecting
+                          ? 'Connecting...'
+                          : 'Connect'}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      </Modal>
         <View style={styles.main}>
           {!isTranscriptEditingWithKeyboard ? (
             <View style={[styles.card, styles.historyCard, styles.historyCardFlat]}>
@@ -2951,6 +3006,35 @@ function createStyles(isDarkTheme: boolean) {
     },
     statusChipTextDisconnected: {
       color: colors.chipDisconnectedText,
+    },
+    settingsScreenContainer: {
+      flex: 1,
+      backgroundColor: colors.page,
+    },
+    settingsScreenHeader: {
+      paddingHorizontal: 16,
+      paddingTop: 10,
+      paddingBottom: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+    },
+    settingsScreenTitle: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: colors.headerTitle,
+    },
+    settingsScreenKeyboardWrap: {
+      flex: 1,
+    },
+    settingsScreenScroll: {
+      flex: 1,
+    },
+    settingsScreenScrollContent: {
+      paddingHorizontal: 16,
+      paddingTop: 4,
+      paddingBottom: 16,
     },
     gatewayPanel: {
       borderRadius: 20,
