@@ -25,6 +25,13 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      - name: Package dry run
+        run: npm pack --dry-run
+
+      - name: Verify app manifest restored after pack
+        run: |
+          node -e "const fs=require('fs'); const pkg=require('./package.json'); if (pkg.main !== 'index.ts') { console.error('package.json main should be index.ts after pack'); process.exit(1); } if (fs.existsSync('.package.json.app.backup')) { console.error('temporary manifest backup should be cleaned up'); process.exit(1); }"
+
       - name: Lint (if present)
         run: npm run lint --if-present
 
