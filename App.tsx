@@ -567,8 +567,10 @@ export default function App() {
   const transcriptRef = useRef('');
   const interimTranscriptRef = useRef('');
   const historyScrollRef = useRef<ScrollView | null>(null);
+  const settingsScrollRef = useRef<ScrollView | null>(null);
   const historyAutoScrollRef = useRef(true);
   const holdStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const settingsFocusScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const quickTextTooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const quickTextLongPressResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -1328,6 +1330,10 @@ export default function App() {
         clearTimeout(holdStartTimerRef.current);
         holdStartTimerRef.current = null;
       }
+      if (settingsFocusScrollTimerRef.current) {
+        clearTimeout(settingsFocusScrollTimerRef.current);
+        settingsFocusScrollTimerRef.current = null;
+      }
       if (quickTextTooltipTimerRef.current) {
         clearTimeout(quickTextTooltipTimerRef.current);
         quickTextTooltipTimerRef.current = null;
@@ -1455,6 +1461,16 @@ export default function App() {
     },
     [clearQuickTextLongPressResetTimer, hideQuickTextTooltip],
   );
+
+  const ensureSettingsFieldVisible = useCallback(() => {
+    if (settingsFocusScrollTimerRef.current) {
+      clearTimeout(settingsFocusScrollTimerRef.current);
+    }
+    settingsFocusScrollTimerRef.current = setTimeout(() => {
+      settingsFocusScrollTimerRef.current = null;
+      settingsScrollRef.current?.scrollToEnd({ animated: true });
+    }, Platform.OS === 'ios' ? 240 : 120);
+  }, []);
 
   const formatTurnTime = (createdAt: number): string =>
     new Date(createdAt).toLocaleTimeString('ja-JP', {
@@ -1983,8 +1999,12 @@ export default function App() {
               behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             >
               <ScrollView
+                ref={settingsScrollRef}
                 style={styles.settingsScreenScroll}
-                contentContainerStyle={styles.settingsScreenScrollContent}
+                contentContainerStyle={[
+                  styles.settingsScreenScrollContent,
+                  isKeyboardVisible && styles.settingsScreenScrollContentKeyboardOpen,
+                ]}
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode="on-drag"
               >
@@ -2243,7 +2263,10 @@ export default function App() {
                           returnKeyType="done"
                           blurOnSubmit
                           onSubmitEditing={() => Keyboard.dismiss()}
-                          onFocus={() => setFocusedField('quick-text-left')}
+                          onFocus={() => {
+                            setFocusedField('quick-text-left');
+                            ensureSettingsFieldVisible();
+                          }}
                           onBlur={() =>
                             setFocusedField((current) =>
                               current === 'quick-text-left' ? null : current,
@@ -2274,7 +2297,10 @@ export default function App() {
                           returnKeyType="done"
                           blurOnSubmit
                           onSubmitEditing={() => Keyboard.dismiss()}
-                          onFocus={() => setFocusedField('quick-text-right')}
+                          onFocus={() => {
+                            setFocusedField('quick-text-right');
+                            ensureSettingsFieldVisible();
+                          }}
                           onBlur={() =>
                             setFocusedField((current) =>
                               current === 'quick-text-right' ? null : current,
@@ -3491,6 +3517,9 @@ function createStyles(isDarkTheme: boolean) {
       paddingHorizontal: 12,
       paddingTop: 4,
       paddingBottom: 16,
+    },
+    settingsScreenScrollContentKeyboardOpen: {
+      paddingBottom: Platform.OS === 'ios' ? 300 : 220,
     },
     gatewayPanel: {
       borderRadius: 16,
