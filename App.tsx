@@ -61,6 +61,8 @@ const STORAGE_KEYS = {
   authToken: 'mobile-openclaw.auth-token',
   theme: 'mobile-openclaw.theme',
   speechLang: 'mobile-openclaw.speech-lang',
+  quickTextLeft: 'mobile-openclaw.quick-text-left',
+  quickTextRight: 'mobile-openclaw.quick-text-right',
   sessionKey: 'mobile-openclaw.session-key',
   sessionPrefs: 'mobile-openclaw.session-prefs',
 };
@@ -137,7 +139,14 @@ type HistoryListItem =
 
 type AppTheme = 'dark' | 'light';
 type SpeechLang = 'ja-JP' | 'en-US';
-type FocusField = 'gateway-url' | 'auth-token' | 'transcript' | null;
+type QuickTextButtonSide = 'left' | 'right';
+type FocusField =
+  | 'gateway-url'
+  | 'auth-token'
+  | 'quick-text-left'
+  | 'quick-text-right'
+  | 'transcript'
+  | null;
 type SessionPreference = {
   alias?: string;
   pinned?: boolean;
@@ -148,6 +157,9 @@ const DEFAULT_GATEWAY_URL = (process.env.EXPO_PUBLIC_DEFAULT_GATEWAY_URL ?? '').
 const DEFAULT_THEME: AppTheme =
   process.env.EXPO_PUBLIC_DEFAULT_THEME === 'dark' ? 'dark' : 'light';
 const DEFAULT_SPEECH_LANG: SpeechLang = 'ja-JP';
+const DEFAULT_QUICK_TEXT_LEFT = 'ありがとう';
+const DEFAULT_QUICK_TEXT_RIGHT = 'お願いします';
+const QUICK_TEXT_TOOLTIP_HIDE_MS = 1600;
 const DEFAULT_SESSION_KEY =
   (process.env.EXPO_PUBLIC_DEFAULT_SESSION_KEY ?? 'main').trim() || 'main';
 const MAX_TEXT_SCALE = 1.35;
@@ -220,6 +232,19 @@ async function triggerHaptic(
     }
   }
   Vibration.vibrate(type === 'send-error' ? 20 : type === 'button-press' ? 6 : 10);
+}
+
+function normalizeSpeechErrorCode(error: unknown): string {
+  return String(error ?? '').trim().toLowerCase();
+}
+
+function isSpeechAbortLikeError(code: string): boolean {
+  return (
+    code.includes('aborted') ||
+    code.includes('cancelled') ||
+    code.includes('canceled') ||
+    code.includes('interrupted')
+  );
 }
 
 function toTextContent(message?: ChatMessage): string {
@@ -496,6 +521,8 @@ export default function App() {
   const [gatewayUrl, setGatewayUrl] = useState(DEFAULT_GATEWAY_URL);
   const [authToken, setAuthToken] = useState('');
   const [speechLang, setSpeechLang] = useState<SpeechLang>(DEFAULT_SPEECH_LANG);
+  const [quickTextLeft, setQuickTextLeft] = useState(DEFAULT_QUICK_TEXT_LEFT);
+  const [quickTextRight, setQuickTextRight] = useState(DEFAULT_QUICK_TEXT_RIGHT);
   const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
   const [isSessionPanelOpen, setIsSessionPanelOpen] = useState(false);
   const [settingsReady, setSettingsReady] = useState(false);
@@ -519,6 +546,8 @@ export default function App() {
   const [settingsSavedAt, setSettingsSavedAt] = useState<number | null>(null);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [theme, setTheme] = useState<AppTheme>(DEFAULT_THEME);
+  const [quickTextTooltipSide, setQuickTextTooltipSide] =
+    useState<QuickTextButtonSide | null>(null);
   const [focusedField, setFocusedField] = useState<FocusField>(null);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [isKeyboardBarMounted, setIsKeyboardBarMounted] = useState(false);
@@ -540,6 +569,11 @@ export default function App() {
   const historyScrollRef = useRef<ScrollView | null>(null);
   const historyAutoScrollRef = useRef(true);
   const holdStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const quickTextTooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const quickTextLongPressResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const quickTextLongPressSideRef = useRef<QuickTextButtonSide | null>(null);
   const holdActivatedRef = useRef(false);
   const keyboardBarAnim = useRef(new Animated.Value(0)).current;
   const expectedSpeechStopRef = useRef(false);
@@ -601,6 +635,8 @@ export default function App() {
           savedIdentity,
           savedTheme,
           savedSpeechLang,
+          savedQuickTextLeft,
+          savedQuickTextRight,
           savedSessionKey,
           savedSessionPrefs,
         ] = await Promise.all([
@@ -609,6 +645,8 @@ export default function App() {
           kvStore.getItemAsync(OPENCLAW_IDENTITY_STORAGE_KEY),
           kvStore.getItemAsync(STORAGE_KEYS.theme),
           kvStore.getItemAsync(STORAGE_KEYS.speechLang),
+          kvStore.getItemAsync(STORAGE_KEYS.quickTextLeft),
+          kvStore.getItemAsync(STORAGE_KEYS.quickTextRight),
           kvStore.getItemAsync(STORAGE_KEYS.sessionKey),
           kvStore.getItemAsync(STORAGE_KEYS.sessionPrefs),
         ]);
@@ -621,6 +659,12 @@ export default function App() {
         }
         if (savedSpeechLang === 'ja-JP' || savedSpeechLang === 'en-US') {
           setSpeechLang(savedSpeechLang);
+        }
+        if (savedQuickTextLeft != null) {
+          setQuickTextLeft(savedQuickTextLeft);
+        }
+        if (savedQuickTextRight != null) {
+          setQuickTextRight(savedQuickTextRight);
         }
         if (savedSessionKey?.trim()) {
           setActiveSessionKey(savedSessionKey.trim());
@@ -681,6 +725,30 @@ export default function App() {
       await kvStore.setItemAsync(STORAGE_KEYS.speechLang, speechLang);
     });
   }, [persistSetting, settingsReady, speechLang]);
+
+  useEffect(() => {
+    if (!settingsReady) return;
+    const value = quickTextLeft.trim();
+    persistSetting(async () => {
+      if (value) {
+        await kvStore.setItemAsync(STORAGE_KEYS.quickTextLeft, value);
+      } else {
+        await kvStore.deleteItemAsync(STORAGE_KEYS.quickTextLeft);
+      }
+    });
+  }, [persistSetting, quickTextLeft, settingsReady]);
+
+  useEffect(() => {
+    if (!settingsReady) return;
+    const value = quickTextRight.trim();
+    persistSetting(async () => {
+      if (value) {
+        await kvStore.setItemAsync(STORAGE_KEYS.quickTextRight, value);
+      } else {
+        await kvStore.deleteItemAsync(STORAGE_KEYS.quickTextRight);
+      }
+    });
+  }, [persistSetting, quickTextRight, settingsReady]);
 
   useEffect(() => {
     if (!settingsReady) return;
@@ -759,16 +827,21 @@ export default function App() {
   });
 
   useSpeechRecognitionEvent('error', (event) => {
-    const code = String(event.error ?? '').toLowerCase();
-    const isAbortedLike =
-      code.includes('aborted') || code.includes('cancelled') || code.includes('canceled');
-    const shouldIgnore = isUnmountingRef.current || (expectedSpeechStopRef.current && isAbortedLike);
+    const code = normalizeSpeechErrorCode(event.error);
+    const isAbortedLike = isSpeechAbortLikeError(code);
+    const shouldIgnore =
+      isUnmountingRef.current ||
+      isAbortedLike ||
+      (expectedSpeechStopRef.current && code.length > 0);
 
     expectedSpeechStopRef.current = false;
     setIsRecognizing(false);
-    if (shouldIgnore) return;
+    if (shouldIgnore) {
+      setSpeechError(null);
+      return;
+    }
     void triggerHaptic('send-error');
-    setSpeechError(`Speech recognition error: ${event.error}`);
+    setSpeechError(`Speech recognition error: ${errorMessage(event.error)}`);
   });
 
   const clearSubscriptions = () => {
@@ -1255,6 +1328,15 @@ export default function App() {
         clearTimeout(holdStartTimerRef.current);
         holdStartTimerRef.current = null;
       }
+      if (quickTextTooltipTimerRef.current) {
+        clearTimeout(quickTextTooltipTimerRef.current);
+        quickTextTooltipTimerRef.current = null;
+      }
+      if (quickTextLongPressResetTimerRef.current) {
+        clearTimeout(quickTextLongPressResetTimerRef.current);
+        quickTextLongPressResetTimerRef.current = null;
+      }
+      quickTextLongPressSideRef.current = null;
       disconnectGateway();
       clearSubscriptions();
       ExpoSpeechRecognitionModule.abort();
@@ -1293,6 +1375,87 @@ export default function App() {
     ExpoSpeechRecognitionModule.stop();
   };
 
+  const insertQuickText = useCallback(
+    (rawText: string) => {
+      const nextText = rawText.trim();
+      if (!nextText || isRecognizing) return;
+      setTranscript((previous) => {
+        const current = previous.trimEnd();
+        if (!current) return nextText;
+        return `${current}\n${nextText}`;
+      });
+      setInterimTranscript('');
+      void triggerHaptic('button-press');
+    },
+    [isRecognizing],
+  );
+
+  const clearQuickTextTooltipTimer = useCallback(() => {
+    if (quickTextTooltipTimerRef.current) {
+      clearTimeout(quickTextTooltipTimerRef.current);
+      quickTextTooltipTimerRef.current = null;
+    }
+  }, []);
+
+  const clearQuickTextLongPressResetTimer = useCallback(() => {
+    if (quickTextLongPressResetTimerRef.current) {
+      clearTimeout(quickTextLongPressResetTimerRef.current);
+      quickTextLongPressResetTimerRef.current = null;
+    }
+  }, []);
+
+  const hideQuickTextTooltip = useCallback(() => {
+    clearQuickTextTooltipTimer();
+    setQuickTextTooltipSide(null);
+  }, [clearQuickTextTooltipTimer]);
+
+  const scheduleQuickTextTooltipHide = useCallback(() => {
+    clearQuickTextTooltipTimer();
+    quickTextTooltipTimerRef.current = setTimeout(() => {
+      quickTextTooltipTimerRef.current = null;
+      setQuickTextTooltipSide(null);
+    }, QUICK_TEXT_TOOLTIP_HIDE_MS);
+  }, [clearQuickTextTooltipTimer]);
+
+  const handleQuickTextLongPress = useCallback(
+    (side: QuickTextButtonSide, rawText: string) => {
+      if (!rawText.trim()) return;
+      quickTextLongPressSideRef.current = side;
+      clearQuickTextLongPressResetTimer();
+      setQuickTextTooltipSide(side);
+      void triggerHaptic('button-press');
+      scheduleQuickTextTooltipHide();
+    },
+    [clearQuickTextLongPressResetTimer, scheduleQuickTextTooltipHide],
+  );
+
+  const handleQuickTextPress = useCallback(
+    (side: QuickTextButtonSide, rawText: string) => {
+      if (quickTextLongPressSideRef.current === side) {
+        quickTextLongPressSideRef.current = null;
+        return;
+      }
+      hideQuickTextTooltip();
+      insertQuickText(rawText);
+    },
+    [hideQuickTextTooltip, insertQuickText],
+  );
+
+  const handleQuickTextPressOut = useCallback(
+    (side: QuickTextButtonSide) => {
+      if (quickTextLongPressSideRef.current !== side) {
+        hideQuickTextTooltip();
+        return;
+      }
+      clearQuickTextLongPressResetTimer();
+      quickTextLongPressResetTimerRef.current = setTimeout(() => {
+        quickTextLongPressResetTimerRef.current = null;
+        quickTextLongPressSideRef.current = null;
+      }, 260);
+    },
+    [clearQuickTextLongPressResetTimer, hideQuickTextTooltip],
+  );
+
   const formatTurnTime = (createdAt: number): string =>
     new Date(createdAt).toLocaleTimeString('ja-JP', {
       hour: '2-digit',
@@ -1302,14 +1465,25 @@ export default function App() {
   const draftText = transcript.trim() || interimTranscript.trim();
   const hasDraft = Boolean(draftText);
   const canSendDraft = hasDraft && !isRecognizing;
+  const quickTextLeftLabel = quickTextLeft.trim();
+  const quickTextRightLabel = quickTextRight.trim();
   const isTranscriptFocused = focusedField === 'transcript';
   const isGatewayFieldFocused =
-    focusedField === 'gateway-url' || focusedField === 'auth-token';
+    focusedField === 'gateway-url' ||
+    focusedField === 'auth-token' ||
+    focusedField === 'quick-text-left' ||
+    focusedField === 'quick-text-right';
   const showKeyboardActionBar =
     isKeyboardVisible && (isTranscriptFocused || isGatewayFieldFocused);
   const showDoneOnlyAction = showKeyboardActionBar && isGatewayFieldFocused;
   const canSendFromKeyboardBar =
     hasDraft && !isRecognizing && isGatewayConnected && !isSending;
+  const canUseQuickText = !isRecognizing && settingsReady;
+  const canUseQuickTextLeft = canUseQuickText && quickTextLeftLabel.length > 0;
+  const canUseQuickTextRight = canUseQuickText && quickTextRightLabel.length > 0;
+  const showQuickTextLeftTooltip = quickTextTooltipSide === 'left' && canUseQuickTextLeft;
+  const showQuickTextRightTooltip =
+    quickTextTooltipSide === 'right' && canUseQuickTextRight;
   const isTranscriptEditingWithKeyboard = isKeyboardVisible && isTranscriptFocused;
   const sendDisabledReason = !hasDraft
     ? 'No text to send.'
@@ -2030,6 +2204,86 @@ export default function App() {
                       })}
                     </View>
                   </View>
+
+                  <View style={[styles.settingsSection, styles.settingsSectionSpaced]}>
+                    <View style={styles.sectionTitleRow}>
+                      <Ionicons
+                        name="chatbubble-ellipses-outline"
+                        size={14}
+                        color={sectionIconColor}
+                      />
+                      <Text
+                        style={styles.settingsSectionTitle}
+                        maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                      >
+                        Quick Text
+                      </Text>
+                    </View>
+                    <View style={styles.quickTextConfigRow}>
+                      <View style={styles.quickTextConfigItem}>
+                        <Text style={styles.label} maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}>
+                          Left
+                        </Text>
+                        <TextInput
+                          style={[
+                            styles.input,
+                            styles.quickTextConfigInput,
+                            focusedField === 'quick-text-left' && styles.inputFocused,
+                          ]}
+                          maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                          value={quickTextLeft}
+                          onChangeText={setQuickTextLeft}
+                          placeholder="e.g. ありがとう"
+                          placeholderTextColor={placeholderColor}
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          maxLength={120}
+                          multiline
+                          textAlignVertical="top"
+                          returnKeyType="done"
+                          blurOnSubmit
+                          onSubmitEditing={() => Keyboard.dismiss()}
+                          onFocus={() => setFocusedField('quick-text-left')}
+                          onBlur={() =>
+                            setFocusedField((current) =>
+                              current === 'quick-text-left' ? null : current,
+                            )
+                          }
+                        />
+                      </View>
+                      <View style={styles.quickTextConfigItem}>
+                        <Text style={styles.label} maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}>
+                          Right
+                        </Text>
+                        <TextInput
+                          style={[
+                            styles.input,
+                            styles.quickTextConfigInput,
+                            focusedField === 'quick-text-right' && styles.inputFocused,
+                          ]}
+                          maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                          value={quickTextRight}
+                          onChangeText={setQuickTextRight}
+                          placeholder="e.g. お願いします"
+                          placeholderTextColor={placeholderColor}
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          maxLength={120}
+                          multiline
+                          textAlignVertical="top"
+                          returnKeyType="done"
+                          blurOnSubmit
+                          onSubmitEditing={() => Keyboard.dismiss()}
+                          onFocus={() => setFocusedField('quick-text-right')}
+                          onBlur={() =>
+                            setFocusedField((current) =>
+                              current === 'quick-text-right' ? null : current,
+                            )
+                          }
+                        />
+                      </View>
+                    </View>
+                  </View>
                 </View>
               </ScrollView>
           </KeyboardAvoidingView>
@@ -2733,65 +2987,155 @@ export default function App() {
                 </Pressable>
               ) : null}
             </Animated.View>
-          ) : canSendDraft ? (
-            <Pressable
-              style={[
-                styles.roundButton,
-                styles.sendRoundButton,
-                (!isGatewayConnected || isSending) && styles.roundButtonDisabled,
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel={
-                !isGatewayConnected
-                  ? 'Send disabled: not connected'
-                  : isSending
-                    ? 'Sending in progress'
-                    : 'Send transcript'
-              }
-              onPress={() => {
-                const text = transcript.trim() || interimTranscript.trim();
-                if (!text) return;
-                Keyboard.dismiss();
-                setFocusedField(null);
-                void sendToGateway(text);
-              }}
-              onPressIn={() => {
-                void triggerHaptic('button-press');
-              }}
-              disabled={!isGatewayConnected || isSending}
-            >
-              <Ionicons
-                name={isSending ? 'time-outline' : 'send'}
-                size={26}
-                color="#ffffff"
-              />
-            </Pressable>
           ) : (
-            <Pressable
-              style={[
-                styles.roundButton,
-                styles.micRoundButton,
-                isRecognizing && styles.recordingRoundButton,
-                (isSending || !settingsReady) && styles.roundButtonDisabled,
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel={
-                isRecognizing
-                  ? 'Stop voice recording'
-                  : isSending
-                    ? 'Recording disabled while sending'
-                    : 'Hold to record voice'
-              }
-              onPressIn={handleHoldToTalkPressIn}
-              onPressOut={handleHoldToTalkPressOut}
-              disabled={isSending || !settingsReady}
-            >
-              <Ionicons
-                name={isRecognizing ? 'stop' : 'mic'}
-                size={26}
-                color="#ffffff"
-              />
-            </Pressable>
+            <View style={styles.bottomActionRow}>
+              <View style={styles.quickTextButtonSlot}>
+                {showQuickTextLeftTooltip ? (
+                  <View style={styles.quickTextTooltip} pointerEvents="none">
+                    <Text
+                      style={styles.quickTextTooltipText}
+                      numberOfLines={3}
+                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                    >
+                      {quickTextLeftLabel}
+                    </Text>
+                  </View>
+                ) : null}
+                <Pressable
+                  style={[
+                    styles.quickTextButton,
+                    !canUseQuickTextLeft && styles.quickTextButtonDisabled,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    canUseQuickTextLeft
+                      ? `Insert quick text ${quickTextLeftLabel}`
+                      : 'Left quick text is empty'
+                  }
+                  accessibilityHint="Tap to insert. Long press to preview."
+                  onPress={() => {
+                    handleQuickTextPress('left', quickTextLeftLabel);
+                  }}
+                  onLongPress={() => {
+                    handleQuickTextLongPress('left', quickTextLeftLabel);
+                  }}
+                  onPressOut={() => {
+                    handleQuickTextPressOut('left');
+                  }}
+                  delayLongPress={280}
+                  disabled={!canUseQuickTextLeft}
+                >
+                  <Ionicons
+                    name="chatbubble-ellipses-outline"
+                    size={20}
+                    style={styles.quickTextButtonIcon}
+                  />
+                </Pressable>
+              </View>
+              {canSendDraft ? (
+                <Pressable
+                  style={[
+                    styles.roundButton,
+                    styles.sendRoundButton,
+                    (!isGatewayConnected || isSending) && styles.roundButtonDisabled,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    !isGatewayConnected
+                      ? 'Send disabled: not connected'
+                      : isSending
+                        ? 'Sending in progress'
+                        : 'Send transcript'
+                  }
+                  onPress={() => {
+                    const text = transcript.trim() || interimTranscript.trim();
+                    if (!text) return;
+                    Keyboard.dismiss();
+                    setFocusedField(null);
+                    void sendToGateway(text);
+                  }}
+                  onPressIn={() => {
+                    void triggerHaptic('button-press');
+                  }}
+                  disabled={!isGatewayConnected || isSending}
+                >
+                  <Ionicons
+                    name={isSending ? 'time-outline' : 'send'}
+                    size={26}
+                    color="#ffffff"
+                  />
+                </Pressable>
+              ) : (
+                <Pressable
+                  style={[
+                    styles.roundButton,
+                    styles.micRoundButton,
+                    isRecognizing && styles.recordingRoundButton,
+                    (isSending || !settingsReady) && styles.roundButtonDisabled,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    isRecognizing
+                      ? 'Stop voice recording'
+                      : isSending
+                        ? 'Recording disabled while sending'
+                        : 'Hold to record voice'
+                  }
+                  onPressIn={handleHoldToTalkPressIn}
+                  onPressOut={handleHoldToTalkPressOut}
+                  disabled={isSending || !settingsReady}
+                >
+                  <Ionicons
+                    name={isRecognizing ? 'stop' : 'mic'}
+                    size={26}
+                    color="#ffffff"
+                  />
+                </Pressable>
+              )}
+              <View style={styles.quickTextButtonSlot}>
+                {showQuickTextRightTooltip ? (
+                  <View style={styles.quickTextTooltip} pointerEvents="none">
+                    <Text
+                      style={styles.quickTextTooltipText}
+                      numberOfLines={3}
+                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                    >
+                      {quickTextRightLabel}
+                    </Text>
+                  </View>
+                ) : null}
+                <Pressable
+                  style={[
+                    styles.quickTextButton,
+                    !canUseQuickTextRight && styles.quickTextButtonDisabled,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    canUseQuickTextRight
+                      ? `Insert quick text ${quickTextRightLabel}`
+                      : 'Right quick text is empty'
+                  }
+                  accessibilityHint="Tap to insert. Long press to preview."
+                  onPress={() => {
+                    handleQuickTextPress('right', quickTextRightLabel);
+                  }}
+                  onLongPress={() => {
+                    handleQuickTextLongPress('right', quickTextRightLabel);
+                  }}
+                  onPressOut={() => {
+                    handleQuickTextPressOut('right');
+                  }}
+                  delayLongPress={280}
+                  disabled={!canUseQuickTextRight}
+                >
+                  <Ionicons
+                    name="chatbubble-ellipses-outline"
+                    size={20}
+                    style={styles.quickTextButtonIcon}
+                  />
+                </Pressable>
+              </View>
+            </View>
           )}
           {isKeyboardBarMounted ? null : (
             <Text style={styles.bottomHint} maxFontSizeMultiplier={MAX_TEXT_SCALE}>
@@ -2867,6 +3211,12 @@ function createStyles(isDarkTheme: boolean) {
         recordingRound: '#DC2626',
         sendRound: '#059669',
         roundDisabled: '#243a63',
+        quickActionBg: '#047857',
+        quickActionBorder: 'transparent',
+        quickActionText: '#ffffff',
+        quickTooltipBg: '#1a2f5a',
+        quickTooltipBorder: 'rgba(110,231,183,0.34)',
+        quickTooltipText: '#e8fff7',
         bottomHint: '#b8c9e6',
         bottomDockBg: 'transparent',
         bottomDockBorder: 'rgba(255,255,255,0.08)',
@@ -2932,6 +3282,12 @@ function createStyles(isDarkTheme: boolean) {
         recordingRound: '#DC2626',
         sendRound: '#059669',
         roundDisabled: '#C4C4C0',
+        quickActionBg: '#047857',
+        quickActionBorder: 'transparent',
+        quickActionText: '#ffffff',
+        quickTooltipBg: '#ffffff',
+        quickTooltipBorder: 'rgba(5,150,105,0.24)',
+        quickTooltipText: '#065f46',
         bottomHint: '#5C5C5C',
         bottomDockBg: 'transparent',
         bottomDockBorder: 'rgba(0,0,0,0.04)',
@@ -3258,6 +3614,19 @@ function createStyles(isDarkTheme: boolean) {
     languageOptionCodeSelected: {
       color: colors.inputBorderFocused,
       fontWeight: '600',
+    },
+    quickTextConfigRow: {
+      flexDirection: 'column',
+      gap: 10,
+      marginTop: 4,
+    },
+    quickTextConfigItem: {
+      width: '100%',
+    },
+    quickTextConfigInput: {
+      minHeight: 72,
+      maxHeight: 120,
+      paddingTop: 8,
     },
     sessionActionButton: {
       minHeight: 36,
@@ -3731,6 +4100,13 @@ function createStyles(isDarkTheme: boolean) {
       paddingBottom: 4,
       gap: 4,
     },
+    bottomActionRow: {
+      width: '100%',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 16,
+    },
     keyboardActionRow: {
       width: '100%',
       flexDirection: 'row',
@@ -3795,6 +4171,49 @@ function createStyles(isDarkTheme: boolean) {
       backgroundColor: colors.roundDisabled,
       shadowOpacity: 0,
       elevation: 0,
+    },
+    quickTextButton: {
+      width: 52,
+      height: 52,
+      borderRadius: 26,
+      borderWidth: 0,
+      borderColor: colors.quickActionBorder,
+      backgroundColor: colors.quickActionBg,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 6,
+    },
+    quickTextButtonSlot: {
+      width: 52,
+      alignItems: 'center',
+      justifyContent: 'center',
+      position: 'relative',
+    },
+    quickTextButtonDisabled: {
+      opacity: 0.42,
+    },
+    quickTextButtonIcon: {
+      color: colors.quickActionText,
+    },
+    quickTextTooltip: {
+      position: 'absolute',
+      bottom: 60,
+      minWidth: 88,
+      maxWidth: 180,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.quickTooltipBorder,
+      backgroundColor: colors.quickTooltipBg,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      zIndex: 3,
+      ...surfaceShadow,
+    },
+    quickTextTooltipText: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: colors.quickTooltipText,
+      textAlign: 'center',
     },
     bottomHint: {
       fontSize: 12,
