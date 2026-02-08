@@ -4,7 +4,6 @@ import { Ionicons } from '@expo/vector-icons';
 import Markdown from 'react-native-markdown-display';
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   Image,
   Keyboard,
@@ -64,7 +63,6 @@ const STORAGE_KEYS = {
   speechLang: 'mobile-openclaw.speech-lang',
   sessionKey: 'mobile-openclaw.session-key',
   sessionPrefs: 'mobile-openclaw.session-prefs',
-  quickSessionBar: 'mobile-openclaw.quick-session-bar',
 };
 
 const OPENCLAW_IDENTITY_STORAGE_KEY = 'openclaw_device_identity';
@@ -441,10 +439,19 @@ function getHistoryDayLabel(timestamp: number): string {
 
 function formatSessionUpdatedAt(updatedAt?: number): string {
   if (!updatedAt) return '';
-  return new Date(updatedAt).toLocaleTimeString(undefined, {
+  const target = new Date(updatedAt);
+  const now = new Date();
+  const withYear = target.getFullYear() !== now.getFullYear();
+  const dateLabel = target.toLocaleDateString(undefined, {
+    year: withYear ? 'numeric' : undefined,
+    month: 'short',
+    day: 'numeric',
+  });
+  const timeLabel = target.toLocaleTimeString(undefined, {
     hour: '2-digit',
     minute: '2-digit',
   });
+  return `${dateLabel} ${timeLabel}`;
 }
 
 function formatClockLabel(timestamp: number): string {
@@ -490,7 +497,7 @@ export default function App() {
   const [authToken, setAuthToken] = useState('');
   const [speechLang, setSpeechLang] = useState<SpeechLang>(DEFAULT_SPEECH_LANG);
   const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
-  const [isSessionQuickPanelOpen, setIsSessionQuickPanelOpen] = useState(true);
+  const [isSessionPanelOpen, setIsSessionPanelOpen] = useState(false);
   const [settingsReady, setSettingsReady] = useState(false);
   const [connectionState, setConnectionState] =
     useState<ConnectionState>('disconnected');
@@ -505,6 +512,7 @@ export default function App() {
   const [isSessionHistoryLoading, setIsSessionHistoryLoading] = useState(false);
   const [isSessionOperationPending, setIsSessionOperationPending] = useState(false);
   const [isSessionRenameOpen, setIsSessionRenameOpen] = useState(false);
+  const [sessionRenameTargetKey, setSessionRenameTargetKey] = useState<string | null>(null);
   const [sessionRenameDraft, setSessionRenameDraft] = useState('');
   const [settingsSavePendingCount, setSettingsSavePendingCount] = useState(0);
   const [settingsSaveError, setSettingsSaveError] = useState<string | null>(null);
@@ -595,7 +603,6 @@ export default function App() {
           savedSpeechLang,
           savedSessionKey,
           savedSessionPrefs,
-          savedQuickSessionBar,
         ] = await Promise.all([
           kvStore.getItemAsync(STORAGE_KEYS.gatewayUrl),
           kvStore.getItemAsync(STORAGE_KEYS.authToken),
@@ -604,7 +611,6 @@ export default function App() {
           kvStore.getItemAsync(STORAGE_KEYS.speechLang),
           kvStore.getItemAsync(STORAGE_KEYS.sessionKey),
           kvStore.getItemAsync(STORAGE_KEYS.sessionPrefs),
-          kvStore.getItemAsync(STORAGE_KEYS.quickSessionBar),
         ]);
         if (!alive) return;
 
@@ -620,9 +626,6 @@ export default function App() {
           setActiveSessionKey(savedSessionKey.trim());
         }
         setSessionPreferences(parseSessionPreferences(savedSessionPrefs));
-        if (savedQuickSessionBar === '0' || savedQuickSessionBar === 'false') {
-          setIsSessionQuickPanelOpen(false);
-        }
         if (savedIdentity) {
           openClawIdentityMemory.set(
             OPENCLAW_IDENTITY_STORAGE_KEY,
@@ -707,15 +710,10 @@ export default function App() {
   }, [persistSetting, sessionPreferences, settingsReady]);
 
   useEffect(() => {
-    if (!settingsReady) return;
-    persistSetting(async () => {
-      if (isSessionQuickPanelOpen) {
-        await kvStore.setItemAsync(STORAGE_KEYS.quickSessionBar, '1');
-      } else {
-        await kvStore.setItemAsync(STORAGE_KEYS.quickSessionBar, '0');
-      }
-    });
-  }, [isSessionQuickPanelOpen, persistSetting, settingsReady]);
+    if (!isGatewayConnected) {
+      setIsSessionPanelOpen(false);
+    }
+  }, [isGatewayConnected]);
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -878,13 +876,14 @@ export default function App() {
     async (sessionKey: string) => {
       const nextKey = sessionKey.trim();
       if (!nextKey || nextKey === activeSessionKeyRef.current) return;
-      if (isSending || isSessionHistoryLoading) return;
+      if (isSending || isSessionOperationPending) return;
 
       Keyboard.dismiss();
       setFocusedField(null);
       setGatewayError(null);
       setSessionsError(null);
       setIsSessionRenameOpen(false);
+      setSessionRenameTargetKey(null);
       setSessionRenameDraft('');
       setIsSending(false);
       setGatewayEventState('idle');
@@ -900,16 +899,16 @@ export default function App() {
       await loadSessionHistory(nextKey);
       void refreshSessions();
     },
-    [isSending, isSessionHistoryLoading, loadSessionHistory, refreshSessions],
+    [isSending, isSessionOperationPending, loadSessionHistory, refreshSessions],
   );
 
   const createAndSwitchSession = useCallback(async () => {
-    if (isSending || isSessionHistoryLoading) return;
+    if (isSending || isSessionOperationPending) return;
     const nextKey = createSessionKey();
     sessionTurnsRef.current.set(nextKey, []);
     setSessions((previous) => [{ key: nextKey, displayName: nextKey }, ...previous]);
     await switchSession(nextKey);
-  }, [isSending, isSessionHistoryLoading, switchSession]);
+  }, [isSending, isSessionOperationPending, switchSession]);
 
   const isSessionPinned = useCallback(
     (sessionKey: string) => sessionPreferences[sessionKey]?.pinned === true,
@@ -925,19 +924,24 @@ export default function App() {
     [sessionPreferences],
   );
 
-  const startSessionRename = useCallback(() => {
-    const active = activeSessionKeyRef.current;
-    const currentAlias = sessionPreferences[active]?.alias?.trim();
-    const baseSession =
-      sessions.find((session) => session.key === active) ??
-      ({ key: active, displayName: active } as SessionEntry);
+  const startSessionRename = useCallback(
+    (sessionKey: string) => {
+      const targetKey = sessionKey.trim();
+      if (!targetKey) return;
+      const currentAlias = sessionPreferences[targetKey]?.alias?.trim();
+      const baseSession =
+        sessions.find((session) => session.key === targetKey) ??
+        ({ key: targetKey, displayName: targetKey } as SessionEntry);
 
-    setSessionRenameDraft(currentAlias || sessionDisplayName(baseSession));
-    setIsSessionRenameOpen(true);
-  }, [sessionPreferences, sessions]);
+      setSessionRenameTargetKey(targetKey);
+      setSessionRenameDraft(currentAlias || sessionDisplayName(baseSession));
+      setIsSessionRenameOpen(true);
+    },
+    [sessionPreferences, sessions],
+  );
 
   const submitSessionRename = useCallback(async () => {
-    const sessionKey = activeSessionKeyRef.current.trim();
+    const sessionKey = (sessionRenameTargetKey ?? '').trim();
     if (!sessionKey || isSessionOperationPending) return;
 
     const alias = sessionRenameDraft.trim();
@@ -971,6 +975,7 @@ export default function App() {
       });
 
       setIsSessionRenameOpen(false);
+      setSessionRenameTargetKey(null);
       setSessionRenameDraft('');
       void refreshSessions();
     } finally {
@@ -981,111 +986,29 @@ export default function App() {
     isSessionOperationPending,
     refreshSessions,
     sessionRenameDraft,
+    sessionRenameTargetKey,
   ]);
 
-  const toggleActiveSessionPinned = useCallback(() => {
-    const sessionKey = activeSessionKeyRef.current.trim();
-    if (!sessionKey || isSessionOperationPending) return;
-    setSessionPreferences((previous) => {
-      const current = previous[sessionKey] ?? {};
-      const next: SessionPreference = {
-        ...current,
-        pinned: !current.pinned,
-      };
-      if (!next.alias && !next.pinned) {
-        if (!(sessionKey in previous)) return previous;
-        const { [sessionKey]: _removed, ...rest } = previous;
-        return rest;
-      }
-      return { ...previous, [sessionKey]: next };
-    });
-  }, [isSessionOperationPending]);
-
-  const deleteSessionByKey = useCallback(
-    async (sessionKey: string) => {
+  const toggleSessionPinned = useCallback(
+    (sessionKey: string) => {
       const targetKey = sessionKey.trim();
-      if (!targetKey || isSessionOperationPending || isSending || isSessionHistoryLoading) {
-        return;
-      }
-      if (connectionState !== 'connected' || !clientRef.current) {
-        setSessionsError('Connect to the gateway to delete sessions.');
-        return;
-      }
-
-      setSessionsError(null);
-      setIsSessionOperationPending(true);
-      try {
-        await clientRef.current.sessionsDelete(targetKey);
-
-        sessionTurnsRef.current.delete(targetKey);
-        setSessionPreferences((previous) => {
+      if (!targetKey || isSessionOperationPending) return;
+      setSessionPreferences((previous) => {
+        const current = previous[targetKey] ?? {};
+        const next: SessionPreference = {
+          ...current,
+          pinned: !current.pinned,
+        };
+        if (!next.alias && !next.pinned) {
           if (!(targetKey in previous)) return previous;
           const { [targetKey]: _removed, ...rest } = previous;
           return rest;
-        });
-
-        if (activeSessionKeyRef.current === targetKey) {
-          const existingFallback = sessions.find(
-            (session) => session.key !== targetKey,
-          )?.key;
-          const fallback =
-            existingFallback && existingFallback !== targetKey
-              ? existingFallback
-              : createSessionKey();
-
-          setSessions((previous) => {
-            const remaining = previous.filter((session) => session.key !== targetKey);
-            if (remaining.some((session) => session.key === fallback)) {
-              return remaining;
-            }
-            return [{ key: fallback, displayName: fallback }, ...remaining];
-          });
-          sessionTurnsRef.current.set(fallback, sessionTurnsRef.current.get(fallback) ?? []);
-
-          setIsSessionRenameOpen(false);
-          setSessionRenameDraft('');
-          await switchSession(fallback);
-        } else {
-          setSessions((previous) =>
-            previous.filter((session) => session.key !== targetKey),
-          );
-          void refreshSessions();
         }
-      } catch (err) {
-        setSessionsError(`Delete failed: ${errorMessage(err)}`);
-      } finally {
-        setIsSessionOperationPending(false);
-      }
+        return { ...previous, [targetKey]: next };
+      });
     },
-    [
-      connectionState,
-      isSending,
-      isSessionHistoryLoading,
-      isSessionOperationPending,
-      refreshSessions,
-      sessions,
-      switchSession,
-    ],
+    [isSessionOperationPending],
   );
-
-  const confirmDeleteActiveSession = useCallback(() => {
-    const sessionKey = activeSessionKeyRef.current.trim();
-    if (!sessionKey) return;
-    Alert.alert(
-      'Delete session?',
-      `Delete "${sessionKey}" from the gateway history if supported?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            void deleteSessionByKey(sessionKey);
-          },
-        },
-      ],
-    );
-  }, [deleteSessionByKey]);
 
   useEffect(() => {
     if (!isGatewayConnected) return;
@@ -1404,8 +1327,13 @@ export default function App() {
       : isGatewayConnected
         ? 'Hold to record'
         : 'Please connect';
-  const canSwitchSession =
-    !isSending && !isSessionHistoryLoading && !isSessionOperationPending;
+  const canSwitchSession = !isSending && !isSessionOperationPending;
+  const canRefreshSessions =
+    isGatewayConnected && !isSessionsLoading && !isSessionOperationPending;
+  const canCreateSession = canSwitchSession;
+  const canRenameSession = canSwitchSession;
+  const canPinSession = !isSessionOperationPending;
+  const hasGatewaySessions = sessions.length > 0;
   const visibleSessions = useMemo(() => {
     const active = activeSessionKey;
     const merged = [...sessions];
@@ -1426,8 +1354,20 @@ export default function App() {
     });
     return merged.slice(0, 20);
   }, [activeSessionKey, sessionPreferences, sessions]);
-  const showQuickSessionBar =
-    isGatewayConnected && !isSettingsPanelOpen && isSessionQuickPanelOpen;
+  const sessionPanelStatusText = sessionsError
+    ? 'Error'
+    : isSessionsLoading
+      ? 'Loading sessions...'
+      : hasGatewaySessions
+        ? `${visibleSessions.length} sessions`
+        : 'Local session only';
+  const sessionListHintText = sessionsError
+    ? 'Sync failed. Tap Refresh.'
+    : !hasGatewaySessions
+      ? 'No sessions yet. Tap New.'
+    : isSending || isSessionOperationPending
+        ? 'Busy now. Try again in a moment.'
+        : null;
   const settingsStatusText = !settingsReady
     ? 'Loading settings...'
     : settingsSavePendingCount > 0
@@ -1439,6 +1379,16 @@ export default function App() {
           : 'Saved';
   const isSettingsStatusError = Boolean(settingsSaveError);
   const isSettingsStatusPending = settingsSavePendingCount > 0;
+  const sectionIconColor = isDarkTheme ? '#9eb1d2' : '#70706A';
+  const actionIconColor = isDarkTheme ? '#b8c9e6' : '#5C5C5C';
+  const currentBadgeIconColor = isDarkTheme ? '#9ec0ff' : '#1D4ED8';
+  const pinnedBadgeIconColor = isDarkTheme ? '#dbe7ff' : '#4B5563';
+  const optionIconColor = isDarkTheme ? '#b8c9e6' : '#5C5C5C';
+  const historyStatusText = isSessionHistoryLoading
+    ? 'Loading session...'
+    : isSending
+      ? `Responding... (${gatewayEventState})`
+      : null;
   const historyItems = useMemo<HistoryListItem[]>(() => {
     if (chatTurns.length === 0) return [];
 
@@ -1711,6 +1661,40 @@ export default function App() {
             <Pressable
               style={[
                 styles.iconButton,
+                isSessionPanelOpen && styles.iconButtonActive,
+                !isGatewayConnected && styles.iconButtonDisabled,
+              ]}
+              hitSlop={7}
+              accessibilityRole="button"
+              accessibilityLabel={
+                isSessionPanelOpen ? 'Hide sessions screen' : 'Show sessions screen'
+              }
+              onPress={() => {
+                if (!isGatewayConnected) return;
+                Keyboard.dismiss();
+                setFocusedField(null);
+                setIsSettingsPanelOpen(false);
+                const next = !isSessionPanelOpen;
+                setIsSessionPanelOpen(next);
+                if (next) {
+                  void refreshSessions();
+                } else {
+                  setIsSessionRenameOpen(false);
+                  setSessionRenameTargetKey(null);
+                  setSessionRenameDraft('');
+                }
+              }}
+              disabled={!isGatewayConnected}
+            >
+              <Ionicons
+                name="albums-outline"
+                size={18}
+                color={isDarkTheme ? '#bccae2' : '#707070'}
+              />
+            </Pressable>
+            <Pressable
+              style={[
+                styles.iconButton,
                 isSettingsPanelOpen && styles.iconButtonActive,
                 !isGatewayConnected && styles.iconButtonDisabled,
               ]}
@@ -1725,6 +1709,7 @@ export default function App() {
                 if (!isGatewayConnected) return;
                 Keyboard.dismiss();
                 setFocusedField(null);
+                setIsSessionPanelOpen(false);
                 setIsSettingsPanelOpen((current) => !current);
               }}
               disabled={!isGatewayConnected}
@@ -1737,125 +1722,6 @@ export default function App() {
             </Pressable>
           </View>
         </View>
-
-        {showQuickSessionBar ? (
-          <View style={styles.quickSessionBar}>
-            <View style={styles.quickSessionHeader}>
-              <Text style={styles.quickSessionLabel} maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}>
-                Session
-              </Text>
-              <Text
-                style={styles.quickSessionActiveKey}
-                numberOfLines={1}
-                maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-              >
-                {getSessionTitle(
-                  visibleSessions.find((session) => session.key === activeSessionKey) ??
-                    { key: activeSessionKey, displayName: activeSessionKey },
-                )}
-              </Text>
-            </View>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.quickSessionListRow}
-            >
-              {visibleSessions.map((session) => {
-                const selected = session.key === activeSessionKey;
-                const pinned = isSessionPinned(session.key);
-                return (
-                  <Pressable
-                    key={`quick-${session.key}`}
-                    style={[
-                      styles.quickSessionChip,
-                      selected && styles.quickSessionChipActive,
-                      (!canSwitchSession || isSessionHistoryLoading) &&
-                        styles.quickSessionChipDisabled,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Switch to session ${getSessionTitle(session)}`}
-                    onPress={() => {
-                      void switchSession(session.key);
-                    }}
-                    disabled={!canSwitchSession || isSessionHistoryLoading}
-                  >
-                    <Text
-                      style={[
-                        styles.quickSessionChipText,
-                        selected && styles.quickSessionChipTextActive,
-                      ]}
-                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                      numberOfLines={1}
-                    >
-                      {pinned ? `★ ${getSessionTitle(session)}` : getSessionTitle(session)}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-              <Pressable
-                style={[
-                  styles.quickSessionActionChip,
-                  (isSessionsLoading ||
-                    !isGatewayConnected ||
-                    isSessionOperationPending) &&
-                    styles.quickSessionChipDisabled,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="Refresh sessions list"
-                onPress={() => {
-                  void refreshSessions();
-                }}
-                disabled={
-                  isSessionsLoading || !isGatewayConnected || isSessionOperationPending
-                }
-              >
-                <Ionicons
-                  name="refresh-outline"
-                  size={14}
-                  color={isDarkTheme ? '#9eb1d2' : '#5C5C5C'}
-                />
-                <Text
-                  style={styles.quickSessionActionChipText}
-                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                >
-                  Refresh
-                </Text>
-              </Pressable>
-              <Pressable
-                style={[
-                  styles.quickSessionActionChip,
-                  !canSwitchSession && styles.quickSessionChipDisabled,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="Create new session"
-                onPress={() => {
-                  void createAndSwitchSession();
-                }}
-                disabled={!canSwitchSession}
-              >
-                <Ionicons
-                  name="add"
-                  size={14}
-                  color={isDarkTheme ? '#9eb1d2' : '#5C5C5C'}
-                />
-                <Text
-                  style={styles.quickSessionActionChipText}
-                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                >
-                  New
-                </Text>
-              </Pressable>
-            </ScrollView>
-            {sessionsError ? (
-              <Text
-                style={styles.quickSessionErrorText}
-                maxFontSizeMultiplier={MAX_TEXT_SCALE}
-              >
-                {sessionsError}
-              </Text>
-            ) : null}
-          </View>
-        ) : null}
 
         <Modal
           visible={shouldShowSettingsScreen}
@@ -1950,18 +1816,15 @@ export default function App() {
               >
                 <View style={styles.gatewayPanel}>
                   <View style={styles.settingsSection}>
-                    <Text
-                      style={styles.settingsSectionTitle}
-                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                    >
-                      Gateway
-                    </Text>
-                    <Text
-                      style={styles.settingsSectionDescription}
-                      maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                    >
-                      Configure endpoint and authentication for OpenClaw connection.
-                    </Text>
+                    <View style={styles.sectionTitleRow}>
+                      <Ionicons name="link-outline" size={14} color={sectionIconColor} />
+                      <Text
+                        style={styles.settingsSectionTitle}
+                        maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                      >
+                        Gateway
+                      </Text>
+                    </View>
                     <Text style={styles.label} maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}>
                       Gateway URL
                     </Text>
@@ -1992,7 +1855,7 @@ export default function App() {
                       style={[styles.label, styles.labelSpacing]}
                       maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
                     >
-                      Token / Password (Optional)
+                      Token (optional)
                     </Text>
                     <TextInput
                       style={[
@@ -2016,13 +1879,6 @@ export default function App() {
                         )
                       }
                     />
-                    <Text
-                      style={styles.settingsFieldHint}
-                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                    >
-                      Saved locally on this device. Keep secrets out of git.
-                    </Text>
-
                     <View style={styles.connectionRow}>
                       <Pressable
                         style={[
@@ -2053,21 +1909,19 @@ export default function App() {
                   </View>
 
                   <View style={[styles.settingsSection, styles.settingsSectionSpaced]}>
-                    <Text
-                      style={styles.settingsSectionTitle}
-                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                    >
-                      Appearance
-                    </Text>
-                    <Text
-                      style={styles.settingsSectionDescription}
-                      maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                    >
-                      Choose visual theme and home layout options.
-                    </Text>
-                    <Text style={styles.label} maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}>
-                      Theme
-                    </Text>
+                    <View style={styles.sectionTitleRow}>
+                      <Ionicons
+                        name="color-palette-outline"
+                        size={14}
+                        color={sectionIconColor}
+                      />
+                      <Text
+                        style={styles.settingsSectionTitle}
+                        maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                      >
+                        Theme
+                      </Text>
+                    </View>
                     <View style={styles.settingsOptionRow}>
                       <Pressable
                         style={[
@@ -2080,6 +1934,11 @@ export default function App() {
                           setTheme('light');
                         }}
                       >
+                        <Ionicons
+                          name="sunny-outline"
+                          size={14}
+                          color={theme === 'light' ? currentBadgeIconColor : optionIconColor}
+                        />
                         <Text
                           style={[
                             styles.settingsOptionLabel,
@@ -2101,6 +1960,11 @@ export default function App() {
                           setTheme('dark');
                         }}
                       >
+                        <Ionicons
+                          name="moon-outline"
+                          size={14}
+                          color={theme === 'dark' ? currentBadgeIconColor : optionIconColor}
+                        />
                         <Text
                           style={[
                             styles.settingsOptionLabel,
@@ -2113,79 +1977,18 @@ export default function App() {
                       </Pressable>
                     </View>
 
-                    <Text
-                      style={[styles.label, styles.labelSpacing]}
-                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                    >
-                      Quick Sessions Bar
-                    </Text>
-                    <View style={styles.settingsOptionRow}>
-                      <Pressable
-                        style={[
-                          styles.settingsOptionButton,
-                          isSessionQuickPanelOpen && styles.settingsOptionButtonSelected,
-                        ]}
-                        accessibilityRole="button"
-                        accessibilityLabel="Show quick sessions bar on home screen"
-                        onPress={() => {
-                          if (!isSessionQuickPanelOpen) {
-                            void refreshSessions();
-                          }
-                          setIsSessionQuickPanelOpen(true);
-                        }}
-                      >
-                        <Text
-                          style={[
-                            styles.settingsOptionLabel,
-                            isSessionQuickPanelOpen &&
-                              styles.settingsOptionLabelSelected,
-                          ]}
-                          maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                        >
-                          Show
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        style={[
-                          styles.settingsOptionButton,
-                          !isSessionQuickPanelOpen && styles.settingsOptionButtonSelected,
-                        ]}
-                        accessibilityRole="button"
-                        accessibilityLabel="Hide quick sessions bar on home screen"
-                        onPress={() => {
-                          setIsSessionQuickPanelOpen(false);
-                        }}
-                      >
-                        <Text
-                          style={[
-                            styles.settingsOptionLabel,
-                            !isSessionQuickPanelOpen &&
-                              styles.settingsOptionLabelSelected,
-                          ]}
-                          maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                        >
-                          Hide
-                        </Text>
-                      </Pressable>
-                    </View>
                   </View>
 
                   <View style={[styles.settingsSection, styles.settingsSectionSpaced]}>
-                    <Text
-                      style={styles.settingsSectionTitle}
-                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                    >
-                      Speech
-                    </Text>
-                    <Text
-                      style={styles.settingsSectionDescription}
-                      maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                    >
-                      Select recognition language for voice input.
-                    </Text>
-                    <Text style={styles.label} maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}>
-                      Speech Language
-                    </Text>
+                    <View style={styles.sectionTitleRow}>
+                      <Ionicons name="mic-outline" size={14} color={sectionIconColor} />
+                      <Text
+                        style={styles.settingsSectionTitle}
+                        maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                      >
+                        Language
+                      </Text>
+                    </View>
                     <View style={styles.languagePickerRow}>
                       {SPEECH_LANG_OPTIONS.map((option) => {
                         const selected = speechLang === option.value;
@@ -2227,242 +2030,230 @@ export default function App() {
                       })}
                     </View>
                   </View>
-
-                  <View style={[styles.settingsSection, styles.settingsSectionSpaced]}>
+                </View>
+              </ScrollView>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      </Modal>
+      <Modal
+        visible={isGatewayConnected && isSessionPanelOpen}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => {
+          setIsSessionPanelOpen(false);
+          setIsSessionRenameOpen(false);
+          setSessionRenameTargetKey(null);
+          setSessionRenameDraft('');
+          Keyboard.dismiss();
+        }}
+      >
+        <SafeAreaView style={styles.settingsScreenContainer}>
+          <View style={styles.settingsScreenHeader}>
+            <Text
+              style={styles.settingsScreenTitle}
+              maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+            >
+              Sessions
+            </Text>
+            <View style={styles.settingsScreenHeaderRight}>
+              <View
+                style={[
+                  styles.settingsStatusChip,
+                  isSessionsLoading && styles.settingsStatusChipPending,
+                  Boolean(sessionsError) && styles.settingsStatusChipError,
+                ]}
+              >
+                <Ionicons
+                  name={
+                    sessionsError
+                      ? 'alert-circle-outline'
+                      : isSessionsLoading
+                        ? 'sync-outline'
+                        : 'albums-outline'
+                  }
+                  size={12}
+                  color={
+                    sessionsError
+                      ? isDarkTheme
+                        ? '#ffb0b0'
+                        : '#DC2626'
+                      : isDarkTheme
+                        ? '#9ec0ff'
+                        : '#1D4ED8'
+                  }
+                />
+                <Text
+                  style={[
+                    styles.settingsStatusChipText,
+                    Boolean(sessionsError) && styles.settingsStatusChipTextError,
+                  ]}
+                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                  numberOfLines={1}
+                >
+                  {sessionPanelStatusText}
+                </Text>
+              </View>
+              <Pressable
+                style={styles.iconButton}
+                hitSlop={7}
+                accessibilityRole="button"
+                accessibilityLabel="Close sessions screen"
+                onPress={() => {
+                  setIsSessionPanelOpen(false);
+                  setIsSessionRenameOpen(false);
+                  setSessionRenameTargetKey(null);
+                  setSessionRenameDraft('');
+                  Keyboard.dismiss();
+                }}
+              >
+                <Ionicons
+                  name="close"
+                  size={18}
+                  color={isDarkTheme ? '#bccae2' : '#707070'}
+                />
+              </Pressable>
+            </View>
+          </View>
+          <KeyboardAvoidingView
+            style={styles.settingsScreenKeyboardWrap}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            <ScrollView
+              style={styles.settingsScreenScroll}
+              contentContainerStyle={styles.settingsScreenScrollContent}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+            >
+              <View style={styles.gatewayPanel}>
+                <View style={styles.settingsSection}>
+                  <View style={styles.sectionTitleRow}>
+                    <Ionicons name="albums-outline" size={14} color={sectionIconColor} />
                     <Text
                       style={styles.settingsSectionTitle}
                       maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
                     >
                       Sessions
                     </Text>
-                    <Text
-                      style={styles.settingsSectionDescription}
-                      maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                  </View>
+                  <View style={styles.sessionActionRow}>
+                    <Pressable
+                      style={[
+                        styles.sessionActionButton,
+                        styles.sessionActionButtonWide,
+                        !canRefreshSessions && styles.sessionActionButtonDisabled,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Refresh sessions list"
+                      onPress={() => {
+                        void refreshSessions();
+                      }}
+                      disabled={!canRefreshSessions}
                     >
-                      Switch and manage conversation contexts. Pinned sessions stay at the top.
-                    </Text>
-                    <View style={styles.sessionHeaderRow}>
-                      <View style={styles.sessionKeyPill}>
-                        <Text
-                          style={styles.sessionKeyText}
-                          numberOfLines={1}
-                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                        >
-                          {getSessionTitle(
-                            visibleSessions.find(
-                              (session) => session.key === activeSessionKey,
-                            ) ?? { key: activeSessionKey, displayName: activeSessionKey },
-                          )}
-                        </Text>
-                      </View>
-                      <Pressable
-                        style={[
-                          styles.sessionActionButton,
-                          (!isGatewayConnected ||
-                            isSessionsLoading ||
-                            isSessionOperationPending) &&
-                            styles.sessionActionButtonDisabled,
-                        ]}
-                        accessibilityRole="button"
-                        accessibilityLabel="Refresh sessions list"
-                        onPress={() => {
-                          void refreshSessions();
-                        }}
-                        disabled={
-                          !isGatewayConnected ||
-                          isSessionsLoading ||
-                          isSessionOperationPending
-                        }
-                      >
+                      <View style={styles.sessionButtonContent}>
+                        <Ionicons
+                          name="refresh-outline"
+                          size={12}
+                          color={actionIconColor}
+                        />
                         <Text
                           style={styles.sessionActionButtonText}
                           maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
                         >
                           Refresh
                         </Text>
-                      </Pressable>
-                      <Pressable
-                        style={[
-                          styles.sessionActionButton,
-                          !canSwitchSession && styles.sessionActionButtonDisabled,
-                        ]}
-                        accessibilityRole="button"
-                        accessibilityLabel="Create new session"
-                        onPress={() => {
-                          void createAndSwitchSession();
-                        }}
-                        disabled={!canSwitchSession}
-                      >
+                      </View>
+                    </Pressable>
+                    <Pressable
+                      style={[
+                        styles.sessionActionButton,
+                        styles.sessionActionButtonWide,
+                        !canCreateSession && styles.sessionActionButtonDisabled,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Create new session"
+                      onPress={() => {
+                        void createAndSwitchSession();
+                      }}
+                      disabled={!canCreateSession}
+                    >
+                      <View style={styles.sessionButtonContent}>
+                        <Ionicons name="add" size={12} color={actionIconColor} />
                         <Text
                           style={styles.sessionActionButtonText}
                           maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
                         >
                           New
                         </Text>
-                      </Pressable>
-                    </View>
-                    <View style={styles.sessionManageRow}>
-                      <Pressable
-                        style={[
-                          styles.sessionManageButton,
-                          !canSwitchSession && styles.sessionManageButtonDisabled,
-                        ]}
-                        accessibilityRole="button"
-                        accessibilityLabel="Rename current session"
-                        onPress={startSessionRename}
-                        disabled={!canSwitchSession}
-                      >
-                        <Text
-                          style={styles.sessionManageButtonText}
-                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                        >
-                          Rename
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        style={[
-                          styles.sessionManageButton,
-                          isSessionOperationPending && styles.sessionManageButtonDisabled,
-                        ]}
-                        accessibilityRole="button"
-                        accessibilityLabel={
-                          isSessionPinned(activeSessionKey)
-                            ? 'Unpin current session'
-                            : 'Pin current session'
-                        }
-                        onPress={toggleActiveSessionPinned}
-                        disabled={isSessionOperationPending}
-                      >
-                        <Text
-                          style={styles.sessionManageButtonText}
-                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                        >
-                          {isSessionPinned(activeSessionKey) ? 'Unpin' : 'Pin'}
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        style={[
-                          styles.sessionManageButton,
-                          styles.sessionManageButtonDanger,
-                          (!canSwitchSession || !isGatewayConnected) &&
-                            styles.sessionManageButtonDisabled,
-                        ]}
-                        accessibilityRole="button"
-                        accessibilityLabel="Delete current session"
-                        onPress={confirmDeleteActiveSession}
-                        disabled={!canSwitchSession || !isGatewayConnected}
-                      >
-                        <Text
-                          style={[
-                            styles.sessionManageButtonText,
-                            styles.sessionManageButtonDangerText,
-                          ]}
-                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                        >
-                          Delete
-                        </Text>
-                      </Pressable>
-                    </View>
-                    {isSessionRenameOpen ? (
-                      <View style={styles.sessionRenameRow}>
-                        <TextInput
-                          style={[styles.input, styles.sessionRenameInput]}
-                          maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                          value={sessionRenameDraft}
-                          onChangeText={setSessionRenameDraft}
-                          placeholder="Session name"
-                          placeholderTextColor={placeholderColor}
-                          autoCapitalize="none"
-                          autoCorrect={false}
-                          returnKeyType="done"
-                          blurOnSubmit
-                          onSubmitEditing={() => {
-                            void submitSessionRename();
-                          }}
-                        />
-                        <Pressable
-                          style={[
-                            styles.sessionRenameActionButton,
-                            isSessionOperationPending &&
-                              styles.sessionRenameActionButtonDisabled,
-                          ]}
-                          accessibilityRole="button"
-                          accessibilityLabel="Save session name"
-                          onPress={() => {
-                            void submitSessionRename();
-                          }}
-                          disabled={isSessionOperationPending}
-                        >
-                          <Text
-                            style={styles.sessionRenameActionButtonText}
-                            maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                          >
-                            Save
-                          </Text>
-                        </Pressable>
-                        <Pressable
-                          style={styles.sessionRenameActionButton}
-                          accessibilityRole="button"
-                          accessibilityLabel="Cancel session rename"
-                          onPress={() => {
-                            setIsSessionRenameOpen(false);
-                            setSessionRenameDraft('');
-                          }}
-                        >
-                          <Text
-                            style={styles.sessionRenameActionButtonText}
-                            maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                          >
-                            Cancel
-                          </Text>
-                        </Pressable>
                       </View>
-                    ) : null}
-                    {sessionsError ? (
-                      <Text
-                        style={styles.sessionErrorText}
-                        maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                      >
-                        {sessionsError}
-                      </Text>
-                    ) : null}
-                    {isGatewayConnected ? (
-                      <ScrollView
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        contentContainerStyle={styles.sessionListRow}
-                      >
-                        {visibleSessions.map((session) => {
-                          const selected = session.key === activeSessionKey;
-                          const pinned = isSessionPinned(session.key);
-                          return (
+                    </Pressable>
+                  </View>
+                  {isGatewayConnected ? (
+                    <View style={styles.sessionListColumn}>
+                      {visibleSessions.map((session) => {
+                        const selected = session.key === activeSessionKey;
+                        const pinned = isSessionPinned(session.key);
+                        const updatedLabel = formatSessionUpdatedAt(session.updatedAt);
+                        const renameTarget = sessionRenameTargetKey === session.key;
+                        return (
+                          <View
+                            key={session.key}
+                            style={[
+                              styles.sessionChip,
+                              selected && styles.sessionChipActive,
+                              !canSwitchSession && styles.sessionChipDisabled,
+                            ]}
+                          >
                             <Pressable
-                              key={session.key}
-                              style={[
-                                styles.sessionChip,
-                                selected && styles.sessionChipActive,
-                                (!canSwitchSession || isSessionHistoryLoading) &&
-                                  styles.sessionChipDisabled,
-                              ]}
+                              style={styles.sessionChipPrimary}
                               accessibilityRole="button"
                               accessibilityLabel={`Switch to session ${getSessionTitle(session)}`}
                               onPress={() => {
                                 void switchSession(session.key);
                               }}
-                              disabled={!canSwitchSession || isSessionHistoryLoading}
+                              disabled={!canSwitchSession}
                             >
-                              <Text
-                                style={[
-                                  styles.sessionChipTitle,
-                                  selected && styles.sessionChipTitleActive,
-                                ]}
-                                numberOfLines={1}
-                                maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                              >
-                                {pinned
-                                  ? `★ ${getSessionTitle(session)}`
-                                  : getSessionTitle(session)}
-                              </Text>
+                              <View style={styles.sessionChipTopRow}>
+                                <Text
+                                  style={[
+                                    styles.sessionChipTitle,
+                                    selected && styles.sessionChipTitleActive,
+                                  ]}
+                                  numberOfLines={1}
+                                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                                >
+                                  {getSessionTitle(session)}
+                                </Text>
+                                <View style={styles.sessionChipBadgeRow}>
+                                  {selected ? (
+                                    <View
+                                      style={[
+                                        styles.sessionChipBadge,
+                                        styles.sessionChipBadgeCurrent,
+                                      ]}
+                                    >
+                                      <Ionicons
+                                        name="checkmark-circle"
+                                        size={10}
+                                        color={currentBadgeIconColor}
+                                      />
+                                    </View>
+                                  ) : null}
+                                  {pinned ? (
+                                    <View
+                                      style={[
+                                        styles.sessionChipBadge,
+                                        styles.sessionChipBadgePinned,
+                                      ]}
+                                    >
+                                      <Ionicons
+                                        name="star"
+                                        size={10}
+                                        color={pinnedBadgeIconColor}
+                                      />
+                                    </View>
+                                  ) : null}
+                                </View>
+                              </View>
                               <Text
                                 style={[
                                   styles.sessionChipMeta,
@@ -2470,44 +2261,162 @@ export default function App() {
                                 ]}
                                 maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
                               >
-                                {pinned
-                                  ? `Pinned${formatSessionUpdatedAt(session.updatedAt) ? ` · ${formatSessionUpdatedAt(session.updatedAt)}` : ''}`
-                                  : formatSessionUpdatedAt(session.updatedAt) || session.key}
+                                {updatedLabel
+                                  ? `Updated ${updatedLabel} · ${session.key}`
+                                  : session.key}
                               </Text>
                             </Pressable>
-                          );
-                        })}
-                      </ScrollView>
-                    ) : (
-                      <Text
-                        style={styles.sessionHintText}
-                        maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                      >
-                        Connect to load available sessions.
-                      </Text>
-                    )}
-                  </View>
+                            <View style={styles.sessionChipActionRow}>
+                              <Pressable
+                                style={[
+                                  styles.sessionChipActionButton,
+                                  !canRenameSession && styles.sessionChipActionButtonDisabled,
+                                ]}
+                                accessibilityRole="button"
+                                accessibilityLabel={`Rename session ${getSessionTitle(session)}`}
+                                onPress={() => {
+                                  startSessionRename(session.key);
+                                }}
+                                disabled={!canRenameSession}
+                              >
+                                <Ionicons
+                                  name="create-outline"
+                                  size={13}
+                                  color={actionIconColor}
+                                />
+                              </Pressable>
+                              <Pressable
+                                style={[
+                                  styles.sessionChipActionButton,
+                                  !canPinSession && styles.sessionChipActionButtonDisabled,
+                                ]}
+                                accessibilityRole="button"
+                                accessibilityLabel={
+                                  isSessionPinned(session.key)
+                                    ? `Unpin session ${getSessionTitle(session)}`
+                                    : `Pin session ${getSessionTitle(session)}`
+                                }
+                                onPress={() => {
+                                  toggleSessionPinned(session.key);
+                                }}
+                                disabled={!canPinSession}
+                              >
+                                <Ionicons
+                                  name={
+                                    isSessionPinned(session.key)
+                                      ? 'bookmark'
+                                      : 'bookmark-outline'
+                                  }
+                                  size={13}
+                                  color={actionIconColor}
+                                />
+                              </Pressable>
+                            </View>
+                            {isSessionRenameOpen && renameTarget ? (
+                              <View style={[styles.sessionRenameRow, styles.sessionRenameRowInline]}>
+                                <TextInput
+                                  style={[styles.input, styles.sessionRenameInput]}
+                                  maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                                  value={sessionRenameDraft}
+                                  onChangeText={setSessionRenameDraft}
+                                  placeholder="Session name"
+                                  placeholderTextColor={placeholderColor}
+                                  autoCapitalize="none"
+                                  autoCorrect={false}
+                                  returnKeyType="done"
+                                  blurOnSubmit
+                                  onSubmitEditing={() => {
+                                    void submitSessionRename();
+                                  }}
+                                />
+                                <Pressable
+                                  style={[
+                                    styles.sessionRenameActionButton,
+                                    isSessionOperationPending &&
+                                      styles.sessionRenameActionButtonDisabled,
+                                  ]}
+                                  accessibilityRole="button"
+                                  accessibilityLabel="Save session name"
+                                  onPress={() => {
+                                    void submitSessionRename();
+                                  }}
+                                  disabled={isSessionOperationPending}
+                                >
+                                  <View style={styles.sessionButtonContent}>
+                                    <Ionicons
+                                      name="checkmark-outline"
+                                      size={12}
+                                      color={actionIconColor}
+                                    />
+                                    <Text
+                                      style={styles.sessionRenameActionButtonText}
+                                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                                    >
+                                      Save
+                                    </Text>
+                                  </View>
+                                </Pressable>
+                                <Pressable
+                                  style={styles.sessionRenameActionButton}
+                                  accessibilityRole="button"
+                                  accessibilityLabel="Cancel session rename"
+                                  onPress={() => {
+                                    setIsSessionRenameOpen(false);
+                                    setSessionRenameTargetKey(null);
+                                    setSessionRenameDraft('');
+                                  }}
+                                >
+                                  <View style={styles.sessionButtonContent}>
+                                    <Ionicons
+                                      name="close-outline"
+                                      size={12}
+                                      color={actionIconColor}
+                                    />
+                                    <Text
+                                      style={styles.sessionRenameActionButtonText}
+                                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                                    >
+                                      Cancel
+                                    </Text>
+                                  </View>
+                                </Pressable>
+                              </View>
+                            ) : null}
+                          </View>
+                        );
+                      })}
+                    </View>
+                  ) : (
+                    <Text
+                      style={styles.sessionHintText}
+                      maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                    >
+                      Connect to load available sessions.
+                    </Text>
+                  )}
+                  {isGatewayConnected && sessionListHintText ? (
+                    <Text
+                      style={[
+                        styles.sessionHintText,
+                        sessionsError && styles.sessionHintTextWarning,
+                      ]}
+                      maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                    >
+                      {sessionListHintText}
+                    </Text>
+                  ) : null}
                 </View>
+
+              </View>
             </ScrollView>
           </KeyboardAvoidingView>
         </SafeAreaView>
       </Modal>
+        <View style={styles.headerBoundary} pointerEvents="none" />
         <View style={styles.main}>
           {!isTranscriptEditingWithKeyboard ? (
             <View style={[styles.card, styles.historyCard, styles.historyCardFlat]}>
-              <View style={styles.historyHeaderRow}>
-                <Text style={styles.historyTitle} maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}>
-                  History
-                </Text>
-                <Text
-                  style={styles.historySessionText}
-                  numberOfLines={1}
-                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                >
-                  {activeSessionKey}
-                </Text>
-              </View>
-              {isSessionHistoryLoading ? (
+              {historyStatusText ? (
                 <View style={styles.loadingRow}>
                   <ActivityIndicator
                     size="small"
@@ -2517,21 +2426,7 @@ export default function App() {
                     style={styles.loadingText}
                     maxFontSizeMultiplier={MAX_TEXT_SCALE}
                   >
-                    Loading session...
-                  </Text>
-                </View>
-              ) : null}
-              {isSending ? (
-                <View style={styles.loadingRow}>
-                  <ActivityIndicator
-                    size="small"
-                    color={isDarkTheme ? '#9ec0ff' : '#2563EB'}
-                  />
-                  <Text
-                    style={styles.loadingText}
-                    maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                  >
-                    Responding... ({gatewayEventState})
+                    {historyStatusText}
                   </Text>
                 </View>
               ) : null}
@@ -3185,8 +3080,8 @@ function createStyles(isDarkTheme: boolean) {
     },
     settingsScreenHeader: {
       paddingHorizontal: 16,
-      paddingTop: 10,
-      paddingBottom: 8,
+      paddingTop: 8,
+      paddingBottom: 10,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
@@ -3199,21 +3094,21 @@ function createStyles(isDarkTheme: boolean) {
       flexShrink: 1,
     },
     settingsScreenTitle: {
-      fontSize: 18,
+      fontSize: 17,
       fontWeight: '700',
       color: colors.headerTitle,
     },
     settingsStatusChip: {
-      maxWidth: 200,
-      minHeight: 28,
+      maxWidth: 184,
+      minHeight: 30,
       borderRadius: 999,
       borderWidth: 1.5,
       borderColor: colors.inputBorder,
       backgroundColor: colors.inputBg,
-      paddingHorizontal: 8,
+      paddingHorizontal: 9,
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 5,
+      gap: 6,
     },
     settingsStatusChipPending: {
       borderColor: colors.inputBorderFocused,
@@ -3223,7 +3118,7 @@ function createStyles(isDarkTheme: boolean) {
     },
     settingsStatusChipText: {
       flexShrink: 1,
-      fontSize: 11,
+      fontSize: 10,
       color: colors.textSecondary,
       fontWeight: '600',
     },
@@ -3237,14 +3132,14 @@ function createStyles(isDarkTheme: boolean) {
       flex: 1,
     },
     settingsScreenScrollContent: {
-      paddingHorizontal: 16,
+      paddingHorizontal: 12,
       paddingTop: 4,
       paddingBottom: 16,
     },
     gatewayPanel: {
-      borderRadius: 20,
+      borderRadius: 16,
       backgroundColor: colors.panelBg,
-      padding: 14,
+      padding: 12,
       borderWidth: 1.5,
       borderColor: colors.panelBorder,
       ...surfaceShadow,
@@ -3252,9 +3147,15 @@ function createStyles(isDarkTheme: boolean) {
     settingsSection: {
       width: '100%',
     },
+    sectionTitleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 7,
+      marginBottom: 4,
+    },
     settingsSectionSpaced: {
-      marginTop: 16,
-      paddingTop: 14,
+      marginTop: 14,
+      paddingTop: 12,
       borderTopWidth: 1,
       borderTopColor: colors.panelBorder,
     },
@@ -3262,17 +3163,12 @@ function createStyles(isDarkTheme: boolean) {
       fontSize: 14,
       color: colors.textPrimary,
       fontWeight: '700',
-      marginBottom: 2,
-    },
-    settingsSectionDescription: {
-      fontSize: 12,
-      color: colors.label,
-      lineHeight: 17,
-      marginBottom: 8,
+      marginBottom: 0,
     },
     settingsOptionRow: {
       flexDirection: 'row',
-      gap: 8,
+      gap: 6,
+      marginTop: 1,
     },
     settingsOptionButton: {
       flex: 1,
@@ -3280,11 +3176,13 @@ function createStyles(isDarkTheme: boolean) {
       borderColor: colors.inputBorder,
       borderRadius: 10,
       backgroundColor: colors.inputBg,
+      flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
-      minHeight: 40,
-      paddingVertical: 6,
+      minHeight: 38,
+      paddingVertical: 7,
       paddingHorizontal: 10,
+      gap: 6,
     },
     settingsOptionButtonSelected: {
       borderColor: colors.inputBorderFocused,
@@ -3293,7 +3191,7 @@ function createStyles(isDarkTheme: boolean) {
         : 'rgba(37,99,235,0.10)',
     },
     settingsOptionLabel: {
-      fontSize: 13,
+      fontSize: 12,
       fontWeight: '600',
       color: colors.textSecondary,
     },
@@ -3301,28 +3199,22 @@ function createStyles(isDarkTheme: boolean) {
       color: colors.textPrimary,
     },
     label: {
-      fontSize: 12,
+      fontSize: 11,
       color: colors.label,
       marginBottom: 4,
     },
     labelSpacing: {
       marginTop: 8,
     },
-    settingsFieldHint: {
-      marginTop: 6,
-      fontSize: 11,
-      color: colors.label,
-      lineHeight: 15,
-    },
     input: {
       borderWidth: 1.5,
       borderColor: colors.inputBorder,
       borderRadius: 10,
       paddingHorizontal: 12,
-      paddingVertical: 10,
+      paddingVertical: 9,
       color: colors.inputText,
       backgroundColor: colors.inputBg,
-      fontSize: 14,
+      fontSize: 13,
     },
     inputFocused: {
       borderColor: colors.inputBorderFocused,
@@ -3330,6 +3222,7 @@ function createStyles(isDarkTheme: boolean) {
     languagePickerRow: {
       flexDirection: 'row',
       gap: 8,
+      marginTop: 1,
     },
     languageOptionButton: {
       flex: 1,
@@ -3339,10 +3232,10 @@ function createStyles(isDarkTheme: boolean) {
       backgroundColor: colors.inputBg,
       alignItems: 'center',
       justifyContent: 'center',
-      minHeight: 56,
-      paddingVertical: 6,
+      minHeight: 52,
+      paddingVertical: 7,
       paddingHorizontal: 10,
-      gap: 2,
+      gap: 3,
     },
     languageOptionButtonSelected: {
       borderColor: colors.inputBorderFocused,
@@ -3359,119 +3252,15 @@ function createStyles(isDarkTheme: boolean) {
       color: colors.textPrimary,
     },
     languageOptionCode: {
-      fontSize: 11,
+      fontSize: 9,
       color: colors.label,
     },
     languageOptionCodeSelected: {
       color: colors.inputBorderFocused,
       fontWeight: '600',
     },
-    quickSessionBar: {
-      borderRadius: 14,
-      borderWidth: 1.5,
-      borderColor: colors.panelBorder,
-      backgroundColor: colors.panelBg,
-      paddingHorizontal: 8,
-      paddingTop: 7,
-      paddingBottom: 8,
-      ...surfaceShadow,
-    },
-    quickSessionHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingHorizontal: 4,
-      gap: 8,
-    },
-    quickSessionLabel: {
-      fontSize: 11,
-      color: colors.label,
-      fontWeight: '600',
-    },
-    quickSessionActiveKey: {
-      flexShrink: 1,
-      fontSize: 11,
-      color: colors.textSecondary,
-    },
-    quickSessionListRow: {
-      marginTop: 8,
-      gap: 6,
-      paddingRight: 2,
-    },
-    quickSessionChip: {
-      minHeight: 30,
-      borderRadius: 999,
-      borderWidth: 1.5,
-      borderColor: colors.inputBorder,
-      backgroundColor: colors.inputBg,
-      justifyContent: 'center',
-      paddingHorizontal: 10,
-      maxWidth: 180,
-    },
-    quickSessionChipActive: {
-      borderColor: colors.inputBorderFocused,
-      backgroundColor: isDarkTheme
-        ? 'rgba(37,99,235,0.24)'
-        : 'rgba(37,99,235,0.10)',
-    },
-    quickSessionChipDisabled: {
-      opacity: 0.6,
-    },
-    quickSessionChipText: {
-      fontSize: 12,
-      color: colors.textSecondary,
-      fontWeight: '600',
-    },
-    quickSessionChipTextActive: {
-      color: colors.textPrimary,
-    },
-    quickSessionActionChip: {
-      minHeight: 30,
-      borderRadius: 999,
-      borderWidth: 1.5,
-      borderColor: colors.inputBorder,
-      backgroundColor: colors.inputBg,
-      paddingHorizontal: 10,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 4,
-    },
-    quickSessionActionChipText: {
-      fontSize: 11,
-      color: colors.textSecondary,
-      fontWeight: '600',
-    },
-    quickSessionErrorText: {
-      marginTop: 6,
-      paddingHorizontal: 4,
-      fontSize: 11,
-      color: colors.errorText,
-      lineHeight: 15,
-    },
-    sessionHeaderRow: {
-      marginTop: 2,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-    },
-    sessionKeyPill: {
-      flex: 1,
-      minHeight: 38,
-      borderRadius: 10,
-      borderWidth: 1.5,
-      borderColor: colors.inputBorder,
-      backgroundColor: colors.inputBg,
-      justifyContent: 'center',
-      paddingHorizontal: 10,
-    },
-    sessionKeyText: {
-      fontSize: 12,
-      color: colors.textPrimary,
-      fontWeight: '600',
-    },
     sessionActionButton: {
-      minHeight: 38,
+      minHeight: 36,
       borderRadius: 10,
       borderWidth: 1.5,
       borderColor: colors.inputBorder,
@@ -3488,50 +3277,59 @@ function createStyles(isDarkTheme: boolean) {
       color: colors.textSecondary,
       fontWeight: '600',
     },
-    sessionManageRow: {
+    sessionButtonContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    sessionActionRow: {
       marginTop: 8,
       flexDirection: 'row',
-      gap: 8,
+      gap: 6,
     },
-    sessionManageButton: {
-      minHeight: 32,
-      borderRadius: 9,
+    sessionActionButtonWide: {
+      flex: 1,
+    },
+    sessionChipPrimary: {
+      gap: 4,
+    },
+    sessionChipActionRow: {
+      marginTop: 4,
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      gap: 6,
+    },
+    sessionChipActionButton: {
+      width: 30,
+      height: 30,
+      borderRadius: 8,
       borderWidth: 1.5,
       borderColor: colors.inputBorder,
       backgroundColor: colors.inputBg,
-      paddingHorizontal: 10,
       alignItems: 'center',
       justifyContent: 'center',
     },
-    sessionManageButtonDanger: {
-      borderColor: isDarkTheme ? 'rgba(220,38,38,0.44)' : 'rgba(220,38,38,0.24)',
-    },
-    sessionManageButtonDisabled: {
+    sessionChipActionButtonDisabled: {
       opacity: 0.55,
-    },
-    sessionManageButtonText: {
-      fontSize: 11,
-      color: colors.textSecondary,
-      fontWeight: '600',
-    },
-    sessionManageButtonDangerText: {
-      color: colors.errorText,
     },
     sessionRenameRow: {
       marginTop: 8,
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 8,
+      gap: 6,
+    },
+    sessionRenameRowInline: {
+      marginTop: 6,
     },
     sessionRenameInput: {
       flex: 1,
-      minHeight: 40,
-      paddingVertical: 8,
+      minHeight: 38,
+      paddingVertical: 7,
       fontSize: 13,
     },
     sessionRenameActionButton: {
-      minHeight: 34,
-      borderRadius: 9,
+      minHeight: 32,
+      borderRadius: 8,
       borderWidth: 1.5,
       borderColor: colors.inputBorder,
       backgroundColor: colors.inputBg,
@@ -3547,34 +3345,29 @@ function createStyles(isDarkTheme: boolean) {
       color: colors.textSecondary,
       fontWeight: '600',
     },
-    sessionErrorText: {
-      marginTop: 6,
-      fontSize: 12,
-      color: colors.errorText,
-      lineHeight: 16,
-    },
     sessionHintText: {
       marginTop: 6,
-      fontSize: 12,
+      fontSize: 10,
       color: colors.label,
-      lineHeight: 16,
+      lineHeight: 14,
     },
-    sessionListRow: {
+    sessionHintTextWarning: {
+      color: colors.errorText,
+    },
+    sessionListColumn: {
       marginTop: 8,
       paddingVertical: 2,
       gap: 8,
-      paddingRight: 4,
     },
     sessionChip: {
-      minWidth: 128,
-      maxWidth: 180,
-      borderRadius: 10,
+      width: '100%',
+      borderRadius: 12,
       borderWidth: 1.5,
       borderColor: colors.inputBorder,
       backgroundColor: colors.inputBg,
-      paddingHorizontal: 10,
+      paddingHorizontal: 11,
       paddingVertical: 8,
-      gap: 2,
+      gap: 6,
     },
     sessionChipActive: {
       borderColor: colors.inputBorderFocused,
@@ -3589,29 +3382,62 @@ function createStyles(isDarkTheme: boolean) {
       fontSize: 12,
       color: colors.textPrimary,
       fontWeight: '600',
+      flexShrink: 1,
     },
     sessionChipTitleActive: {
       color: colors.textPrimary,
     },
+    sessionChipTopRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    sessionChipBadgeRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    sessionChipBadge: {
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.inputBorder,
+      backgroundColor: colors.inputBg,
+      minWidth: 18,
+      minHeight: 18,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 2,
+      paddingVertical: 2,
+    },
+    sessionChipBadgeCurrent: {
+      borderColor: colors.inputBorderFocused,
+      backgroundColor: isDarkTheme
+        ? 'rgba(37,99,235,0.24)'
+        : 'rgba(37,99,235,0.12)',
+    },
+    sessionChipBadgePinned: {
+      borderColor: isDarkTheme ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.12)',
+    },
     sessionChipMeta: {
       fontSize: 10,
       color: colors.label,
+      lineHeight: 14,
     },
     sessionChipMetaActive: {
       color: colors.inputBorderFocused,
     },
     connectionRow: {
-      marginTop: 10,
+      marginTop: 8,
       flexDirection: 'row',
       gap: 8,
       alignItems: 'stretch',
       width: '100%',
     },
     smallButton: {
-      borderRadius: 10,
-      minHeight: 44,
-      paddingHorizontal: 14,
-      paddingVertical: 9,
+      borderRadius: 9,
+      minHeight: 40,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
       alignItems: 'center',
       justifyContent: 'center',
       flex: 1,
@@ -3624,10 +3450,19 @@ function createStyles(isDarkTheme: boolean) {
     smallButtonText: {
       color: '#fff',
       fontWeight: '700',
-      fontSize: 13,
+      fontSize: 12,
     },
     smallButtonDisabled: {
       backgroundColor: colors.smallBtnDisabled,
+    },
+    headerBoundary: {
+      height: 1,
+      backgroundColor: isDarkTheme
+        ? 'rgba(143,167,210,0.26)'
+        : 'rgba(108,122,148,0.26)',
+      marginTop: 2,
+      marginBottom: 5,
+      opacity: 0.9,
     },
     main: {
       flex: 1,
@@ -3659,39 +3494,20 @@ function createStyles(isDarkTheme: boolean) {
       shadowRadius: 0,
       elevation: 0,
     },
-    historyTitle: {
-      fontSize: 11,
-      fontWeight: '600',
-      color: colors.historyDateText,
-      textTransform: 'uppercase',
-      letterSpacing: 0.8,
-      paddingHorizontal: 2,
-    },
-    historyHeaderRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: 8,
-    },
-    historySessionText: {
-      fontSize: 10,
-      color: colors.historyDateText,
-      maxWidth: '60%',
-    },
     transcriptCardExpanded: {
       flex: 1,
       minHeight: 0,
     },
     transcriptEditor: {
-      minHeight: 120,
-      gap: 8,
+      minHeight: 96,
+      gap: 6,
     },
     transcriptEditorExpanded: {
       flex: 1,
       minHeight: 0,
     },
     transcriptInput: {
-      minHeight: 100,
+      minHeight: 80,
       borderRadius: 0,
       borderWidth: 0,
       borderColor: 'transparent',

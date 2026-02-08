@@ -115,6 +115,11 @@ export interface SessionPatchInput {
   [key: string]: unknown;
 }
 
+export interface SessionDeleteTarget {
+  key: string;
+  sessionId?: string;
+}
+
 // ─── Gateway Error ──────────────────────────────────────────────────────────────
 
 export class GatewayError extends Error {
@@ -500,13 +505,32 @@ export class GatewayClient {
    * Delete a session by key.
    * Uses a few payload shapes for compatibility with gateway variants.
    */
-  async sessionsDelete(sessionKey: string): Promise<void> {
+  async sessionsDelete(target: string | SessionDeleteTarget): Promise<void> {
+    const sessionKey =
+      typeof target === "string" ? target.trim() : target.key.trim();
+    const sessionId =
+      typeof target === "string" ? "" : (target.sessionId ?? "").trim();
+    if (!sessionKey) {
+      throw new Error("sessions.delete requires a non-empty session key");
+    }
+
     const payloads: Array<Record<string, unknown>> = [
       { sessionKey },
       { key: sessionKey },
       { sessionKeys: [sessionKey] },
       { keys: [sessionKey] },
     ];
+    if (sessionId) {
+      payloads.unshift(
+        { sessionKey, sessionId },
+        { key: sessionKey, sessionId },
+        { key: sessionKey, id: sessionId },
+        { sessionId },
+        { id: sessionId },
+        { sessionIds: [sessionId] },
+        { ids: [sessionId] },
+      );
+    }
 
     let lastError: unknown;
     for (const payload of payloads) {
@@ -524,6 +548,54 @@ export class GatewayClient {
     throw lastError instanceof Error
       ? lastError
       : new Error("sessions.delete failed");
+  }
+
+  /**
+   * Reset a session by key.
+   * Some gateway builds expose reset semantics where delete is unavailable.
+   */
+  async sessionsReset(target: string | SessionDeleteTarget): Promise<void> {
+    const sessionKey =
+      typeof target === "string" ? target.trim() : target.key.trim();
+    const sessionId =
+      typeof target === "string" ? "" : (target.sessionId ?? "").trim();
+    if (!sessionKey) {
+      throw new Error("sessions.reset requires a non-empty session key");
+    }
+
+    const payloads: Array<Record<string, unknown>> = [
+      { sessionKey },
+      { key: sessionKey },
+      { sessionKeys: [sessionKey] },
+      { keys: [sessionKey] },
+    ];
+    if (sessionId) {
+      payloads.unshift(
+        { sessionKey, sessionId },
+        { key: sessionKey, sessionId },
+        { sessionId },
+        { id: sessionId },
+        { sessionIds: [sessionId] },
+        { ids: [sessionId] },
+      );
+    }
+
+    let lastError: unknown;
+    for (const payload of payloads) {
+      try {
+        await this.request(GatewayMethods.SESSIONS_RESET, payload, 10_000);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (!(error instanceof GatewayError) || error.code !== "INVALID_REQUEST") {
+          throw error;
+        }
+      }
+    }
+
+    throw lastError instanceof Error
+      ? lastError
+      : new Error("sessions.reset failed");
   }
 
   /**
