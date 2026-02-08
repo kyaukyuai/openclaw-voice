@@ -247,53 +247,63 @@ function isSpeechAbortLikeError(code: string): boolean {
   );
 }
 
-function toTextContent(message?: ChatMessage): string {
+type TextContentOptions = {
+  trim?: boolean;
+  dedupe?: boolean;
+};
+
+function toTextContent(message?: ChatMessage, options?: TextContentOptions): string {
   if (!message) return '';
+  const trim = options?.trim ?? true;
+  const dedupe = options?.dedupe ?? true;
 
   const { content } = message;
-  if (typeof content === 'string') return content.trim();
+  if (typeof content === 'string') return trim ? content.trim() : content;
   if (!Array.isArray(content)) return '';
 
   const lines = content
     .map((block) => {
       const pieces: string[] = [];
-      collectText(pieceOrUndefined(block?.text), pieces);
-      collectText(pieceOrUndefined(block?.thinking), pieces);
-      collectText(pieceOrUndefined(block?.content), pieces);
-      return dedupeLines(pieces).join('\n').trim();
+      collectText(pieceOrUndefined(block?.text), pieces, 0, trim);
+      collectText(pieceOrUndefined(block?.thinking), pieces, 0, trim);
+      collectText(pieceOrUndefined(block?.content), pieces, 0, trim);
+      const normalized = dedupe ? dedupeLines(pieces) : pieces;
+      const joined = normalized.join('\n');
+      return trim ? joined.trim() : joined;
     })
     .filter(Boolean);
 
-  return lines.join('\n');
+  const joined = lines.join('\n');
+  return trim ? joined.trim() : joined;
 }
 
 function pieceOrUndefined(value: unknown): unknown {
   return value === null ? undefined : value;
 }
 
-function collectText(value: unknown, out: string[], depth = 0): void {
+function collectText(value: unknown, out: string[], depth = 0, trim = true): void {
   if (value == null || depth > 6) return;
 
   if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (trimmed) out.push(trimmed);
+    const text = trim ? value.trim() : value;
+    if (text) out.push(text);
     return;
   }
 
   if (Array.isArray(value)) {
-    value.forEach((entry) => collectText(entry, out, depth + 1));
+    value.forEach((entry) => collectText(entry, out, depth + 1, trim));
     return;
   }
 
   if (typeof value !== 'object') return;
 
   const record = value as Record<string, unknown>;
-  collectText(record.text, out, depth + 1);
-  collectText(record.thinking, out, depth + 1);
-  collectText(record.content, out, depth + 1);
-  collectText(record.value, out, depth + 1);
-  collectText(record.message, out, depth + 1);
-  collectText(record.output, out, depth + 1);
+  collectText(record.text, out, depth + 1, trim);
+  collectText(record.thinking, out, depth + 1, trim);
+  collectText(record.content, out, depth + 1, trim);
+  collectText(record.value, out, depth + 1, trim);
+  collectText(record.message, out, depth + 1, trim);
+  collectText(record.output, out, depth + 1, trim);
 }
 
 function dedupeLines(lines: string[]): string[] {
@@ -360,6 +370,34 @@ function textFromUnknown(value: unknown): string {
   return dedupeLines(pieces).join('\n').trim();
 }
 
+function normalizeChatEventState(state: string | undefined): string {
+  const normalized = (state ?? 'unknown').trim().toLowerCase();
+  if (normalized === 'done' || normalized === 'final') return 'complete';
+  return normalized || 'unknown';
+}
+
+function getTextOverlapSize(base: string, incoming: string): number {
+  const max = Math.min(base.length, incoming.length);
+  for (let size = max; size > 0; size -= 1) {
+    if (base.slice(-size) === incoming.slice(0, size)) return size;
+  }
+  return 0;
+}
+
+function mergeAssistantStreamText(previousRaw: string, incomingRaw: string): string {
+  const previous = previousRaw === 'Responding...' ? '' : previousRaw;
+  const incoming = incomingRaw;
+
+  if (!incoming) return previous || 'Responding...';
+  if (!previous) return incoming;
+  if (incoming === previous) return previous;
+  if (incoming.startsWith(previous)) return incoming;
+  if (previous.startsWith(incoming)) return previous;
+
+  const overlap = getTextOverlapSize(previous, incoming);
+  return `${previous}${incoming.slice(overlap)}`;
+}
+
 function buildTurnsFromHistory(
   messages: unknown[] | undefined,
   sessionKey: string,
@@ -368,6 +406,10 @@ function buildTurnsFromHistory(
 
   const turns: ChatTurn[] = [];
   let pendingTurn: ChatTurn | null = null;
+  const finalizePendingTurn = () => {
+    if (pendingTurn) turns.push(pendingTurn);
+    pendingTurn = null;
+  };
 
   messages.forEach((entry, index) => {
     if (typeof entry !== 'object' || entry === null) return;
@@ -384,9 +426,7 @@ function buildTurnsFromHistory(
     );
 
     if (role === 'user') {
-      if (pendingTurn) {
-        turns.push(pendingTurn);
-      }
+      finalizePendingTurn();
       pendingTurn = {
         id: `hist-${sessionKey}-${index}`,
         userText: text || '(empty)',
@@ -409,17 +449,21 @@ function buildTurnsFromHistory(
           : record.errorMessage || record.error
             ? 'error'
             : 'complete';
+    const normalizedStatus = normalizeChatEventState(status);
+    const nextState = isTurnErrorState(normalizedStatus)
+      ? 'error'
+      : isTurnWaitingState(normalizedStatus)
+        ? normalizedStatus
+        : 'complete';
 
     pendingTurn = {
       ...pendingTurn,
       assistantText: text || pendingTurn.assistantText,
-      state: isTurnErrorState(status) ? 'error' : 'complete',
+      state: nextState,
     };
-    turns.push(pendingTurn);
-    pendingTurn = null;
   });
 
-  if (pendingTurn) turns.push(pendingTurn);
+  finalizePendingTurn();
   return turns;
 }
 
@@ -569,6 +613,7 @@ export default function App() {
   const historyScrollRef = useRef<ScrollView | null>(null);
   const settingsScrollRef = useRef<ScrollView | null>(null);
   const historyAutoScrollRef = useRef(true);
+  const historySyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const holdStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const settingsFocusScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const quickTextTooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1161,14 +1206,21 @@ export default function App() {
   );
 
   const handleChatEvent = (payload: ChatEventPayload) => {
-    if (payload.sessionKey !== activeSessionKeyRef.current) return;
-
-    const text = toTextContent(payload.message);
-    const state = payload.state ?? 'unknown';
+    const activeSessionKey = activeSessionKeyRef.current;
+    const hasMatchingSession = payload.sessionKey === activeSessionKey;
+    const text = toTextContent(payload.message, { trim: false, dedupe: false });
+    const state = normalizeChatEventState(payload.state);
     setGatewayEventState(state);
     let turnId = runIdToTurnIdRef.current.get(payload.runId);
+    const canBindPendingTurn =
+      Boolean(pendingTurnIdRef.current) &&
+      (hasMatchingSession || payload.runId === activeRunIdRef.current);
 
-    if (!turnId && pendingTurnIdRef.current) {
+    if (!hasMatchingSession && !turnId && !canBindPendingTurn) {
+      return;
+    }
+
+    if (!turnId && pendingTurnIdRef.current && canBindPendingTurn) {
       turnId = pendingTurnIdRef.current;
       pendingTurnIdRef.current = null;
       runIdToTurnIdRef.current.set(payload.runId, turnId);
@@ -1178,7 +1230,25 @@ export default function App() {
       }));
     }
 
-    if (!turnId) return;
+    if (!turnId) {
+      if (
+        text ||
+        state === 'complete' ||
+        state === 'error' ||
+        state === 'aborted'
+      ) {
+        if (
+          state === 'complete' ||
+          state === 'error' ||
+          state === 'aborted'
+        ) {
+          setIsSending(false);
+          activeRunIdRef.current = null;
+        }
+        scheduleActiveHistorySync();
+      }
+      return;
+    }
 
     if (state === 'delta' || state === 'streaming') {
       activeRunIdRef.current = payload.runId;
@@ -1187,12 +1257,12 @@ export default function App() {
         ...turn,
         runId: payload.runId,
         state,
-        assistantText: text || turn.assistantText || 'Responding...',
+        assistantText: mergeAssistantStreamText(turn.assistantText, text),
       }));
       return;
     }
 
-    if (state === 'complete' || state === 'done' || state === 'final') {
+    if (state === 'complete') {
       setIsSending(false);
       activeRunIdRef.current = null;
       runIdToTurnIdRef.current.delete(payload.runId);
@@ -1206,6 +1276,7 @@ export default function App() {
         state: 'complete',
         assistantText: text || turn.assistantText || fallbackText,
       }));
+      scheduleActiveHistorySync();
       void refreshSessions();
       return;
     }
@@ -1248,7 +1319,7 @@ export default function App() {
         ...turn,
         runId: payload.runId,
         state,
-        assistantText: text,
+        assistantText: mergeAssistantStreamText(turn.assistantText, text),
       }));
     }
   };
@@ -1329,6 +1400,10 @@ export default function App() {
       if (holdStartTimerRef.current) {
         clearTimeout(holdStartTimerRef.current);
         holdStartTimerRef.current = null;
+      }
+      if (historySyncTimerRef.current) {
+        clearTimeout(historySyncTimerRef.current);
+        historySyncTimerRef.current = null;
       }
       if (settingsFocusScrollTimerRef.current) {
         clearTimeout(settingsFocusScrollTimerRef.current);
@@ -1471,6 +1546,16 @@ export default function App() {
       settingsScrollRef.current?.scrollToEnd({ animated: true });
     }, Platform.OS === 'ios' ? 240 : 120);
   }, []);
+
+  const scheduleActiveHistorySync = useCallback(() => {
+    if (historySyncTimerRef.current) return;
+    historySyncTimerRef.current = setTimeout(() => {
+      historySyncTimerRef.current = null;
+      const sessionKey = activeSessionKeyRef.current;
+      void loadSessionHistory(sessionKey);
+      void refreshSessions();
+    }, 280);
+  }, [loadSessionHistory, refreshSessions]);
 
   const formatTurnTime = (createdAt: number): string =>
     new Date(createdAt).toLocaleTimeString('ja-JP', {
@@ -1638,6 +1723,15 @@ export default function App() {
     setFocusedField(null);
     void sendToGateway(latestRetryText);
   };
+
+  const handleRefreshHistory = useCallback(() => {
+    if (!isGatewayConnected || isSessionHistoryLoading) return;
+    Keyboard.dismiss();
+    setFocusedField(null);
+    const sessionKey = activeSessionKeyRef.current;
+    void loadSessionHistory(sessionKey);
+    void refreshSessions();
+  }, [isGatewayConnected, isSessionHistoryLoading, loadSessionHistory, refreshSessions]);
 
   const handleHoldToTalkPressIn = () => {
     if (isRecognizing || isSending) return;
@@ -2696,6 +2790,25 @@ export default function App() {
         <View style={styles.main}>
           {!isTranscriptEditingWithKeyboard ? (
             <View style={[styles.card, styles.historyCard, styles.historyCardFlat]}>
+              <Pressable
+                style={[
+                  styles.iconButton,
+                  styles.historyRefreshButtonFloating,
+                  (!isGatewayConnected || isSessionHistoryLoading) &&
+                    styles.iconButtonDisabled,
+                ]}
+                hitSlop={7}
+                accessibilityRole="button"
+                accessibilityLabel="Refresh current session history"
+                onPress={handleRefreshHistory}
+                disabled={!isGatewayConnected || isSessionHistoryLoading}
+              >
+                <Ionicons
+                  name="refresh-outline"
+                  size={15}
+                  color={isDarkTheme ? '#bccae2' : '#707070'}
+                />
+              </Pressable>
               {historyStatusText ? (
                 <View style={styles.loadingRow}>
                   <ActivityIndicator
@@ -3237,7 +3350,7 @@ function createStyles(isDarkTheme: boolean) {
         recordingRound: '#DC2626',
         sendRound: '#059669',
         roundDisabled: '#243a63',
-        quickActionBg: '#047857',
+        quickActionBg: '#059669',
         quickActionBorder: 'transparent',
         quickActionText: '#ffffff',
         quickTooltipBg: '#1a2f5a',
@@ -3308,7 +3421,7 @@ function createStyles(isDarkTheme: boolean) {
         recordingRound: '#DC2626',
         sendRound: '#059669',
         roundDisabled: '#C4C4C0',
-        quickActionBg: '#047857',
+        quickActionBg: '#059669',
         quickActionBorder: 'transparent',
         quickActionText: '#ffffff',
         quickTooltipBg: '#ffffff',
@@ -3941,11 +4054,22 @@ function createStyles(isDarkTheme: boolean) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
-      marginBottom: 10,
+      minHeight: 24,
+      marginBottom: 4,
+      paddingRight: 36,
     },
     loadingText: {
       fontSize: 12,
       color: colors.loading,
+    },
+    historyRefreshButtonFloating: {
+      width: 26,
+      height: 26,
+      borderRadius: 9,
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      zIndex: 2,
     },
     chatList: {
       paddingBottom: 10,
