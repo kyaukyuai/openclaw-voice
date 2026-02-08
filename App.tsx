@@ -1733,6 +1733,11 @@ export default function App() {
   const canReconnectFromError = settingsReady && !isGatewayConnecting;
   const canRetryFromError =
     Boolean(latestRetryText) && !isSending && isGatewayConnected;
+  const errorBannerMessage = gatewayError ?? speechError;
+  const isGatewayErrorBanner = Boolean(gatewayError);
+  const errorBannerIconName = isGatewayErrorBanner
+    ? 'cloud-offline-outline'
+    : 'mic-off-outline';
 
   const handleReconnectFromError = () => {
     if (!canReconnectFromError) return;
@@ -3082,72 +3087,63 @@ export default function App() {
           </View>
         </View>
 
-        {speechError || gatewayError ? (
-          <View style={styles.errorStack}>
-            {speechError ? (
-              <View
-                style={styles.errorBox}
-                accessibilityRole="alert"
-                accessibilityLiveRegion="polite"
-              >
-                <Text style={styles.errorText} maxFontSizeMultiplier={MAX_TEXT_SCALE}>
-                  {speechError}
-                </Text>
-              </View>
-            ) : null}
-            {gatewayError ? (
-              <View
-                style={styles.errorBox}
-                accessibilityRole="alert"
-                accessibilityLiveRegion="polite"
-              >
-                <Text style={styles.errorText} maxFontSizeMultiplier={MAX_TEXT_SCALE}>
-                  {gatewayError}
-                </Text>
-                <View style={styles.errorActionRow}>
-                  <Pressable
-                    style={[
-                      styles.errorActionButton,
-                      styles.errorActionButtonSecondary,
-                      !canReconnectFromError && styles.errorActionButtonDisabled,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel="Reconnect to Gateway"
-                    onPress={handleReconnectFromError}
-                    disabled={!canReconnectFromError}
-                  >
-                    <Text
-                      style={[
-                        styles.errorActionButtonText,
-                        styles.errorActionButtonTextSecondary,
-                      ]}
-                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                    >
-                      Reconnect
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    style={[
-                      styles.errorActionButton,
-                      styles.errorActionButtonPrimary,
-                      !canRetryFromError && styles.errorActionButtonDisabled,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel="Retry sending the latest message"
-                    onPress={handleRetryFromError}
-                    disabled={!canRetryFromError}
-                  >
-                    <Text
-                      style={[
-                        styles.errorActionButtonText,
-                        styles.errorActionButtonTextPrimary,
-                      ]}
-                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                    >
-                      Retry Send
-                    </Text>
-                  </Pressable>
-                </View>
+        {errorBannerMessage ? (
+          <View
+            style={[
+              styles.errorBanner,
+              isGatewayErrorBanner
+                ? styles.errorBannerGateway
+                : styles.errorBannerSpeech,
+            ]}
+            accessibilityRole="alert"
+            accessibilityLiveRegion="polite"
+          >
+            <Ionicons
+              name={errorBannerIconName}
+              size={14}
+              style={styles.errorBannerIcon}
+            />
+            <Text
+              style={styles.errorBannerText}
+              maxFontSizeMultiplier={MAX_TEXT_SCALE}
+              numberOfLines={2}
+            >
+              {errorBannerMessage}
+            </Text>
+            {isGatewayErrorBanner ? (
+              <View style={styles.errorBannerActionRow}>
+                <Pressable
+                  style={[
+                    styles.errorBannerActionButton,
+                    !canReconnectFromError && styles.errorBannerActionButtonDisabled,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Reconnect to Gateway"
+                  onPress={handleReconnectFromError}
+                  disabled={!canReconnectFromError}
+                >
+                  <Ionicons
+                    name="refresh-outline"
+                    size={15}
+                    style={styles.errorBannerActionIcon}
+                  />
+                </Pressable>
+                <Pressable
+                  style={[
+                    styles.errorBannerActionButton,
+                    !canRetryFromError && styles.errorBannerActionButtonDisabled,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Retry sending the latest message"
+                  onPress={handleRetryFromError}
+                  disabled={!canRetryFromError}
+                >
+                  <Ionicons
+                    name="arrow-redo-outline"
+                    size={15}
+                    style={styles.errorBannerActionIcon}
+                  />
+                </Pressable>
               </View>
             ) : null}
           </View>
@@ -3542,14 +3538,6 @@ function createStyles(isDarkTheme: boolean) {
     shadowOpacity: 0.05,
     shadowRadius: 3,
     elevation: 2,
-  } as const;
-
-  const surfaceShadowMd = {
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 4,
   } as const;
 
   const fabShadow = {
@@ -4307,56 +4295,56 @@ function createStyles(isDarkTheme: boolean) {
       borderWidth: 1.5,
       borderColor: colors.turnAssistantErrorBorder,
     },
-    errorStack: {
-      gap: 8,
-    },
-    errorBox: {
-      borderRadius: 14,
-      padding: 10,
-      backgroundColor: colors.errorBg,
-      borderWidth: 1.5,
-      borderColor: colors.errorBorder,
-      ...surfaceShadowMd,
-    },
-    errorText: {
-      color: colors.errorText,
-      fontSize: 13,
-      lineHeight: 18,
-    },
-    errorActionRow: {
-      marginTop: 10,
-      flexDirection: 'row',
-      gap: 8,
-    },
-    errorActionButton: {
-      flex: 1,
-      minHeight: 44,
+    errorBanner: {
+      width: '100%',
+      minHeight: 36,
       borderRadius: 12,
-      borderWidth: 1.5,
-      alignItems: 'center',
-      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: colors.errorBorder,
+      backgroundColor: colors.errorBg,
       paddingHorizontal: 10,
-      paddingVertical: 8,
+      paddingVertical: 7,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      ...surfaceShadow,
     },
-    errorActionButtonPrimary: {
-      backgroundColor: colors.errorActionPrimaryBg,
-      borderColor: 'transparent',
+    errorBannerGateway: {
+      borderColor: colors.errorBorder,
+      backgroundColor: colors.errorBg,
     },
-    errorActionButtonSecondary: {
+    errorBannerSpeech: {
+      borderColor: isDarkTheme ? 'rgba(217,119,6,0.46)' : 'rgba(217,119,6,0.28)',
+      backgroundColor: isDarkTheme ? 'rgba(217,119,6,0.16)' : 'rgba(217,119,6,0.08)',
+    },
+    errorBannerIcon: {
+      color: colors.errorText,
+    },
+    errorBannerText: {
+      flex: 1,
+      color: colors.errorText,
+      fontSize: 12,
+      lineHeight: 16,
+    },
+    errorBannerActionRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    errorBannerActionButton: {
+      width: 28,
+      height: 28,
+      borderRadius: 9,
+      borderWidth: 1.5,
       backgroundColor: colors.errorActionSecondaryBg,
       borderColor: colors.errorActionSecondaryBorder,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
-    errorActionButtonDisabled: {
-      opacity: 0.56,
+    errorBannerActionButtonDisabled: {
+      opacity: 0.55,
     },
-    errorActionButtonText: {
-      fontSize: 13,
-      fontWeight: '700',
-    },
-    errorActionButtonTextPrimary: {
-      color: colors.errorActionPrimaryText,
-    },
-    errorActionButtonTextSecondary: {
+    errorBannerActionIcon: {
       color: colors.errorActionSecondaryText,
     },
     bottomDock: {
