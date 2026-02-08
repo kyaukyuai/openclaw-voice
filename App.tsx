@@ -1,13 +1,14 @@
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import Markdown from 'react-native-markdown-display';
+import Markdown, { MarkdownIt } from 'react-native-markdown-display';
 import {
   ActivityIndicator,
   Animated,
   Image,
   Keyboard,
   KeyboardAvoidingView,
+  Linking,
   LogBox,
   Modal,
   NativeScrollEvent,
@@ -1771,6 +1772,7 @@ export default function App() {
   );
 
   const styles = useMemo(() => createStyles(isDarkTheme), [isDarkTheme]);
+  const markdownParser = useMemo(() => new MarkdownIt({ linkify: true }), []);
   const placeholderColor = isDarkTheme ? '#95a8ca' : '#C4C4C0';
   const markdownStyles = useMemo(
     () => ({
@@ -2957,7 +2959,12 @@ export default function App() {
                             ]}
                           >
                             <Markdown
+                              markdownit={markdownParser}
                               style={error ? markdownErrorStyles : markdownStyles}
+                              onLinkPress={(url) => {
+                                void Linking.openURL(url).catch(() => {});
+                                return false;
+                              }}
                             >
                               {assistantText}
                             </Markdown>
