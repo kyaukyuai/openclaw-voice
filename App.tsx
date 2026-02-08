@@ -446,6 +446,13 @@ function formatSessionUpdatedAt(updatedAt?: number): string {
   });
 }
 
+function formatClockLabel(timestamp: number): string {
+  return new Date(timestamp).toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 function parseSessionPreferences(raw: string | null): SessionPreferences {
   if (!raw) return {};
   try {
@@ -498,6 +505,9 @@ export default function App() {
   const [isSessionOperationPending, setIsSessionOperationPending] = useState(false);
   const [isSessionRenameOpen, setIsSessionRenameOpen] = useState(false);
   const [sessionRenameDraft, setSessionRenameDraft] = useState('');
+  const [settingsSavePendingCount, setSettingsSavePendingCount] = useState(0);
+  const [settingsSaveError, setSettingsSaveError] = useState<string | null>(null);
+  const [settingsSavedAt, setSettingsSavedAt] = useState<number | null>(null);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [theme, setTheme] = useState<AppTheme>(DEFAULT_THEME);
   const [focusedField, setFocusedField] = useState<FocusField>(null);
@@ -531,6 +541,21 @@ export default function App() {
     connectionState === 'connecting' || connectionState === 'reconnecting';
   const shouldShowSettingsScreen = !isGatewayConnected || isSettingsPanelOpen;
   const isDarkTheme = theme === 'dark';
+
+  const persistSetting = useCallback((task: () => Promise<void>) => {
+    setSettingsSavePendingCount((current) => current + 1);
+    setSettingsSaveError(null);
+    void task()
+      .then(() => {
+        setSettingsSavedAt(Date.now());
+      })
+      .catch(() => {
+        setSettingsSaveError('Local save failed');
+      })
+      .finally(() => {
+        setSettingsSavePendingCount((current) => Math.max(0, current - 1));
+      });
+  }, []);
 
   useEffect(() => {
     transcriptRef.current = transcript;
@@ -613,109 +638,67 @@ export default function App() {
   useEffect(() => {
     if (!settingsReady) return;
     const value = gatewayUrl.trim();
-
-    const persist = async () => {
-      try {
-        if (value) {
-          await kvStore.setItemAsync(STORAGE_KEYS.gatewayUrl, value);
-        } else {
-          await kvStore.deleteItemAsync(STORAGE_KEYS.gatewayUrl);
-        }
-      } catch {
-        // ignore persistence errors
+    persistSetting(async () => {
+      if (value) {
+        await kvStore.setItemAsync(STORAGE_KEYS.gatewayUrl, value);
+      } else {
+        await kvStore.deleteItemAsync(STORAGE_KEYS.gatewayUrl);
       }
-    };
-
-    void persist();
-  }, [gatewayUrl, settingsReady]);
+    });
+  }, [gatewayUrl, persistSetting, settingsReady]);
 
   useEffect(() => {
     if (!settingsReady) return;
     const value = authToken.trim();
-
-    const persist = async () => {
-      try {
-        if (value) {
-          await kvStore.setItemAsync(STORAGE_KEYS.authToken, value);
-        } else {
-          await kvStore.deleteItemAsync(STORAGE_KEYS.authToken);
-        }
-      } catch {
-        // ignore persistence errors
+    persistSetting(async () => {
+      if (value) {
+        await kvStore.setItemAsync(STORAGE_KEYS.authToken, value);
+      } else {
+        await kvStore.deleteItemAsync(STORAGE_KEYS.authToken);
       }
-    };
-
-    void persist();
-  }, [authToken, settingsReady]);
+    });
+  }, [authToken, persistSetting, settingsReady]);
 
   useEffect(() => {
     if (!settingsReady) return;
-
-    const persist = async () => {
-      try {
-        await kvStore.setItemAsync(STORAGE_KEYS.theme, theme);
-      } catch {
-        // ignore persistence errors
-      }
-    };
-
-    void persist();
-  }, [theme, settingsReady]);
+    persistSetting(async () => {
+      await kvStore.setItemAsync(STORAGE_KEYS.theme, theme);
+    });
+  }, [persistSetting, settingsReady, theme]);
 
   useEffect(() => {
     if (!settingsReady) return;
-
-    const persist = async () => {
-      try {
-        await kvStore.setItemAsync(STORAGE_KEYS.speechLang, speechLang);
-      } catch {
-        // ignore persistence errors
-      }
-    };
-
-    void persist();
-  }, [settingsReady, speechLang]);
+    persistSetting(async () => {
+      await kvStore.setItemAsync(STORAGE_KEYS.speechLang, speechLang);
+    });
+  }, [persistSetting, settingsReady, speechLang]);
 
   useEffect(() => {
     if (!settingsReady) return;
     const sessionKey = activeSessionKey.trim();
-
-    const persist = async () => {
-      try {
-        if (sessionKey) {
-          await kvStore.setItemAsync(STORAGE_KEYS.sessionKey, sessionKey);
-        } else {
-          await kvStore.deleteItemAsync(STORAGE_KEYS.sessionKey);
-        }
-      } catch {
-        // ignore persistence errors
+    persistSetting(async () => {
+      if (sessionKey) {
+        await kvStore.setItemAsync(STORAGE_KEYS.sessionKey, sessionKey);
+      } else {
+        await kvStore.deleteItemAsync(STORAGE_KEYS.sessionKey);
       }
-    };
-
-    void persist();
-  }, [activeSessionKey, settingsReady]);
+    });
+  }, [activeSessionKey, persistSetting, settingsReady]);
 
   useEffect(() => {
     if (!settingsReady) return;
-
-    const persist = async () => {
-      try {
-        const entries = Object.entries(sessionPreferences);
-        if (entries.length === 0) {
-          await kvStore.deleteItemAsync(STORAGE_KEYS.sessionPrefs);
-          return;
-        }
-        await kvStore.setItemAsync(
-          STORAGE_KEYS.sessionPrefs,
-          JSON.stringify(sessionPreferences),
-        );
-      } catch {
-        // ignore persistence errors
+    persistSetting(async () => {
+      const entries = Object.entries(sessionPreferences);
+      if (entries.length === 0) {
+        await kvStore.deleteItemAsync(STORAGE_KEYS.sessionPrefs);
+        return;
       }
-    };
-
-    void persist();
-  }, [sessionPreferences, settingsReady]);
+      await kvStore.setItemAsync(
+        STORAGE_KEYS.sessionPrefs,
+        JSON.stringify(sessionPreferences),
+      );
+    });
+  }, [persistSetting, sessionPreferences, settingsReady]);
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -1428,6 +1411,17 @@ export default function App() {
   }, [activeSessionKey, sessionPreferences, sessions]);
   const showQuickSessionBar =
     isGatewayConnected && !isSettingsPanelOpen && isSessionQuickPanelOpen;
+  const settingsStatusText = !settingsReady
+    ? 'Loading settings...'
+    : settingsSavePendingCount > 0
+      ? 'Syncing...'
+      : settingsSaveError
+        ? settingsSaveError
+        : settingsSavedAt
+          ? `Saved ${formatClockLabel(settingsSavedAt)}`
+          : 'Saved';
+  const isSettingsStatusError = Boolean(settingsSaveError);
+  const isSettingsStatusPending = settingsSavePendingCount > 0;
   const historyItems = useMemo<HistoryListItem[]>(() => {
     if (chatTurns.length === 0) return [];
 
@@ -1910,6 +1904,44 @@ export default function App() {
               >
                 Settings
               </Text>
+              <View style={styles.settingsScreenHeaderRight}>
+                <View
+                  style={[
+                    styles.settingsStatusChip,
+                    isSettingsStatusPending && styles.settingsStatusChipPending,
+                    isSettingsStatusError && styles.settingsStatusChipError,
+                  ]}
+                >
+                  <Ionicons
+                    name={
+                      isSettingsStatusError
+                        ? 'alert-circle-outline'
+                        : isSettingsStatusPending
+                          ? 'sync-outline'
+                          : 'checkmark-circle-outline'
+                    }
+                    size={12}
+                    color={
+                      isSettingsStatusError
+                        ? isDarkTheme
+                          ? '#ffb0b0'
+                          : '#DC2626'
+                        : isDarkTheme
+                          ? '#9ec0ff'
+                          : '#1D4ED8'
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.settingsStatusChipText,
+                      isSettingsStatusError && styles.settingsStatusChipTextError,
+                    ]}
+                    maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                    numberOfLines={1}
+                  >
+                    {settingsStatusText}
+                  </Text>
+                </View>
               <Pressable
                 style={[
                   styles.iconButton,
@@ -1932,6 +1964,7 @@ export default function App() {
                   color={isDarkTheme ? '#bccae2' : '#707070'}
                 />
               </Pressable>
+              </View>
             </View>
             <KeyboardAvoidingView
               style={styles.settingsScreenKeyboardWrap}
@@ -1944,378 +1977,427 @@ export default function App() {
                 keyboardDismissMode="on-drag"
               >
                 <View style={styles.gatewayPanel}>
-            <Text style={styles.label} maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}>
-              Gateway URL
-            </Text>
-            <TextInput
-              style={[
-                styles.input,
-                focusedField === 'gateway-url' && styles.inputFocused,
-              ]}
-              maxFontSizeMultiplier={MAX_TEXT_SCALE}
-              value={gatewayUrl}
-              onChangeText={setGatewayUrl}
-              placeholder="wss://your-openclaw-gateway.example.com"
-              placeholderTextColor={placeholderColor}
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="done"
-              blurOnSubmit
-              onSubmitEditing={() => Keyboard.dismiss()}
-              onFocus={() => setFocusedField('gateway-url')}
-              onBlur={() =>
-                setFocusedField((current) =>
-                  current === 'gateway-url' ? null : current,
-                )
-              }
-            />
-
-            <Text
-              style={[styles.label, styles.labelSpacing]}
-              maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-            >
-              Token / Password (Optional)
-            </Text>
-            <TextInput
-              style={[
-                styles.input,
-                focusedField === 'auth-token' && styles.inputFocused,
-              ]}
-              maxFontSizeMultiplier={MAX_TEXT_SCALE}
-              value={authToken}
-              onChangeText={setAuthToken}
-              placeholder="gateway token or password"
-              placeholderTextColor={placeholderColor}
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="done"
-              blurOnSubmit
-              onSubmitEditing={() => Keyboard.dismiss()}
-              onFocus={() => setFocusedField('auth-token')}
-              onBlur={() =>
-                setFocusedField((current) =>
-                  current === 'auth-token' ? null : current,
-                )
-              }
-            />
-
-            <Text
-              style={[styles.label, styles.labelSpacing]}
-              maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-            >
-              Speech Language
-            </Text>
-            <View style={styles.languagePickerRow}>
-              {SPEECH_LANG_OPTIONS.map((option) => {
-                const selected = speechLang === option.value;
-                return (
-                  <Pressable
-                    key={option.value}
-                    style={[
-                      styles.languageOptionButton,
-                      selected && styles.languageOptionButtonSelected,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Set speech language to ${option.label} (${option.value})`}
-                    onPress={() => {
-                      Keyboard.dismiss();
-                      setFocusedField(null);
-                      setSpeechLang(option.value);
-                    }}
-                  >
+                  <View style={styles.settingsSection}>
                     <Text
-                      style={[
-                        styles.languageOptionLabel,
-                        selected && styles.languageOptionLabelSelected,
-                      ]}
+                      style={styles.settingsSectionTitle}
+                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                    >
+                      Gateway
+                    </Text>
+                    <Text
+                      style={styles.settingsSectionDescription}
                       maxFontSizeMultiplier={MAX_TEXT_SCALE}
                     >
-                      {option.label}
+                      Configure endpoint and authentication for OpenClaw connection.
                     </Text>
-                    <Text
+                    <Text style={styles.label} maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}>
+                      Gateway URL
+                    </Text>
+                    <TextInput
                       style={[
-                        styles.languageOptionCode,
-                        selected && styles.languageOptionCodeSelected,
+                        styles.input,
+                        focusedField === 'gateway-url' && styles.inputFocused,
                       ]}
+                      maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                      value={gatewayUrl}
+                      onChangeText={setGatewayUrl}
+                      placeholder="wss://your-openclaw-gateway.example.com"
+                      placeholderTextColor={placeholderColor}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      returnKeyType="done"
+                      blurOnSubmit
+                      onSubmitEditing={() => Keyboard.dismiss()}
+                      onFocus={() => setFocusedField('gateway-url')}
+                      onBlur={() =>
+                        setFocusedField((current) =>
+                          current === 'gateway-url' ? null : current,
+                        )
+                      }
+                    />
+
+                    <Text
+                      style={[styles.label, styles.labelSpacing]}
                       maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
                     >
-                      {option.value}
+                      Token / Password (Optional)
                     </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            <Text
-              style={[styles.label, styles.labelSpacing]}
-              maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-            >
-              Session
-            </Text>
-            <View style={styles.sessionHeaderRow}>
-              <View style={styles.sessionKeyPill}>
-                <Text
-                  style={styles.sessionKeyText}
-                  numberOfLines={1}
-                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                >
-                  {getSessionTitle(
-                    visibleSessions.find((session) => session.key === activeSessionKey) ??
-                      { key: activeSessionKey, displayName: activeSessionKey },
-                  )}
-                </Text>
-              </View>
-              <Pressable
-                style={[
-                  styles.sessionActionButton,
-                  (!isGatewayConnected ||
-                    isSessionsLoading ||
-                    isSessionOperationPending) &&
-                    styles.sessionActionButtonDisabled,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="Refresh sessions list"
-                onPress={() => {
-                  void refreshSessions();
-                }}
-                disabled={
-                  !isGatewayConnected || isSessionsLoading || isSessionOperationPending
-                }
-              >
-                <Text
-                  style={styles.sessionActionButtonText}
-                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                >
-                  Refresh
-                </Text>
-              </Pressable>
-              <Pressable
-                style={[
-                  styles.sessionActionButton,
-                  !canSwitchSession && styles.sessionActionButtonDisabled,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="Create new session"
-                onPress={() => {
-                  void createAndSwitchSession();
-                }}
-                disabled={!canSwitchSession}
-              >
-                <Text
-                  style={styles.sessionActionButtonText}
-                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                >
-                  New
-                </Text>
-              </Pressable>
-            </View>
-            <View style={styles.sessionManageRow}>
-              <Pressable
-                style={[
-                  styles.sessionManageButton,
-                  !canSwitchSession && styles.sessionManageButtonDisabled,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="Rename current session"
-                onPress={startSessionRename}
-                disabled={!canSwitchSession}
-              >
-                <Text
-                  style={styles.sessionManageButtonText}
-                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                >
-                  Rename
-                </Text>
-              </Pressable>
-              <Pressable
-                style={[
-                  styles.sessionManageButton,
-                  isSessionOperationPending && styles.sessionManageButtonDisabled,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel={
-                  isSessionPinned(activeSessionKey)
-                    ? 'Unpin current session'
-                    : 'Pin current session'
-                }
-                onPress={toggleActiveSessionPinned}
-                disabled={isSessionOperationPending}
-              >
-                <Text
-                  style={styles.sessionManageButtonText}
-                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                >
-                  {isSessionPinned(activeSessionKey) ? 'Unpin' : 'Pin'}
-                </Text>
-              </Pressable>
-              <Pressable
-                style={[
-                  styles.sessionManageButton,
-                  styles.sessionManageButtonDanger,
-                  (!canSwitchSession || !isGatewayConnected) &&
-                    styles.sessionManageButtonDisabled,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="Delete current session"
-                onPress={confirmDeleteActiveSession}
-                disabled={!canSwitchSession || !isGatewayConnected}
-              >
-                <Text
-                  style={[
-                    styles.sessionManageButtonText,
-                    styles.sessionManageButtonDangerText,
-                  ]}
-                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                >
-                  Delete
-                </Text>
-              </Pressable>
-            </View>
-            {isSessionRenameOpen ? (
-              <View style={styles.sessionRenameRow}>
-                <TextInput
-                  style={[
-                    styles.input,
-                    styles.sessionRenameInput,
-                  ]}
-                  maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                  value={sessionRenameDraft}
-                  onChangeText={setSessionRenameDraft}
-                  placeholder="Session name"
-                  placeholderTextColor={placeholderColor}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  returnKeyType="done"
-                  blurOnSubmit
-                  onSubmitEditing={() => {
-                    void submitSessionRename();
-                  }}
-                />
-                <Pressable
-                  style={[
-                    styles.sessionRenameActionButton,
-                    isSessionOperationPending && styles.sessionRenameActionButtonDisabled,
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel="Save session name"
-                  onPress={() => {
-                    void submitSessionRename();
-                  }}
-                  disabled={isSessionOperationPending}
-                >
-                  <Text
-                    style={styles.sessionRenameActionButtonText}
-                    maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                  >
-                    Save
-                  </Text>
-                </Pressable>
-                <Pressable
-                  style={styles.sessionRenameActionButton}
-                  accessibilityRole="button"
-                  accessibilityLabel="Cancel session rename"
-                  onPress={() => {
-                    setIsSessionRenameOpen(false);
-                    setSessionRenameDraft('');
-                  }}
-                >
-                  <Text
-                    style={styles.sessionRenameActionButtonText}
-                    maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                  >
-                    Cancel
-                  </Text>
-                </Pressable>
-              </View>
-            ) : null}
-            {sessionsError ? (
-              <Text style={styles.sessionErrorText} maxFontSizeMultiplier={MAX_TEXT_SCALE}>
-                {sessionsError}
-              </Text>
-            ) : null}
-            {isGatewayConnected ? (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.sessionListRow}
-              >
-                {visibleSessions.map((session) => {
-                  const selected = session.key === activeSessionKey;
-                  const pinned = isSessionPinned(session.key);
-                  return (
-                    <Pressable
-                      key={session.key}
+                    <TextInput
                       style={[
-                        styles.sessionChip,
-                        selected && styles.sessionChipActive,
-                        (!canSwitchSession || isSessionHistoryLoading) &&
-                          styles.sessionChipDisabled,
+                        styles.input,
+                        focusedField === 'auth-token' && styles.inputFocused,
                       ]}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Switch to session ${getSessionTitle(session)}`}
-                      onPress={() => {
-                        void switchSession(session.key);
-                      }}
-                      disabled={!canSwitchSession || isSessionHistoryLoading}
-                    >
-                      <Text
-                        style={[
-                          styles.sessionChipTitle,
-                          selected && styles.sessionChipTitleActive,
-                        ]}
-                        numberOfLines={1}
-                        maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                      >
-                        {pinned ? `★ ${getSessionTitle(session)}` : getSessionTitle(session)}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.sessionChipMeta,
-                          selected && styles.sessionChipMetaActive,
-                        ]}
-                        maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                      >
-                        {pinned
-                          ? `Pinned${formatSessionUpdatedAt(session.updatedAt) ? ` · ${formatSessionUpdatedAt(session.updatedAt)}` : ''}`
-                          : formatSessionUpdatedAt(session.updatedAt) || session.key}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
-            ) : (
-              <Text style={styles.sessionHintText} maxFontSizeMultiplier={MAX_TEXT_SCALE}>
-                Connect to load available sessions.
-              </Text>
-            )}
-
-                <View style={styles.connectionRow}>
-                  <Pressable
-                    style={[
-                      styles.smallButton,
-                      styles.connectButton,
-                      (isGatewayConnecting || !settingsReady) && styles.smallButtonDisabled,
-                    ]}
-                    onPress={() => {
-                      Keyboard.dismiss();
-                      setFocusedField(null);
-                      void connectGateway();
-                    }}
-                    disabled={isGatewayConnecting || !settingsReady}
-                  >
+                      maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                      value={authToken}
+                      onChangeText={setAuthToken}
+                      placeholder="gateway token or password"
+                      placeholderTextColor={placeholderColor}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      returnKeyType="done"
+                      blurOnSubmit
+                      onSubmitEditing={() => Keyboard.dismiss()}
+                      onFocus={() => setFocusedField('auth-token')}
+                      onBlur={() =>
+                        setFocusedField((current) =>
+                          current === 'auth-token' ? null : current,
+                        )
+                      }
+                    />
                     <Text
-                      style={styles.smallButtonText}
+                      style={styles.settingsFieldHint}
                       maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
                     >
-                      {!settingsReady
-                        ? 'Initializing...'
-                        : isGatewayConnecting
-                          ? 'Connecting...'
-                          : 'Connect'}
+                      Saved locally on this device. Keep secrets out of git.
                     </Text>
-                  </Pressable>
+
+                    <View style={styles.connectionRow}>
+                      <Pressable
+                        style={[
+                          styles.smallButton,
+                          styles.connectButton,
+                          (isGatewayConnecting || !settingsReady) &&
+                            styles.smallButtonDisabled,
+                        ]}
+                        onPress={() => {
+                          Keyboard.dismiss();
+                          setFocusedField(null);
+                          void connectGateway();
+                        }}
+                        disabled={isGatewayConnecting || !settingsReady}
+                      >
+                        <Text
+                          style={styles.smallButtonText}
+                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                        >
+                          {!settingsReady
+                            ? 'Initializing...'
+                            : isGatewayConnecting
+                              ? 'Connecting...'
+                              : 'Connect'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
+
+                  <View style={[styles.settingsSection, styles.settingsSectionSpaced]}>
+                    <Text
+                      style={styles.settingsSectionTitle}
+                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                    >
+                      Speech
+                    </Text>
+                    <Text
+                      style={styles.settingsSectionDescription}
+                      maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                    >
+                      Select recognition language for voice input.
+                    </Text>
+                    <Text style={styles.label} maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}>
+                      Speech Language
+                    </Text>
+                    <View style={styles.languagePickerRow}>
+                      {SPEECH_LANG_OPTIONS.map((option) => {
+                        const selected = speechLang === option.value;
+                        return (
+                          <Pressable
+                            key={option.value}
+                            style={[
+                              styles.languageOptionButton,
+                              selected && styles.languageOptionButtonSelected,
+                            ]}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Set speech language to ${option.label} (${option.value})`}
+                            onPress={() => {
+                              Keyboard.dismiss();
+                              setFocusedField(null);
+                              setSpeechLang(option.value);
+                            }}
+                          >
+                            <Text
+                              style={[
+                                styles.languageOptionLabel,
+                                selected && styles.languageOptionLabelSelected,
+                              ]}
+                              maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                            >
+                              {option.label}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.languageOptionCode,
+                                selected && styles.languageOptionCodeSelected,
+                              ]}
+                              maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                            >
+                              {option.value}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+
+                  <View style={[styles.settingsSection, styles.settingsSectionSpaced]}>
+                    <Text
+                      style={styles.settingsSectionTitle}
+                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                    >
+                      Sessions
+                    </Text>
+                    <Text
+                      style={styles.settingsSectionDescription}
+                      maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                    >
+                      Switch and manage conversation contexts. Pinned sessions stay at the top.
+                    </Text>
+                    <View style={styles.sessionHeaderRow}>
+                      <View style={styles.sessionKeyPill}>
+                        <Text
+                          style={styles.sessionKeyText}
+                          numberOfLines={1}
+                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                        >
+                          {getSessionTitle(
+                            visibleSessions.find(
+                              (session) => session.key === activeSessionKey,
+                            ) ?? { key: activeSessionKey, displayName: activeSessionKey },
+                          )}
+                        </Text>
+                      </View>
+                      <Pressable
+                        style={[
+                          styles.sessionActionButton,
+                          (!isGatewayConnected ||
+                            isSessionsLoading ||
+                            isSessionOperationPending) &&
+                            styles.sessionActionButtonDisabled,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel="Refresh sessions list"
+                        onPress={() => {
+                          void refreshSessions();
+                        }}
+                        disabled={
+                          !isGatewayConnected ||
+                          isSessionsLoading ||
+                          isSessionOperationPending
+                        }
+                      >
+                        <Text
+                          style={styles.sessionActionButtonText}
+                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                        >
+                          Refresh
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        style={[
+                          styles.sessionActionButton,
+                          !canSwitchSession && styles.sessionActionButtonDisabled,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel="Create new session"
+                        onPress={() => {
+                          void createAndSwitchSession();
+                        }}
+                        disabled={!canSwitchSession}
+                      >
+                        <Text
+                          style={styles.sessionActionButtonText}
+                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                        >
+                          New
+                        </Text>
+                      </Pressable>
+                    </View>
+                    <View style={styles.sessionManageRow}>
+                      <Pressable
+                        style={[
+                          styles.sessionManageButton,
+                          !canSwitchSession && styles.sessionManageButtonDisabled,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel="Rename current session"
+                        onPress={startSessionRename}
+                        disabled={!canSwitchSession}
+                      >
+                        <Text
+                          style={styles.sessionManageButtonText}
+                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                        >
+                          Rename
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        style={[
+                          styles.sessionManageButton,
+                          isSessionOperationPending && styles.sessionManageButtonDisabled,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          isSessionPinned(activeSessionKey)
+                            ? 'Unpin current session'
+                            : 'Pin current session'
+                        }
+                        onPress={toggleActiveSessionPinned}
+                        disabled={isSessionOperationPending}
+                      >
+                        <Text
+                          style={styles.sessionManageButtonText}
+                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                        >
+                          {isSessionPinned(activeSessionKey) ? 'Unpin' : 'Pin'}
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        style={[
+                          styles.sessionManageButton,
+                          styles.sessionManageButtonDanger,
+                          (!canSwitchSession || !isGatewayConnected) &&
+                            styles.sessionManageButtonDisabled,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel="Delete current session"
+                        onPress={confirmDeleteActiveSession}
+                        disabled={!canSwitchSession || !isGatewayConnected}
+                      >
+                        <Text
+                          style={[
+                            styles.sessionManageButtonText,
+                            styles.sessionManageButtonDangerText,
+                          ]}
+                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                        >
+                          Delete
+                        </Text>
+                      </Pressable>
+                    </View>
+                    {isSessionRenameOpen ? (
+                      <View style={styles.sessionRenameRow}>
+                        <TextInput
+                          style={[styles.input, styles.sessionRenameInput]}
+                          maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                          value={sessionRenameDraft}
+                          onChangeText={setSessionRenameDraft}
+                          placeholder="Session name"
+                          placeholderTextColor={placeholderColor}
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          returnKeyType="done"
+                          blurOnSubmit
+                          onSubmitEditing={() => {
+                            void submitSessionRename();
+                          }}
+                        />
+                        <Pressable
+                          style={[
+                            styles.sessionRenameActionButton,
+                            isSessionOperationPending &&
+                              styles.sessionRenameActionButtonDisabled,
+                          ]}
+                          accessibilityRole="button"
+                          accessibilityLabel="Save session name"
+                          onPress={() => {
+                            void submitSessionRename();
+                          }}
+                          disabled={isSessionOperationPending}
+                        >
+                          <Text
+                            style={styles.sessionRenameActionButtonText}
+                            maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                          >
+                            Save
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          style={styles.sessionRenameActionButton}
+                          accessibilityRole="button"
+                          accessibilityLabel="Cancel session rename"
+                          onPress={() => {
+                            setIsSessionRenameOpen(false);
+                            setSessionRenameDraft('');
+                          }}
+                        >
+                          <Text
+                            style={styles.sessionRenameActionButtonText}
+                            maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                          >
+                            Cancel
+                          </Text>
+                        </Pressable>
+                      </View>
+                    ) : null}
+                    {sessionsError ? (
+                      <Text
+                        style={styles.sessionErrorText}
+                        maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                      >
+                        {sessionsError}
+                      </Text>
+                    ) : null}
+                    {isGatewayConnected ? (
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.sessionListRow}
+                      >
+                        {visibleSessions.map((session) => {
+                          const selected = session.key === activeSessionKey;
+                          const pinned = isSessionPinned(session.key);
+                          return (
+                            <Pressable
+                              key={session.key}
+                              style={[
+                                styles.sessionChip,
+                                selected && styles.sessionChipActive,
+                                (!canSwitchSession || isSessionHistoryLoading) &&
+                                  styles.sessionChipDisabled,
+                              ]}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Switch to session ${getSessionTitle(session)}`}
+                              onPress={() => {
+                                void switchSession(session.key);
+                              }}
+                              disabled={!canSwitchSession || isSessionHistoryLoading}
+                            >
+                              <Text
+                                style={[
+                                  styles.sessionChipTitle,
+                                  selected && styles.sessionChipTitleActive,
+                                ]}
+                                numberOfLines={1}
+                                maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                              >
+                                {pinned
+                                  ? `★ ${getSessionTitle(session)}`
+                                  : getSessionTitle(session)}
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.sessionChipMeta,
+                                  selected && styles.sessionChipMetaActive,
+                                ]}
+                                maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                              >
+                                {pinned
+                                  ? `Pinned${formatSessionUpdatedAt(session.updatedAt) ? ` · ${formatSessionUpdatedAt(session.updatedAt)}` : ''}`
+                                  : formatSessionUpdatedAt(session.updatedAt) || session.key}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </ScrollView>
+                    ) : (
+                      <Text
+                        style={styles.sessionHintText}
+                        maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                      >
+                        Connect to load available sessions.
+                      </Text>
+                    )}
+                  </View>
                 </View>
-              </View>
             </ScrollView>
           </KeyboardAvoidingView>
         </SafeAreaView>
@@ -3020,10 +3102,43 @@ function createStyles(isDarkTheme: boolean) {
       justifyContent: 'space-between',
       gap: 10,
     },
+    settingsScreenHeaderRight: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      flexShrink: 1,
+    },
     settingsScreenTitle: {
       fontSize: 18,
       fontWeight: '700',
       color: colors.headerTitle,
+    },
+    settingsStatusChip: {
+      maxWidth: 200,
+      minHeight: 28,
+      borderRadius: 999,
+      borderWidth: 1.5,
+      borderColor: colors.inputBorder,
+      backgroundColor: colors.inputBg,
+      paddingHorizontal: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+    },
+    settingsStatusChipPending: {
+      borderColor: colors.inputBorderFocused,
+    },
+    settingsStatusChipError: {
+      borderColor: isDarkTheme ? 'rgba(220,38,38,0.44)' : 'rgba(220,38,38,0.24)',
+    },
+    settingsStatusChipText: {
+      flexShrink: 1,
+      fontSize: 11,
+      color: colors.textSecondary,
+      fontWeight: '600',
+    },
+    settingsStatusChipTextError: {
+      color: colors.errorText,
     },
     settingsScreenKeyboardWrap: {
       flex: 1,
@@ -3044,6 +3159,27 @@ function createStyles(isDarkTheme: boolean) {
       borderColor: colors.panelBorder,
       ...surfaceShadow,
     },
+    settingsSection: {
+      width: '100%',
+    },
+    settingsSectionSpaced: {
+      marginTop: 16,
+      paddingTop: 14,
+      borderTopWidth: 1,
+      borderTopColor: colors.panelBorder,
+    },
+    settingsSectionTitle: {
+      fontSize: 14,
+      color: colors.textPrimary,
+      fontWeight: '700',
+      marginBottom: 2,
+    },
+    settingsSectionDescription: {
+      fontSize: 12,
+      color: colors.label,
+      lineHeight: 17,
+      marginBottom: 8,
+    },
     label: {
       fontSize: 12,
       color: colors.label,
@@ -3051,6 +3187,12 @@ function createStyles(isDarkTheme: boolean) {
     },
     labelSpacing: {
       marginTop: 8,
+    },
+    settingsFieldHint: {
+      marginTop: 6,
+      fontSize: 11,
+      color: colors.label,
+      lineHeight: 15,
     },
     input: {
       borderWidth: 1.5,
