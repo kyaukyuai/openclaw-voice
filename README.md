@@ -138,7 +138,8 @@ Notes:
 - OpenClaw Gateway connection with URL + token/password
 - Streaming response rendering with per-turn states (`WAIT`, `OK`, `ERR`)
 - Auto reconnect support
-- Persistent settings for gateway URL, token/password, and theme
+- Session list + session switching (`sessions.list` / `chat.history`)
+- Persistent settings for gateway URL, token/password, theme, speech language, and session key
 - Local device identity generation/signing for gateway auth
 
 ## Environment Variables
@@ -151,6 +152,7 @@ cp .env.example .env
 
 - `EXPO_PUBLIC_DEFAULT_GATEWAY_URL`
 - `EXPO_PUBLIC_DEFAULT_THEME` (`light` or `dark`)
+- `EXPO_PUBLIC_DEFAULT_SESSION_KEY` (default: `main`)
 - `EXPO_PUBLIC_GATEWAY_CLIENT_ID` (default: `openclaw-ios`)
 - `EXPO_PUBLIC_GATEWAY_DISPLAY_NAME` (default: `OpenClawVoice`)
 - `EXPO_PUBLIC_DEBUG_MODE` (`true` to show warnings in dev, default: `false`)

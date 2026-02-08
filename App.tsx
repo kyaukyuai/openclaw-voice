@@ -31,6 +31,7 @@ import {
   type ChatEventPayload,
   type ChatMessage,
   type ConnectionState,
+  type SessionEntry,
   type Storage as OpenClawStorage,
 } from './src/openclaw';
 
@@ -59,6 +60,7 @@ const STORAGE_KEYS = {
   authToken: 'mobile-openclaw.auth-token',
   theme: 'mobile-openclaw.theme',
   speechLang: 'mobile-openclaw.speech-lang',
+  sessionKey: 'mobile-openclaw.session-key',
 };
 
 const OPENCLAW_IDENTITY_STORAGE_KEY = 'openclaw_device_identity';
@@ -138,6 +140,8 @@ const DEFAULT_GATEWAY_URL = (process.env.EXPO_PUBLIC_DEFAULT_GATEWAY_URL ?? '').
 const DEFAULT_THEME: AppTheme =
   process.env.EXPO_PUBLIC_DEFAULT_THEME === 'dark' ? 'dark' : 'light';
 const DEFAULT_SPEECH_LANG: SpeechLang = 'ja-JP';
+const DEFAULT_SESSION_KEY =
+  (process.env.EXPO_PUBLIC_DEFAULT_SESSION_KEY ?? 'main').trim() || 'main';
 const MAX_TEXT_SCALE = 1.35;
 const MAX_TEXT_SCALE_TIGHT = 1.15;
 const SPEECH_LANG_OPTIONS: Array<{ value: SpeechLang; label: string }> = [
@@ -290,6 +294,102 @@ function createTurnId(): string {
   return `turn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
+function createSessionKey(): string {
+  return `mobile-openclaw-${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 6)}`;
+}
+
+function sessionDisplayName(session: SessionEntry): string {
+  const preferred =
+    session.displayName ??
+    session.label ??
+    session.subject ??
+    session.room ??
+    session.key;
+  return (preferred ?? session.key).trim() || session.key;
+}
+
+function extractTimestampFromUnknown(value: unknown, fallback: number): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const asNumber = Number(value);
+    if (Number.isFinite(asNumber)) return asNumber;
+    const asDate = Date.parse(value);
+    if (Number.isFinite(asDate)) return asDate;
+  }
+  return fallback;
+}
+
+function textFromUnknown(value: unknown): string {
+  const pieces: string[] = [];
+  collectText(value, pieces);
+  return dedupeLines(pieces).join('\n').trim();
+}
+
+function buildTurnsFromHistory(
+  messages: unknown[] | undefined,
+  sessionKey: string,
+): ChatTurn[] {
+  if (!Array.isArray(messages) || messages.length === 0) return [];
+
+  const turns: ChatTurn[] = [];
+  let pendingTurn: ChatTurn | null = null;
+
+  messages.forEach((entry, index) => {
+    if (typeof entry !== 'object' || entry === null) return;
+    const record = entry as Record<string, unknown>;
+    const role = typeof record.role === 'string' ? record.role.toLowerCase() : '';
+    if (!role) return;
+
+    const createdAt = extractTimestampFromUnknown(
+      record.timestamp ?? record.ts ?? record.createdAt,
+      Date.now() + index,
+    );
+    const text = textFromUnknown(
+      record.content ?? record.text ?? record.message ?? record,
+    );
+
+    if (role === 'user') {
+      if (pendingTurn) {
+        turns.push(pendingTurn);
+      }
+      pendingTurn = {
+        id: `hist-${sessionKey}-${index}`,
+        userText: text || '(empty)',
+        assistantText: '',
+        state: 'complete',
+        createdAt,
+      };
+      return;
+    }
+
+    const assistantLikeRole =
+      role === 'assistant' || role === 'agent' || role === 'model' || role === 'system';
+    if (!assistantLikeRole || !pendingTurn) return;
+
+    const status =
+      typeof record.state === 'string'
+        ? record.state
+        : typeof record.status === 'string'
+          ? record.status
+          : record.errorMessage || record.error
+            ? 'error'
+            : 'complete';
+
+    pendingTurn = {
+      ...pendingTurn,
+      assistantText: text || pendingTurn.assistantText,
+      state: isTurnErrorState(status) ? 'error' : 'complete',
+    };
+    turns.push(pendingTurn);
+    pendingTurn = null;
+  });
+
+  if (pendingTurn) turns.push(pendingTurn);
+  return turns;
+}
+
 const WAITING_TURN_STATES = new Set(['sending', 'queued', 'delta', 'streaming']);
 
 function isTurnWaitingState(state: string): boolean {
@@ -329,11 +429,20 @@ function getHistoryDayLabel(timestamp: number): string {
   });
 }
 
+function formatSessionUpdatedAt(updatedAt?: number): string {
+  if (!updatedAt) return '';
+  return new Date(updatedAt).toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 export default function App() {
   const [gatewayUrl, setGatewayUrl] = useState(DEFAULT_GATEWAY_URL);
   const [authToken, setAuthToken] = useState('');
   const [speechLang, setSpeechLang] = useState<SpeechLang>(DEFAULT_SPEECH_LANG);
   const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
+  const [isSessionQuickPanelOpen, setIsSessionQuickPanelOpen] = useState(true);
   const [settingsReady, setSettingsReady] = useState(false);
   const [connectionState, setConnectionState] =
     useState<ConnectionState>('disconnected');
@@ -341,6 +450,11 @@ export default function App() {
   const [gatewayEventState, setGatewayEventState] = useState('idle');
   const [isSending, setIsSending] = useState(false);
   const [chatTurns, setChatTurns] = useState<ChatTurn[]>([]);
+  const [activeSessionKey, setActiveSessionKey] = useState(DEFAULT_SESSION_KEY);
+  const [sessions, setSessions] = useState<SessionEntry[]>([]);
+  const [isSessionsLoading, setIsSessionsLoading] = useState(false);
+  const [isSessionHistoryLoading, setIsSessionHistoryLoading] = useState(false);
+  const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [theme, setTheme] = useState<AppTheme>(DEFAULT_THEME);
   const [focusedField, setFocusedField] = useState<FocusField>(null);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
@@ -352,10 +466,11 @@ export default function App() {
   const [speechError, setSpeechError] = useState<string | null>(null);
 
   const clientRef = useRef<GatewayClient | null>(null);
-  const sessionKeyRef = useRef(`mobile-openclaw-${Date.now().toString(36)}`);
+  const activeSessionKeyRef = useRef(DEFAULT_SESSION_KEY);
   const activeRunIdRef = useRef<string | null>(null);
   const pendingTurnIdRef = useRef<string | null>(null);
   const runIdToTurnIdRef = useRef<Map<string, string>>(new Map());
+  const sessionTurnsRef = useRef<Map<string, ChatTurn[]>>(new Map());
   const subscriptionsRef = useRef<Array<() => void>>([]);
   const transcriptRef = useRef('');
   const interimTranscriptRef = useRef('');
@@ -382,6 +497,14 @@ export default function App() {
   }, [interimTranscript]);
 
   useEffect(() => {
+    activeSessionKeyRef.current = activeSessionKey;
+  }, [activeSessionKey]);
+
+  useEffect(() => {
+    sessionTurnsRef.current.set(activeSessionKey, chatTurns);
+  }, [activeSessionKey, chatTurns]);
+
+  useEffect(() => {
     if (chatTurns.length === 0 || !historyAutoScrollRef.current) return;
     const timer = setTimeout(() => {
       historyScrollRef.current?.scrollToEnd({ animated: true });
@@ -394,12 +517,20 @@ export default function App() {
 
     const loadSettings = async () => {
       try {
-        const [savedUrl, savedToken, savedIdentity, savedTheme, savedSpeechLang] = await Promise.all([
+        const [
+          savedUrl,
+          savedToken,
+          savedIdentity,
+          savedTheme,
+          savedSpeechLang,
+          savedSessionKey,
+        ] = await Promise.all([
           kvStore.getItemAsync(STORAGE_KEYS.gatewayUrl),
           kvStore.getItemAsync(STORAGE_KEYS.authToken),
           kvStore.getItemAsync(OPENCLAW_IDENTITY_STORAGE_KEY),
           kvStore.getItemAsync(STORAGE_KEYS.theme),
           kvStore.getItemAsync(STORAGE_KEYS.speechLang),
+          kvStore.getItemAsync(STORAGE_KEYS.sessionKey),
         ]);
         if (!alive) return;
 
@@ -410,6 +541,9 @@ export default function App() {
         }
         if (savedSpeechLang === 'ja-JP' || savedSpeechLang === 'en-US') {
           setSpeechLang(savedSpeechLang);
+        }
+        if (savedSessionKey?.trim()) {
+          setActiveSessionKey(savedSessionKey.trim());
         }
         if (savedIdentity) {
           openClawIdentityMemory.set(
@@ -496,6 +630,25 @@ export default function App() {
   }, [settingsReady, speechLang]);
 
   useEffect(() => {
+    if (!settingsReady) return;
+    const sessionKey = activeSessionKey.trim();
+
+    const persist = async () => {
+      try {
+        if (sessionKey) {
+          await kvStore.setItemAsync(STORAGE_KEYS.sessionKey, sessionKey);
+        } else {
+          await kvStore.deleteItemAsync(STORAGE_KEYS.sessionKey);
+        }
+      } catch {
+        // ignore persistence errors
+      }
+    };
+
+    void persist();
+  }, [activeSessionKey, settingsReady]);
+
+  useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
 
@@ -572,6 +725,8 @@ export default function App() {
     pendingTurnIdRef.current = null;
     runIdToTurnIdRef.current.clear();
     setIsSending(false);
+    setIsSessionsLoading(false);
+    setIsSessionHistoryLoading(false);
     setConnectionState('disconnected');
     setGatewayEventState('idle');
   };
@@ -584,6 +739,111 @@ export default function App() {
     },
     [],
   );
+
+  const applySessionTurns = useCallback((sessionKey: string, turns: ChatTurn[]) => {
+    sessionTurnsRef.current.set(sessionKey, turns);
+    if (activeSessionKeyRef.current === sessionKey) {
+      setChatTurns(turns);
+    }
+  }, []);
+
+  const refreshSessions = useCallback(async () => {
+    const client = clientRef.current;
+    if (!client || connectionState !== 'connected') {
+      setSessions([]);
+      setSessionsError(null);
+      return;
+    }
+
+    setIsSessionsLoading(true);
+    setSessionsError(null);
+    try {
+      const response = await client.sessionsList({ limit: 40, includeGlobal: true });
+      const fetched = Array.isArray(response.sessions)
+        ? response.sessions.filter(
+            (session): session is SessionEntry =>
+              typeof session?.key === 'string' && session.key.trim().length > 0,
+          )
+        : [];
+      const activeKey = activeSessionKeyRef.current;
+      const merged = [...fetched];
+      if (!merged.some((session) => session.key === activeKey)) {
+        merged.unshift({ key: activeKey, displayName: activeKey });
+      }
+      merged.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+      setSessions(merged);
+    } catch (err) {
+      setSessionsError(`Sessions unavailable: ${errorMessage(err)}`);
+    } finally {
+      setIsSessionsLoading(false);
+    }
+  }, [connectionState]);
+
+  const loadSessionHistory = useCallback(
+    async (sessionKey: string) => {
+      const client = clientRef.current;
+      if (!client || connectionState !== 'connected') {
+        applySessionTurns(sessionKey, sessionTurnsRef.current.get(sessionKey) ?? []);
+        return;
+      }
+
+      setIsSessionHistoryLoading(true);
+      try {
+        const response = await client.chatHistory(sessionKey, { limit: 80 });
+        const turns = buildTurnsFromHistory(response.messages, sessionKey);
+        applySessionTurns(sessionKey, turns);
+      } catch (err) {
+        setGatewayError(`Failed to load session history: ${errorMessage(err)}`);
+        applySessionTurns(sessionKey, sessionTurnsRef.current.get(sessionKey) ?? []);
+      } finally {
+        if (activeSessionKeyRef.current === sessionKey) {
+          setIsSessionHistoryLoading(false);
+        }
+      }
+    },
+    [applySessionTurns, connectionState],
+  );
+
+  const switchSession = useCallback(
+    async (sessionKey: string) => {
+      const nextKey = sessionKey.trim();
+      if (!nextKey || nextKey === activeSessionKeyRef.current) return;
+      if (isSending || isSessionHistoryLoading) return;
+
+      Keyboard.dismiss();
+      setFocusedField(null);
+      setGatewayError(null);
+      setSessionsError(null);
+      setIsSending(false);
+      setGatewayEventState('idle');
+      activeRunIdRef.current = null;
+      pendingTurnIdRef.current = null;
+      runIdToTurnIdRef.current.clear();
+
+      const cached = sessionTurnsRef.current.get(nextKey) ?? [];
+      setChatTurns(cached);
+      setActiveSessionKey(nextKey);
+      activeSessionKeyRef.current = nextKey;
+
+      await loadSessionHistory(nextKey);
+      void refreshSessions();
+    },
+    [isSending, isSessionHistoryLoading, loadSessionHistory, refreshSessions],
+  );
+
+  const createAndSwitchSession = useCallback(async () => {
+    if (isSending || isSessionHistoryLoading) return;
+    const nextKey = createSessionKey();
+    sessionTurnsRef.current.set(nextKey, []);
+    setSessions((previous) => [{ key: nextKey, displayName: nextKey }, ...previous]);
+    await switchSession(nextKey);
+  }, [isSending, isSessionHistoryLoading, switchSession]);
+
+  useEffect(() => {
+    if (!isGatewayConnected) return;
+    void refreshSessions();
+    void loadSessionHistory(activeSessionKeyRef.current);
+  }, [isGatewayConnected, loadSessionHistory, refreshSessions]);
 
   const sendToGateway = useCallback(
     async (overrideText?: string) => {
@@ -621,7 +881,7 @@ export default function App() {
       ]);
 
       try {
-        const result = await client.chatSend(sessionKeyRef.current, message, {
+        const result = await client.chatSend(activeSessionKeyRef.current, message, {
           timeoutMs: 30_000,
         });
         transcriptRef.current = '';
@@ -655,7 +915,7 @@ export default function App() {
   );
 
   const handleChatEvent = (payload: ChatEventPayload) => {
-    if (payload.sessionKey !== sessionKeyRef.current) return;
+    if (payload.sessionKey !== activeSessionKeyRef.current) return;
 
     const text = toTextContent(payload.message);
     const state = payload.state ?? 'unknown';
@@ -700,6 +960,7 @@ export default function App() {
         state: 'complete',
         assistantText: text || turn.assistantText || fallbackText,
       }));
+      void refreshSessions();
       return;
     }
 
@@ -716,6 +977,7 @@ export default function App() {
         state: 'error',
         assistantText: text || message,
       }));
+      void refreshSessions();
       return;
     }
 
@@ -731,6 +993,7 @@ export default function App() {
         state: 'aborted',
         assistantText: turn.assistantText || 'Response was aborted.',
       }));
+      void refreshSessions();
       return;
     }
 
@@ -758,6 +1021,7 @@ export default function App() {
     const connectOnce = async (clientId: string) => {
       disconnectGateway();
       setGatewayError(null);
+      setSessionsError(null);
       setConnectionState('connecting');
 
       const client = new GatewayClient(gatewayUrl.trim(), {
@@ -892,6 +1156,17 @@ export default function App() {
       : isGatewayConnected
         ? 'Hold to record'
         : 'Please connect';
+  const canSwitchSession = !isSending && !isSessionHistoryLoading;
+  const visibleSessions = useMemo(() => {
+    const active = activeSessionKey;
+    const merged = [...sessions];
+    if (!merged.some((session) => session.key === active)) {
+      merged.unshift({ key: active, displayName: active });
+    }
+    return merged.slice(0, 20);
+  }, [activeSessionKey, sessions]);
+  const showQuickSessionBar =
+    isGatewayConnected && !isSettingsPanelOpen && isSessionQuickPanelOpen;
   const historyItems = useMemo<HistoryListItem[]>(() => {
     if (chatTurns.length === 0) return [];
 
@@ -1164,6 +1439,36 @@ export default function App() {
             <Pressable
               style={[
                 styles.iconButton,
+                isSessionQuickPanelOpen && styles.iconButtonActive,
+                !isGatewayConnected && styles.iconButtonDisabled,
+              ]}
+              hitSlop={7}
+              accessibilityRole="button"
+              accessibilityLabel={
+                isSessionQuickPanelOpen
+                  ? 'Hide quick session switcher'
+                  : 'Show quick session switcher'
+              }
+              onPress={() => {
+                if (!isGatewayConnected) return;
+                Keyboard.dismiss();
+                setFocusedField(null);
+                if (!isSessionQuickPanelOpen) {
+                  void refreshSessions();
+                }
+                setIsSessionQuickPanelOpen((current) => !current);
+              }}
+              disabled={!isGatewayConnected}
+            >
+              <Ionicons
+                name={isSessionQuickPanelOpen ? 'albums' : 'albums-outline'}
+                size={18}
+                color={isDarkTheme ? '#bccae2' : '#707070'}
+              />
+            </Pressable>
+            <Pressable
+              style={[
+                styles.iconButton,
                 isSettingsPanelOpen && styles.iconButtonActive,
                 !isGatewayConnected && styles.iconButtonDisabled,
               ]}
@@ -1205,6 +1510,117 @@ export default function App() {
             </Pressable>
           </View>
         </View>
+
+        {showQuickSessionBar ? (
+          <View style={styles.quickSessionBar}>
+            <View style={styles.quickSessionHeader}>
+              <Text style={styles.quickSessionLabel} maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}>
+                Session
+              </Text>
+              <Text
+                style={styles.quickSessionActiveKey}
+                numberOfLines={1}
+                maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+              >
+                {activeSessionKey}
+              </Text>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.quickSessionListRow}
+            >
+              {visibleSessions.map((session) => {
+                const selected = session.key === activeSessionKey;
+                return (
+                  <Pressable
+                    key={`quick-${session.key}`}
+                    style={[
+                      styles.quickSessionChip,
+                      selected && styles.quickSessionChipActive,
+                      (!canSwitchSession || isSessionHistoryLoading) &&
+                        styles.quickSessionChipDisabled,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Switch to session ${sessionDisplayName(session)}`}
+                    onPress={() => {
+                      void switchSession(session.key);
+                    }}
+                    disabled={!canSwitchSession || isSessionHistoryLoading}
+                  >
+                    <Text
+                      style={[
+                        styles.quickSessionChipText,
+                        selected && styles.quickSessionChipTextActive,
+                      ]}
+                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                      numberOfLines={1}
+                    >
+                      {sessionDisplayName(session)}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+              <Pressable
+                style={[
+                  styles.quickSessionActionChip,
+                  (isSessionsLoading || !isGatewayConnected) &&
+                    styles.quickSessionChipDisabled,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Refresh sessions list"
+                onPress={() => {
+                  void refreshSessions();
+                }}
+                disabled={isSessionsLoading || !isGatewayConnected}
+              >
+                <Ionicons
+                  name="refresh-outline"
+                  size={14}
+                  color={isDarkTheme ? '#9eb1d2' : '#5C5C5C'}
+                />
+                <Text
+                  style={styles.quickSessionActionChipText}
+                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                >
+                  Refresh
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.quickSessionActionChip,
+                  !canSwitchSession && styles.quickSessionChipDisabled,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Create new session"
+                onPress={() => {
+                  void createAndSwitchSession();
+                }}
+                disabled={!canSwitchSession}
+              >
+                <Ionicons
+                  name="add"
+                  size={14}
+                  color={isDarkTheme ? '#9eb1d2' : '#5C5C5C'}
+                />
+                <Text
+                  style={styles.quickSessionActionChipText}
+                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                >
+                  New
+                </Text>
+              </Pressable>
+            </ScrollView>
+            {sessionsError ? (
+              <Text
+                style={styles.quickSessionErrorText}
+                maxFontSizeMultiplier={MAX_TEXT_SCALE}
+              >
+                {sessionsError}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
 
         {shouldShowGatewayPanel ? (
           <View style={styles.gatewayPanel}>
@@ -1310,6 +1726,120 @@ export default function App() {
               })}
             </View>
 
+            <Text
+              style={[styles.label, styles.labelSpacing]}
+              maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+            >
+              Session
+            </Text>
+            <View style={styles.sessionHeaderRow}>
+              <View style={styles.sessionKeyPill}>
+                <Text
+                  style={styles.sessionKeyText}
+                  numberOfLines={1}
+                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                >
+                  {activeSessionKey}
+                </Text>
+              </View>
+              <Pressable
+                style={[
+                  styles.sessionActionButton,
+                  (!isGatewayConnected || isSessionsLoading) &&
+                    styles.sessionActionButtonDisabled,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Refresh sessions list"
+                onPress={() => {
+                  void refreshSessions();
+                }}
+                disabled={!isGatewayConnected || isSessionsLoading}
+              >
+                <Text
+                  style={styles.sessionActionButtonText}
+                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                >
+                  Refresh
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.sessionActionButton,
+                  !canSwitchSession && styles.sessionActionButtonDisabled,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Create new session"
+                onPress={() => {
+                  void createAndSwitchSession();
+                }}
+                disabled={!canSwitchSession}
+              >
+                <Text
+                  style={styles.sessionActionButtonText}
+                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                >
+                  New
+                </Text>
+              </Pressable>
+            </View>
+            {sessionsError ? (
+              <Text style={styles.sessionErrorText} maxFontSizeMultiplier={MAX_TEXT_SCALE}>
+                {sessionsError}
+              </Text>
+            ) : null}
+            {isGatewayConnected ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.sessionListRow}
+              >
+                {visibleSessions.map((session) => {
+                  const selected = session.key === activeSessionKey;
+                  return (
+                    <Pressable
+                      key={session.key}
+                      style={[
+                        styles.sessionChip,
+                        selected && styles.sessionChipActive,
+                        (!canSwitchSession || isSessionHistoryLoading) &&
+                          styles.sessionChipDisabled,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Switch to session ${sessionDisplayName(session)}`}
+                      onPress={() => {
+                        void switchSession(session.key);
+                      }}
+                      disabled={!canSwitchSession || isSessionHistoryLoading}
+                    >
+                      <Text
+                        style={[
+                          styles.sessionChipTitle,
+                          selected && styles.sessionChipTitleActive,
+                        ]}
+                        numberOfLines={1}
+                        maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                      >
+                        {sessionDisplayName(session)}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.sessionChipMeta,
+                          selected && styles.sessionChipMetaActive,
+                        ]}
+                        maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                      >
+                        {formatSessionUpdatedAt(session.updatedAt) || session.key}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            ) : (
+              <Text style={styles.sessionHintText} maxFontSizeMultiplier={MAX_TEXT_SCALE}>
+                Connect to load available sessions.
+              </Text>
+            )}
+
             <View style={styles.connectionRow}>
               <Pressable
                 style={[
@@ -1341,9 +1871,32 @@ export default function App() {
         <View style={styles.main}>
           {!isTranscriptEditingWithKeyboard ? (
             <View style={[styles.card, styles.historyCard, styles.historyCardFlat]}>
-              <Text style={styles.historyTitle} maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}>
-                History
-              </Text>
+              <View style={styles.historyHeaderRow}>
+                <Text style={styles.historyTitle} maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}>
+                  History
+                </Text>
+                <Text
+                  style={styles.historySessionText}
+                  numberOfLines={1}
+                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                >
+                  {activeSessionKey}
+                </Text>
+              </View>
+              {isSessionHistoryLoading ? (
+                <View style={styles.loadingRow}>
+                  <ActivityIndicator
+                    size="small"
+                    color={isDarkTheme ? '#9ec0ff' : '#2563EB'}
+                  />
+                  <Text
+                    style={styles.loadingText}
+                    maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                  >
+                    Loading session...
+                  </Text>
+                </View>
+              ) : null}
               {isSending ? (
                 <View style={styles.loadingRow}>
                   <ActivityIndicator
@@ -2070,6 +2623,181 @@ function createStyles(isDarkTheme: boolean) {
       color: colors.inputBorderFocused,
       fontWeight: '600',
     },
+    quickSessionBar: {
+      borderRadius: 14,
+      borderWidth: 1.5,
+      borderColor: colors.panelBorder,
+      backgroundColor: colors.panelBg,
+      paddingHorizontal: 8,
+      paddingTop: 7,
+      paddingBottom: 8,
+      ...surfaceShadow,
+    },
+    quickSessionHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 4,
+      gap: 8,
+    },
+    quickSessionLabel: {
+      fontSize: 11,
+      color: colors.label,
+      fontWeight: '600',
+    },
+    quickSessionActiveKey: {
+      flexShrink: 1,
+      fontSize: 11,
+      color: colors.textSecondary,
+    },
+    quickSessionListRow: {
+      marginTop: 8,
+      gap: 6,
+      paddingRight: 2,
+    },
+    quickSessionChip: {
+      minHeight: 30,
+      borderRadius: 999,
+      borderWidth: 1.5,
+      borderColor: colors.inputBorder,
+      backgroundColor: colors.inputBg,
+      justifyContent: 'center',
+      paddingHorizontal: 10,
+      maxWidth: 180,
+    },
+    quickSessionChipActive: {
+      borderColor: colors.inputBorderFocused,
+      backgroundColor: isDarkTheme
+        ? 'rgba(37,99,235,0.24)'
+        : 'rgba(37,99,235,0.10)',
+    },
+    quickSessionChipDisabled: {
+      opacity: 0.6,
+    },
+    quickSessionChipText: {
+      fontSize: 12,
+      color: colors.textSecondary,
+      fontWeight: '600',
+    },
+    quickSessionChipTextActive: {
+      color: colors.textPrimary,
+    },
+    quickSessionActionChip: {
+      minHeight: 30,
+      borderRadius: 999,
+      borderWidth: 1.5,
+      borderColor: colors.inputBorder,
+      backgroundColor: colors.inputBg,
+      paddingHorizontal: 10,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 4,
+    },
+    quickSessionActionChipText: {
+      fontSize: 11,
+      color: colors.textSecondary,
+      fontWeight: '600',
+    },
+    quickSessionErrorText: {
+      marginTop: 6,
+      paddingHorizontal: 4,
+      fontSize: 11,
+      color: colors.errorText,
+      lineHeight: 15,
+    },
+    sessionHeaderRow: {
+      marginTop: 2,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    sessionKeyPill: {
+      flex: 1,
+      minHeight: 38,
+      borderRadius: 10,
+      borderWidth: 1.5,
+      borderColor: colors.inputBorder,
+      backgroundColor: colors.inputBg,
+      justifyContent: 'center',
+      paddingHorizontal: 10,
+    },
+    sessionKeyText: {
+      fontSize: 12,
+      color: colors.textPrimary,
+      fontWeight: '600',
+    },
+    sessionActionButton: {
+      minHeight: 38,
+      borderRadius: 10,
+      borderWidth: 1.5,
+      borderColor: colors.inputBorder,
+      backgroundColor: colors.inputBg,
+      paddingHorizontal: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    sessionActionButtonDisabled: {
+      opacity: 0.55,
+    },
+    sessionActionButtonText: {
+      fontSize: 11,
+      color: colors.textSecondary,
+      fontWeight: '600',
+    },
+    sessionErrorText: {
+      marginTop: 6,
+      fontSize: 12,
+      color: colors.errorText,
+      lineHeight: 16,
+    },
+    sessionHintText: {
+      marginTop: 6,
+      fontSize: 12,
+      color: colors.label,
+      lineHeight: 16,
+    },
+    sessionListRow: {
+      marginTop: 8,
+      paddingVertical: 2,
+      gap: 8,
+      paddingRight: 4,
+    },
+    sessionChip: {
+      minWidth: 128,
+      maxWidth: 180,
+      borderRadius: 10,
+      borderWidth: 1.5,
+      borderColor: colors.inputBorder,
+      backgroundColor: colors.inputBg,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      gap: 2,
+    },
+    sessionChipActive: {
+      borderColor: colors.inputBorderFocused,
+      backgroundColor: isDarkTheme
+        ? 'rgba(37,99,235,0.24)'
+        : 'rgba(37,99,235,0.10)',
+    },
+    sessionChipDisabled: {
+      opacity: 0.65,
+    },
+    sessionChipTitle: {
+      fontSize: 12,
+      color: colors.textPrimary,
+      fontWeight: '600',
+    },
+    sessionChipTitleActive: {
+      color: colors.textPrimary,
+    },
+    sessionChipMeta: {
+      fontSize: 10,
+      color: colors.label,
+    },
+    sessionChipMetaActive: {
+      color: colors.inputBorderFocused,
+    },
     connectionRow: {
       marginTop: 10,
       flexDirection: 'row',
@@ -2135,8 +2863,18 @@ function createStyles(isDarkTheme: boolean) {
       color: colors.historyDateText,
       textTransform: 'uppercase',
       letterSpacing: 0.8,
-      marginBottom: 6,
       paddingHorizontal: 2,
+    },
+    historyHeaderRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    historySessionText: {
+      fontSize: 10,
+      color: colors.historyDateText,
+      maxWidth: '60%',
     },
     transcriptCardExpanded: {
       flex: 1,
