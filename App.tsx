@@ -3564,9 +3564,9 @@ function createStyles(isDarkTheme: boolean) {
     keyboardWrap: {
       flex: 1,
       paddingHorizontal: 16,
-      paddingTop: 12,
-      paddingBottom: 10,
-      gap: 10,
+      paddingTop: 8,
+      paddingBottom: 8,
+      gap: 8,
     },
     headerRow: {
       flexDirection: 'row',
@@ -4074,13 +4074,13 @@ function createStyles(isDarkTheme: boolean) {
       backgroundColor: isDarkTheme
         ? 'rgba(143,167,210,0.26)'
         : 'rgba(108,122,148,0.26)',
-      marginTop: 2,
-      marginBottom: 5,
+      marginTop: 1,
+      marginBottom: 3,
       opacity: 0.9,
     },
     main: {
       flex: 1,
-      gap: 12,
+      gap: 8,
     },
     card: {
       borderRadius: 20,
@@ -4103,7 +4103,7 @@ function createStyles(isDarkTheme: boolean) {
       borderColor: 'transparent',
       paddingHorizontal: 0,
       paddingTop: 0,
-      paddingBottom: 0,
+      paddingBottom: 2,
       shadowOpacity: 0,
       shadowRadius: 0,
       elevation: 0,
