@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Markdown from 'react-native-markdown-display';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Image,
   Keyboard,
@@ -61,6 +62,7 @@ const STORAGE_KEYS = {
   theme: 'mobile-openclaw.theme',
   speechLang: 'mobile-openclaw.speech-lang',
   sessionKey: 'mobile-openclaw.session-key',
+  sessionPrefs: 'mobile-openclaw.session-prefs',
 };
 
 const OPENCLAW_IDENTITY_STORAGE_KEY = 'openclaw_device_identity';
@@ -136,6 +138,12 @@ type HistoryListItem =
 type AppTheme = 'dark' | 'light';
 type SpeechLang = 'ja-JP' | 'en-US';
 type FocusField = 'gateway-url' | 'auth-token' | 'transcript' | null;
+type SessionPreference = {
+  alias?: string;
+  pinned?: boolean;
+};
+type SessionPreferences = Record<string, SessionPreference>;
+
 const DEFAULT_GATEWAY_URL = (process.env.EXPO_PUBLIC_DEFAULT_GATEWAY_URL ?? '').trim();
 const DEFAULT_THEME: AppTheme =
   process.env.EXPO_PUBLIC_DEFAULT_THEME === 'dark' ? 'dark' : 'light';
@@ -437,6 +445,37 @@ function formatSessionUpdatedAt(updatedAt?: number): string {
   });
 }
 
+function parseSessionPreferences(raw: string | null): SessionPreferences {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+
+    const next: SessionPreferences = {};
+    Object.entries(parsed as Record<string, unknown>).forEach(([sessionKey, value]) => {
+      if (!sessionKey || !value || typeof value !== 'object' || Array.isArray(value)) {
+        return;
+      }
+
+      const record = value as Record<string, unknown>;
+      const alias = typeof record.alias === 'string' ? record.alias.trim() : '';
+      const pinned = record.pinned === true;
+
+      if (alias || pinned) {
+        next[sessionKey] = {
+          ...(alias ? { alias } : {}),
+          ...(pinned ? { pinned: true } : {}),
+        };
+      }
+    });
+    return next;
+  } catch {
+    return {};
+  }
+}
+
 export default function App() {
   const [gatewayUrl, setGatewayUrl] = useState(DEFAULT_GATEWAY_URL);
   const [authToken, setAuthToken] = useState('');
@@ -452,8 +491,12 @@ export default function App() {
   const [chatTurns, setChatTurns] = useState<ChatTurn[]>([]);
   const [activeSessionKey, setActiveSessionKey] = useState(DEFAULT_SESSION_KEY);
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
+  const [sessionPreferences, setSessionPreferences] = useState<SessionPreferences>({});
   const [isSessionsLoading, setIsSessionsLoading] = useState(false);
   const [isSessionHistoryLoading, setIsSessionHistoryLoading] = useState(false);
+  const [isSessionOperationPending, setIsSessionOperationPending] = useState(false);
+  const [isSessionRenameOpen, setIsSessionRenameOpen] = useState(false);
+  const [sessionRenameDraft, setSessionRenameDraft] = useState('');
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [theme, setTheme] = useState<AppTheme>(DEFAULT_THEME);
   const [focusedField, setFocusedField] = useState<FocusField>(null);
@@ -524,6 +567,7 @@ export default function App() {
           savedTheme,
           savedSpeechLang,
           savedSessionKey,
+          savedSessionPrefs,
         ] = await Promise.all([
           kvStore.getItemAsync(STORAGE_KEYS.gatewayUrl),
           kvStore.getItemAsync(STORAGE_KEYS.authToken),
@@ -531,6 +575,7 @@ export default function App() {
           kvStore.getItemAsync(STORAGE_KEYS.theme),
           kvStore.getItemAsync(STORAGE_KEYS.speechLang),
           kvStore.getItemAsync(STORAGE_KEYS.sessionKey),
+          kvStore.getItemAsync(STORAGE_KEYS.sessionPrefs),
         ]);
         if (!alive) return;
 
@@ -545,6 +590,7 @@ export default function App() {
         if (savedSessionKey?.trim()) {
           setActiveSessionKey(savedSessionKey.trim());
         }
+        setSessionPreferences(parseSessionPreferences(savedSessionPrefs));
         if (savedIdentity) {
           openClawIdentityMemory.set(
             OPENCLAW_IDENTITY_STORAGE_KEY,
@@ -649,6 +695,28 @@ export default function App() {
   }, [activeSessionKey, settingsReady]);
 
   useEffect(() => {
+    if (!settingsReady) return;
+
+    const persist = async () => {
+      try {
+        const entries = Object.entries(sessionPreferences);
+        if (entries.length === 0) {
+          await kvStore.deleteItemAsync(STORAGE_KEYS.sessionPrefs);
+          return;
+        }
+        await kvStore.setItemAsync(
+          STORAGE_KEYS.sessionPrefs,
+          JSON.stringify(sessionPreferences),
+        );
+      } catch {
+        // ignore persistence errors
+      }
+    };
+
+    void persist();
+  }, [sessionPreferences, settingsReady]);
+
+  useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
 
@@ -727,6 +795,7 @@ export default function App() {
     setIsSending(false);
     setIsSessionsLoading(false);
     setIsSessionHistoryLoading(false);
+    setIsSessionOperationPending(false);
     setConnectionState('disconnected');
     setGatewayEventState('idle');
   };
@@ -814,6 +883,8 @@ export default function App() {
       setFocusedField(null);
       setGatewayError(null);
       setSessionsError(null);
+      setIsSessionRenameOpen(false);
+      setSessionRenameDraft('');
       setIsSending(false);
       setGatewayEventState('idle');
       activeRunIdRef.current = null;
@@ -838,6 +909,182 @@ export default function App() {
     setSessions((previous) => [{ key: nextKey, displayName: nextKey }, ...previous]);
     await switchSession(nextKey);
   }, [isSending, isSessionHistoryLoading, switchSession]);
+
+  const isSessionPinned = useCallback(
+    (sessionKey: string) => sessionPreferences[sessionKey]?.pinned === true,
+    [sessionPreferences],
+  );
+
+  const getSessionTitle = useCallback(
+    (session: SessionEntry) => {
+      const alias = sessionPreferences[session.key]?.alias?.trim();
+      if (alias) return alias;
+      return sessionDisplayName(session);
+    },
+    [sessionPreferences],
+  );
+
+  const startSessionRename = useCallback(() => {
+    const active = activeSessionKeyRef.current;
+    const currentAlias = sessionPreferences[active]?.alias?.trim();
+    const baseSession =
+      sessions.find((session) => session.key === active) ??
+      ({ key: active, displayName: active } as SessionEntry);
+
+    setSessionRenameDraft(currentAlias || sessionDisplayName(baseSession));
+    setIsSessionRenameOpen(true);
+  }, [sessionPreferences, sessions]);
+
+  const submitSessionRename = useCallback(async () => {
+    const sessionKey = activeSessionKeyRef.current.trim();
+    if (!sessionKey || isSessionOperationPending) return;
+
+    const alias = sessionRenameDraft.trim();
+    setSessionsError(null);
+    setIsSessionOperationPending(true);
+    try {
+      const client = clientRef.current;
+      if (client && connectionState === 'connected') {
+        try {
+          await client.sessionsPatch(sessionKey, {
+            label: alias || undefined,
+            displayName: alias || undefined,
+          });
+        } catch (err) {
+          setSessionsError(`Session rename synced locally only: ${errorMessage(err)}`);
+        }
+      }
+
+      setSessionPreferences((previous) => {
+        const current = previous[sessionKey] ?? {};
+        const next: SessionPreference = {
+          ...current,
+          alias: alias || undefined,
+        };
+        if (!next.alias && !next.pinned) {
+          if (!(sessionKey in previous)) return previous;
+          const { [sessionKey]: _removed, ...rest } = previous;
+          return rest;
+        }
+        return { ...previous, [sessionKey]: next };
+      });
+
+      setIsSessionRenameOpen(false);
+      setSessionRenameDraft('');
+      void refreshSessions();
+    } finally {
+      setIsSessionOperationPending(false);
+    }
+  }, [
+    connectionState,
+    isSessionOperationPending,
+    refreshSessions,
+    sessionRenameDraft,
+  ]);
+
+  const toggleActiveSessionPinned = useCallback(() => {
+    const sessionKey = activeSessionKeyRef.current.trim();
+    if (!sessionKey || isSessionOperationPending) return;
+    setSessionPreferences((previous) => {
+      const current = previous[sessionKey] ?? {};
+      const next: SessionPreference = {
+        ...current,
+        pinned: !current.pinned,
+      };
+      if (!next.alias && !next.pinned) {
+        if (!(sessionKey in previous)) return previous;
+        const { [sessionKey]: _removed, ...rest } = previous;
+        return rest;
+      }
+      return { ...previous, [sessionKey]: next };
+    });
+  }, [isSessionOperationPending]);
+
+  const deleteSessionByKey = useCallback(
+    async (sessionKey: string) => {
+      const targetKey = sessionKey.trim();
+      if (!targetKey || isSessionOperationPending || isSending || isSessionHistoryLoading) {
+        return;
+      }
+      if (connectionState !== 'connected' || !clientRef.current) {
+        setSessionsError('Connect to the gateway to delete sessions.');
+        return;
+      }
+
+      setSessionsError(null);
+      setIsSessionOperationPending(true);
+      try {
+        await clientRef.current.sessionsDelete(targetKey);
+
+        sessionTurnsRef.current.delete(targetKey);
+        setSessionPreferences((previous) => {
+          if (!(targetKey in previous)) return previous;
+          const { [targetKey]: _removed, ...rest } = previous;
+          return rest;
+        });
+
+        if (activeSessionKeyRef.current === targetKey) {
+          const existingFallback = sessions.find(
+            (session) => session.key !== targetKey,
+          )?.key;
+          const fallback =
+            existingFallback && existingFallback !== targetKey
+              ? existingFallback
+              : createSessionKey();
+
+          setSessions((previous) => {
+            const remaining = previous.filter((session) => session.key !== targetKey);
+            if (remaining.some((session) => session.key === fallback)) {
+              return remaining;
+            }
+            return [{ key: fallback, displayName: fallback }, ...remaining];
+          });
+          sessionTurnsRef.current.set(fallback, sessionTurnsRef.current.get(fallback) ?? []);
+
+          setIsSessionRenameOpen(false);
+          setSessionRenameDraft('');
+          await switchSession(fallback);
+        } else {
+          setSessions((previous) =>
+            previous.filter((session) => session.key !== targetKey),
+          );
+          void refreshSessions();
+        }
+      } catch (err) {
+        setSessionsError(`Delete failed: ${errorMessage(err)}`);
+      } finally {
+        setIsSessionOperationPending(false);
+      }
+    },
+    [
+      connectionState,
+      isSending,
+      isSessionHistoryLoading,
+      isSessionOperationPending,
+      refreshSessions,
+      sessions,
+      switchSession,
+    ],
+  );
+
+  const confirmDeleteActiveSession = useCallback(() => {
+    const sessionKey = activeSessionKeyRef.current.trim();
+    if (!sessionKey) return;
+    Alert.alert(
+      'Delete session?',
+      `Delete "${sessionKey}" from the gateway history if supported?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            void deleteSessionByKey(sessionKey);
+          },
+        },
+      ],
+    );
+  }, [deleteSessionByKey]);
 
   useEffect(() => {
     if (!isGatewayConnected) return;
@@ -1156,15 +1403,28 @@ export default function App() {
       : isGatewayConnected
         ? 'Hold to record'
         : 'Please connect';
-  const canSwitchSession = !isSending && !isSessionHistoryLoading;
+  const canSwitchSession =
+    !isSending && !isSessionHistoryLoading && !isSessionOperationPending;
   const visibleSessions = useMemo(() => {
     const active = activeSessionKey;
     const merged = [...sessions];
     if (!merged.some((session) => session.key === active)) {
       merged.unshift({ key: active, displayName: active });
     }
+    merged.sort((a, b) => {
+      if (a.key === active && b.key !== active) return -1;
+      if (b.key === active && a.key !== active) return 1;
+
+      const aPinned = sessionPreferences[a.key]?.pinned === true;
+      const bPinned = sessionPreferences[b.key]?.pinned === true;
+      if (aPinned !== bPinned) return aPinned ? -1 : 1;
+
+      const byUpdatedAt = (b.updatedAt ?? 0) - (a.updatedAt ?? 0);
+      if (byUpdatedAt !== 0) return byUpdatedAt;
+      return a.key.localeCompare(b.key);
+    });
     return merged.slice(0, 20);
-  }, [activeSessionKey, sessions]);
+  }, [activeSessionKey, sessionPreferences, sessions]);
   const showQuickSessionBar =
     isGatewayConnected && !isSettingsPanelOpen && isSessionQuickPanelOpen;
   const historyItems = useMemo<HistoryListItem[]>(() => {
@@ -1522,7 +1782,10 @@ export default function App() {
                 numberOfLines={1}
                 maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
               >
-                {activeSessionKey}
+                {getSessionTitle(
+                  visibleSessions.find((session) => session.key === activeSessionKey) ??
+                    { key: activeSessionKey, displayName: activeSessionKey },
+                )}
               </Text>
             </View>
             <ScrollView
@@ -1532,6 +1795,7 @@ export default function App() {
             >
               {visibleSessions.map((session) => {
                 const selected = session.key === activeSessionKey;
+                const pinned = isSessionPinned(session.key);
                 return (
                   <Pressable
                     key={`quick-${session.key}`}
@@ -1542,7 +1806,7 @@ export default function App() {
                         styles.quickSessionChipDisabled,
                     ]}
                     accessibilityRole="button"
-                    accessibilityLabel={`Switch to session ${sessionDisplayName(session)}`}
+                    accessibilityLabel={`Switch to session ${getSessionTitle(session)}`}
                     onPress={() => {
                       void switchSession(session.key);
                     }}
@@ -1556,7 +1820,7 @@ export default function App() {
                       maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
                       numberOfLines={1}
                     >
-                      {sessionDisplayName(session)}
+                      {pinned ? `★ ${getSessionTitle(session)}` : getSessionTitle(session)}
                     </Text>
                   </Pressable>
                 );
@@ -1564,7 +1828,9 @@ export default function App() {
               <Pressable
                 style={[
                   styles.quickSessionActionChip,
-                  (isSessionsLoading || !isGatewayConnected) &&
+                  (isSessionsLoading ||
+                    !isGatewayConnected ||
+                    isSessionOperationPending) &&
                     styles.quickSessionChipDisabled,
                 ]}
                 accessibilityRole="button"
@@ -1572,7 +1838,9 @@ export default function App() {
                 onPress={() => {
                   void refreshSessions();
                 }}
-                disabled={isSessionsLoading || !isGatewayConnected}
+                disabled={
+                  isSessionsLoading || !isGatewayConnected || isSessionOperationPending
+                }
               >
                 <Ionicons
                   name="refresh-outline"
@@ -1739,13 +2007,18 @@ export default function App() {
                   numberOfLines={1}
                   maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
                 >
-                  {activeSessionKey}
+                  {getSessionTitle(
+                    visibleSessions.find((session) => session.key === activeSessionKey) ??
+                      { key: activeSessionKey, displayName: activeSessionKey },
+                  )}
                 </Text>
               </View>
               <Pressable
                 style={[
                   styles.sessionActionButton,
-                  (!isGatewayConnected || isSessionsLoading) &&
+                  (!isGatewayConnected ||
+                    isSessionsLoading ||
+                    isSessionOperationPending) &&
                     styles.sessionActionButtonDisabled,
                 ]}
                 accessibilityRole="button"
@@ -1753,7 +2026,9 @@ export default function App() {
                 onPress={() => {
                   void refreshSessions();
                 }}
-                disabled={!isGatewayConnected || isSessionsLoading}
+                disabled={
+                  !isGatewayConnected || isSessionsLoading || isSessionOperationPending
+                }
               >
                 <Text
                   style={styles.sessionActionButtonText}
@@ -1782,6 +2057,125 @@ export default function App() {
                 </Text>
               </Pressable>
             </View>
+            <View style={styles.sessionManageRow}>
+              <Pressable
+                style={[
+                  styles.sessionManageButton,
+                  !canSwitchSession && styles.sessionManageButtonDisabled,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Rename current session"
+                onPress={startSessionRename}
+                disabled={!canSwitchSession}
+              >
+                <Text
+                  style={styles.sessionManageButtonText}
+                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                >
+                  Rename
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.sessionManageButton,
+                  isSessionOperationPending && styles.sessionManageButtonDisabled,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  isSessionPinned(activeSessionKey)
+                    ? 'Unpin current session'
+                    : 'Pin current session'
+                }
+                onPress={toggleActiveSessionPinned}
+                disabled={isSessionOperationPending}
+              >
+                <Text
+                  style={styles.sessionManageButtonText}
+                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                >
+                  {isSessionPinned(activeSessionKey) ? 'Unpin' : 'Pin'}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.sessionManageButton,
+                  styles.sessionManageButtonDanger,
+                  (!canSwitchSession || !isGatewayConnected) &&
+                    styles.sessionManageButtonDisabled,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Delete current session"
+                onPress={confirmDeleteActiveSession}
+                disabled={!canSwitchSession || !isGatewayConnected}
+              >
+                <Text
+                  style={[
+                    styles.sessionManageButtonText,
+                    styles.sessionManageButtonDangerText,
+                  ]}
+                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                >
+                  Delete
+                </Text>
+              </Pressable>
+            </View>
+            {isSessionRenameOpen ? (
+              <View style={styles.sessionRenameRow}>
+                <TextInput
+                  style={[
+                    styles.input,
+                    styles.sessionRenameInput,
+                  ]}
+                  maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                  value={sessionRenameDraft}
+                  onChangeText={setSessionRenameDraft}
+                  placeholder="Session name"
+                  placeholderTextColor={placeholderColor}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="done"
+                  blurOnSubmit
+                  onSubmitEditing={() => {
+                    void submitSessionRename();
+                  }}
+                />
+                <Pressable
+                  style={[
+                    styles.sessionRenameActionButton,
+                    isSessionOperationPending && styles.sessionRenameActionButtonDisabled,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Save session name"
+                  onPress={() => {
+                    void submitSessionRename();
+                  }}
+                  disabled={isSessionOperationPending}
+                >
+                  <Text
+                    style={styles.sessionRenameActionButtonText}
+                    maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                  >
+                    Save
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={styles.sessionRenameActionButton}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancel session rename"
+                  onPress={() => {
+                    setIsSessionRenameOpen(false);
+                    setSessionRenameDraft('');
+                  }}
+                >
+                  <Text
+                    style={styles.sessionRenameActionButtonText}
+                    maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                  >
+                    Cancel
+                  </Text>
+                </Pressable>
+              </View>
+            ) : null}
             {sessionsError ? (
               <Text style={styles.sessionErrorText} maxFontSizeMultiplier={MAX_TEXT_SCALE}>
                 {sessionsError}
@@ -1795,6 +2189,7 @@ export default function App() {
               >
                 {visibleSessions.map((session) => {
                   const selected = session.key === activeSessionKey;
+                  const pinned = isSessionPinned(session.key);
                   return (
                     <Pressable
                       key={session.key}
@@ -1805,7 +2200,7 @@ export default function App() {
                           styles.sessionChipDisabled,
                       ]}
                       accessibilityRole="button"
-                      accessibilityLabel={`Switch to session ${sessionDisplayName(session)}`}
+                      accessibilityLabel={`Switch to session ${getSessionTitle(session)}`}
                       onPress={() => {
                         void switchSession(session.key);
                       }}
@@ -1819,7 +2214,7 @@ export default function App() {
                         numberOfLines={1}
                         maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
                       >
-                        {sessionDisplayName(session)}
+                        {pinned ? `★ ${getSessionTitle(session)}` : getSessionTitle(session)}
                       </Text>
                       <Text
                         style={[
@@ -1828,7 +2223,9 @@ export default function App() {
                         ]}
                         maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
                       >
-                        {formatSessionUpdatedAt(session.updatedAt) || session.key}
+                        {pinned
+                          ? `Pinned${formatSessionUpdatedAt(session.updatedAt) ? ` · ${formatSessionUpdatedAt(session.updatedAt)}` : ''}`
+                          : formatSessionUpdatedAt(session.updatedAt) || session.key}
                       </Text>
                     </Pressable>
                   );
@@ -2741,6 +3138,65 @@ function createStyles(isDarkTheme: boolean) {
       opacity: 0.55,
     },
     sessionActionButtonText: {
+      fontSize: 11,
+      color: colors.textSecondary,
+      fontWeight: '600',
+    },
+    sessionManageRow: {
+      marginTop: 8,
+      flexDirection: 'row',
+      gap: 8,
+    },
+    sessionManageButton: {
+      minHeight: 32,
+      borderRadius: 9,
+      borderWidth: 1.5,
+      borderColor: colors.inputBorder,
+      backgroundColor: colors.inputBg,
+      paddingHorizontal: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    sessionManageButtonDanger: {
+      borderColor: isDarkTheme ? 'rgba(220,38,38,0.44)' : 'rgba(220,38,38,0.24)',
+    },
+    sessionManageButtonDisabled: {
+      opacity: 0.55,
+    },
+    sessionManageButtonText: {
+      fontSize: 11,
+      color: colors.textSecondary,
+      fontWeight: '600',
+    },
+    sessionManageButtonDangerText: {
+      color: colors.errorText,
+    },
+    sessionRenameRow: {
+      marginTop: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    sessionRenameInput: {
+      flex: 1,
+      minHeight: 40,
+      paddingVertical: 8,
+      fontSize: 13,
+    },
+    sessionRenameActionButton: {
+      minHeight: 34,
+      borderRadius: 9,
+      borderWidth: 1.5,
+      borderColor: colors.inputBorder,
+      backgroundColor: colors.inputBg,
+      paddingHorizontal: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    sessionRenameActionButtonDisabled: {
+      opacity: 0.55,
+    },
+    sessionRenameActionButtonText: {
       fontSize: 11,
       color: colors.textSecondary,
       fontWeight: '600',

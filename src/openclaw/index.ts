@@ -6,6 +6,7 @@ export {
   type GatewayClientOptions,
   type ModelEntry,
   type ModelsListResponse,
+  type SessionPatchInput,
 } from './client';
 
 export {

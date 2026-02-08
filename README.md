@@ -138,7 +138,7 @@ Notes:
 - OpenClaw Gateway connection with URL + token/password
 - Streaming response rendering with per-turn states (`WAIT`, `OK`, `ERR`)
 - Auto reconnect support
-- Session list + session switching (`sessions.list` / `chat.history`)
+- Session management: list, switch, rename, pin/unpin, delete (`sessions.list` / `chat.history` / `sessions.patch` / `sessions.delete`)
 - Persistent settings for gateway URL, token/password, theme, speech language, and session key
 - Local device identity generation/signing for gateway auth
 

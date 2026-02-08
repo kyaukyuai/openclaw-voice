@@ -107,6 +107,14 @@ export interface ModelsListResponse {
   models: ModelEntry[];
 }
 
+export interface SessionPatchInput {
+  label?: string;
+  displayName?: string;
+  subject?: string;
+  room?: string;
+  [key: string]: unknown;
+}
+
 // ─── Gateway Error ──────────────────────────────────────────────────────────────
 
 export class GatewayError extends Error {
@@ -453,6 +461,69 @@ export class GatewayClient {
       },
       15_000,
     );
+  }
+
+  /**
+   * Patch session metadata (e.g. label/displayName).
+   * Uses a few payload shapes for compatibility with gateway variants.
+   */
+  async sessionsPatch(
+    sessionKey: string,
+    patch: SessionPatchInput,
+  ): Promise<void> {
+    const payloads: Array<Record<string, unknown>> = [
+      { sessionKey, patch },
+      { key: sessionKey, patch },
+      { sessionKey, ...patch },
+      { key: sessionKey, ...patch },
+    ];
+
+    let lastError: unknown;
+    for (const payload of payloads) {
+      try {
+        await this.request(GatewayMethods.SESSIONS_PATCH, payload, 10_000);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (!(error instanceof GatewayError) || error.code !== "INVALID_REQUEST") {
+          throw error;
+        }
+      }
+    }
+
+    throw lastError instanceof Error
+      ? lastError
+      : new Error("sessions.patch failed");
+  }
+
+  /**
+   * Delete a session by key.
+   * Uses a few payload shapes for compatibility with gateway variants.
+   */
+  async sessionsDelete(sessionKey: string): Promise<void> {
+    const payloads: Array<Record<string, unknown>> = [
+      { sessionKey },
+      { key: sessionKey },
+      { sessionKeys: [sessionKey] },
+      { keys: [sessionKey] },
+    ];
+
+    let lastError: unknown;
+    for (const payload of payloads) {
+      try {
+        await this.request(GatewayMethods.SESSIONS_DELETE, payload, 10_000);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (!(error instanceof GatewayError) || error.code !== "INVALID_REQUEST") {
+          throw error;
+        }
+      }
+    }
+
+    throw lastError instanceof Error
+      ? lastError
+      : new Error("sessions.delete failed");
   }
 
   /**
