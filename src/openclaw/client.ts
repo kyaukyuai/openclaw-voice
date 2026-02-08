@@ -686,7 +686,7 @@ export class GatewayClient {
 
     if (payload.decision === "approved") {
       // Retry connect now that we're approved
-      console.log("[GatewayClient] Device approved, retrying connect...");
+      console.info("[GatewayClient] Device approved, retrying connect...");
       this.sendConnectFrame();
     } else {
       // Rejected - fail the connection

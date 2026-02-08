@@ -32,8 +32,11 @@ jobs:
         run: |
           node -e "const fs=require('fs'); const pkg=require('./package.json'); if (pkg.main !== 'index.ts') { console.error('package.json main should be index.ts after pack'); process.exit(1); } if (fs.existsSync('.package.json.app.backup')) { console.error('temporary manifest backup should be cleaned up'); process.exit(1); }"
 
-      - name: Lint (if present)
-        run: npm run lint --if-present
+      - name: Lint
+        run: npm run lint
 
-      - name: Test (if present)
-        run: npm test --if-present
+      - name: Test
+        run: npm test
+
+      - name: Tarball install smoke test
+        run: npm run smoke:pack-install
