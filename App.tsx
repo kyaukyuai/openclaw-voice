@@ -156,11 +156,20 @@ function getHapticsModule(): HapticsModule | null {
 }
 
 async function triggerHaptic(
-  type: 'record-start' | 'record-stop' | 'send-success' | 'send-error',
+  type:
+    | 'button-press'
+    | 'record-start'
+    | 'record-stop'
+    | 'send-success'
+    | 'send-error',
 ): Promise<void> {
   const haptics = getHapticsModule();
   if (haptics) {
     try {
+      if (type === 'button-press') {
+        await haptics.impactAsync?.(haptics.ImpactFeedbackStyle?.Medium);
+        return;
+      }
       if (type === 'send-success') {
         await haptics.notificationAsync?.(
           haptics.NotificationFeedbackType?.Success,
@@ -183,7 +192,7 @@ async function triggerHaptic(
       // fallback below
     }
   }
-  Vibration.vibrate(type === 'send-error' ? 20 : 10);
+  Vibration.vibrate(type === 'send-error' ? 20 : type === 'button-press' ? 6 : 10);
 }
 
 function toTextContent(message?: ChatMessage): string {
@@ -853,6 +862,7 @@ export default function App() {
 
   const handleHoldToTalkPressIn = () => {
     if (isRecognizing || isSending) return;
+    void triggerHaptic('button-press');
     Keyboard.dismiss();
     setFocusedField(null);
     holdActivatedRef.current = false;
@@ -1471,6 +1481,9 @@ export default function App() {
                 Keyboard.dismiss();
                 setFocusedField(null);
                 void sendToGateway(text);
+              }}
+              onPressIn={() => {
+                void triggerHaptic('button-press');
               }}
               disabled={!isGatewayConnected || isSending}
             >

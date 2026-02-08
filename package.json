@@ -39,6 +39,7 @@
     "base-64": "^1.0.0",
     "expo": "~54.0.33",
     "expo-crypto": "^15.0.8",
+    "expo-haptics": "^15.0.8",
     "expo-secure-store": "^15.0.8",
     "expo-speech-recognition": "^3.1.0",
     "expo-status-bar": "~3.0.9",
