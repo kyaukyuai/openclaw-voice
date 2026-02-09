@@ -36,6 +36,16 @@ import {
   type SessionEntry,
   type Storage as OpenClawStorage,
 } from './src/openclaw';
+import DebugInfoPanel from './src/ui/DebugInfoPanel';
+import {
+  buildHistoryRefreshNotice,
+  computeAutoConnectRetryPlan,
+  normalizeMessageForDedupe,
+  resolveSendDispatch,
+  shouldAttemptFinalRecovery,
+  shouldStartStartupAutoConnect,
+  isIncompleteAssistantContent,
+} from './src/ui/runtime-logic';
 
 const CONNECTION_LABELS: Record<ConnectionState, string> = {
   disconnected: 'Disconnected',
@@ -349,20 +359,6 @@ function createTurnId(): string {
   return `turn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
-function createLocalIdempotencyKey(): string {
-  return `idem-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function normalizeMessageForDedupe(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
-}
-
-function isIncompleteAssistantContent(value: string): boolean {
-  const normalized = value.trim();
-  if (!normalized) return true;
-  return normalized === 'Responding...' || normalized === 'No response';
-}
-
 function createSessionKey(): string {
   return `mobile-openclaw-${Date.now().toString(36)}-${Math.random()
     .toString(36)
@@ -600,6 +596,7 @@ export default function App() {
     useState<ConnectionState>('disconnected');
   const [gatewayError, setGatewayError] = useState<string | null>(null);
   const [gatewayEventState, setGatewayEventState] = useState('idle');
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [chatTurns, setChatTurns] = useState<ChatTurn[]>([]);
   const [activeSessionKey, setActiveSessionKey] = useState(DEFAULT_SESSION_KEY);
@@ -999,6 +996,7 @@ export default function App() {
       clientRef.current = null;
     }
     activeRunIdRef.current = null;
+    setActiveRunId(null);
     pendingTurnIdRef.current = null;
     runIdToTurnIdRef.current.clear();
     setIsSending(false);
@@ -1110,6 +1108,7 @@ export default function App() {
       setIsSending(false);
       setGatewayEventState('idle');
       activeRunIdRef.current = null;
+      setActiveRunId(null);
       pendingTurnIdRef.current = null;
       runIdToTurnIdRef.current.clear();
 
@@ -1256,33 +1255,24 @@ export default function App() {
         setGatewayError('No text to send. Please record your voice first.');
         return;
       }
-      const normalizedMessage = normalizeMessageForDedupe(message);
-      const now = Date.now();
-      const previousSend = sendFingerprintRef.current;
-      const isDuplicateRapidSend =
-        Boolean(previousSend) &&
-        previousSend?.sessionKey === sessionKey &&
-        previousSend?.message === normalizedMessage &&
-        now - previousSend.sentAt < DUPLICATE_SEND_BLOCK_MS;
-      if (isDuplicateRapidSend) {
+      const dispatch = resolveSendDispatch(
+        sendFingerprintRef.current,
+        {
+          sessionKey,
+          message,
+          now: Date.now(),
+        },
+        {
+          duplicateBlockMs: DUPLICATE_SEND_BLOCK_MS,
+          reuseWindowMs: IDEMPOTENCY_REUSE_WINDOW_MS,
+        },
+      );
+      if (dispatch.blocked) {
         setGatewayError('This message was already sent. Please wait a moment.');
         return;
       }
-      const canReuseIdempotencyKey =
-        Boolean(previousSend) &&
-        previousSend?.sessionKey === sessionKey &&
-        previousSend?.message === normalizedMessage &&
-        now - previousSend.sentAt < IDEMPOTENCY_REUSE_WINDOW_MS;
-      const idempotencyKey =
-        canReuseIdempotencyKey && previousSend
-          ? previousSend.idempotencyKey
-          : createLocalIdempotencyKey();
-      sendFingerprintRef.current = {
-        sessionKey,
-        message: normalizedMessage,
-        sentAt: now,
-        idempotencyKey,
-      };
+      const { idempotencyKey } = dispatch;
+      sendFingerprintRef.current = dispatch.nextFingerprint;
 
       setGatewayError(null);
       setGatewayEventState('sending');
@@ -1312,6 +1302,7 @@ export default function App() {
         setInterimTranscript('');
         void triggerHaptic('send-success');
         activeRunIdRef.current = result.runId;
+        setActiveRunId(result.runId);
         runIdToTurnIdRef.current.set(result.runId, turnId);
         pendingTurnIdRef.current = null;
 
@@ -1375,7 +1366,8 @@ export default function App() {
         ) {
           setIsSending(false);
           activeRunIdRef.current = null;
-          if (state === 'complete' && !text.trim()) {
+          setActiveRunId(null);
+          if (state === 'complete' && shouldAttemptFinalRecovery(text)) {
             scheduleFinalResponseRecovery(activeSessionKeyRef.current);
           }
         }
@@ -1386,6 +1378,7 @@ export default function App() {
 
     if (state === 'delta' || state === 'streaming') {
       activeRunIdRef.current = payload.runId;
+      setActiveRunId(payload.runId);
       setIsSending(true);
       updateChatTurn(turnId, (turn) => ({
         ...turn,
@@ -1399,6 +1392,7 @@ export default function App() {
     if (state === 'complete') {
       setIsSending(false);
       activeRunIdRef.current = null;
+      setActiveRunId(null);
       runIdToTurnIdRef.current.delete(payload.runId);
       clearFinalResponseRecoveryTimer();
       const fallbackText =
@@ -1412,7 +1406,7 @@ export default function App() {
         assistantText: text || turn.assistantText || fallbackText,
       }));
       scheduleActiveHistorySync();
-      if (!text.trim() || isIncompleteAssistantContent(text)) {
+      if (shouldAttemptFinalRecovery(text)) {
         scheduleFinalResponseRecovery(activeSessionKeyRef.current);
       }
       void refreshSessions();
@@ -1426,6 +1420,7 @@ export default function App() {
       setGatewayError(`Gateway error: ${message}`);
       setIsSending(false);
       activeRunIdRef.current = null;
+      setActiveRunId(null);
       runIdToTurnIdRef.current.delete(payload.runId);
       updateChatTurn(turnId, (turn) => ({
         ...turn,
@@ -1443,6 +1438,7 @@ export default function App() {
       setGatewayError('The Gateway response was aborted.');
       setIsSending(false);
       activeRunIdRef.current = null;
+      setActiveRunId(null);
       runIdToTurnIdRef.current.delete(payload.runId);
       updateChatTurn(turnId, (turn) => ({
         ...turn,
@@ -1549,24 +1545,24 @@ export default function App() {
       disconnectGateway();
       const errorText = errorMessage(err);
       if (isAutoConnect) {
-        if (autoAttempt < STARTUP_AUTO_CONNECT_MAX_ATTEMPTS) {
-          const nextAttempt = autoAttempt + 1;
-          const retryDelay = STARTUP_AUTO_CONNECT_RETRY_BASE_MS * autoAttempt;
+        const retryPlan = computeAutoConnectRetryPlan({
+          attempt: autoAttempt,
+          maxAttempts: STARTUP_AUTO_CONNECT_MAX_ATTEMPTS,
+          baseDelayMs: STARTUP_AUTO_CONNECT_RETRY_BASE_MS,
+          errorText,
+        });
+        if (retryPlan.shouldRetry) {
           clearStartupAutoConnectRetryTimer();
           startupAutoConnectRetryTimerRef.current = setTimeout(() => {
             startupAutoConnectRetryTimerRef.current = null;
             if (isUnmountingRef.current) return;
             if (!gatewayUrlRef.current.trim()) return;
             if (connectionStateRef.current !== 'disconnected') return;
-            void connectGateway({ auto: true, autoAttempt: nextAttempt });
-          }, retryDelay);
-          setGatewayError(
-            `Gateway auto-connect failed (${autoAttempt}/${STARTUP_AUTO_CONNECT_MAX_ATTEMPTS}). Retrying...`,
-          );
+            void connectGateway({ auto: true, autoAttempt: retryPlan.nextAttempt });
+          }, retryPlan.delayMs);
+          setGatewayError(retryPlan.message);
         } else {
-          setGatewayError(
-            `Gateway auto-connect failed: ${errorText}. Tap Connect to retry manually.`,
-          );
+          setGatewayError(retryPlan.message);
         }
       } else {
         setGatewayError(`Gateway connection failed: ${errorText}`);
@@ -1579,10 +1575,16 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!settingsReady) return;
-    if (startupAutoConnectAttemptedRef.current) return;
-    if (!gatewayUrl.trim()) return;
-    if (connectionState !== 'disconnected') return;
+    if (
+      !shouldStartStartupAutoConnect({
+        settingsReady,
+        alreadyAttempted: startupAutoConnectAttemptedRef.current,
+        gatewayUrl,
+        connectionState,
+      })
+    ) {
+      return;
+    }
     startupAutoConnectAttemptedRef.current = true;
     startupAutoConnectAttemptRef.current = 1;
     void connectGateway({ auto: true, autoAttempt: 1 });
@@ -1781,7 +1783,10 @@ export default function App() {
           const stillIncomplete =
             !latestTurn ||
             isTurnWaitingState(latestTurn.state) ||
-            isIncompleteAssistantContent(latestTurn.assistantText);
+            shouldAttemptFinalRecovery(
+              latestTurn.assistantText,
+              latestTurn.assistantText,
+            );
 
           if (stillIncomplete) {
             scheduleFinalResponseRecovery(sessionKey, attempt + 1);
@@ -1981,10 +1986,12 @@ export default function App() {
       if (synced) {
         const now = Date.now();
         setHistoryLastSyncedAt(now);
-        showHistoryRefreshNotice('success', `Updated ${formatClockLabel(now)}`);
+        const notice = buildHistoryRefreshNotice(true, formatClockLabel(now));
+        showHistoryRefreshNotice(notice.kind, notice.message);
         return;
       }
-      showHistoryRefreshNotice('error', 'Refresh failed');
+      const notice = buildHistoryRefreshNotice(false);
+      showHistoryRefreshNotice(notice.kind, notice.message);
     })();
   }, [
     clearHistoryNoticeTimer,
@@ -2738,6 +2745,18 @@ export default function App() {
                       </View>
                     </View>
                   </View>
+                  {ENABLE_DEBUG_WARNINGS ? (
+                    <DebugInfoPanel
+                      isDarkTheme={isDarkTheme}
+                      connectionState={connectionState}
+                      gatewayEventState={gatewayEventState}
+                      activeSessionKey={activeSessionKey}
+                      activeRunId={activeRunId}
+                      historyLastSyncedAt={historyLastSyncedAt}
+                      isStartupAutoConnecting={isStartupAutoConnecting}
+                      startupAutoConnectAttempt={startupAutoConnectAttemptRef.current}
+                    />
+                  ) : null}
                 </View>
               </ScrollView>
           </KeyboardAvoidingView>
