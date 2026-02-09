@@ -86,6 +86,7 @@ const STORAGE_KEYS = {
   quickTextRightIcon: 'mobile-openclaw.quick-text-right-icon',
   sessionKey: 'mobile-openclaw.session-key',
   sessionPrefs: 'mobile-openclaw.session-prefs',
+  outboxQueue: 'mobile-openclaw.outbox-queue',
 };
 
 const OPENCLAW_IDENTITY_STORAGE_KEY = 'openclaw_device_identity';
@@ -652,6 +653,68 @@ function parseSessionPreferences(raw: string | null): SessionPreferences {
   }
 }
 
+function parseOutboxQueue(raw: string | null): OutboxQueueItem[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+
+    const next: OutboxQueueItem[] = [];
+    parsed.forEach((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return;
+      const record = entry as Record<string, unknown>;
+
+      const id = typeof record.id === 'string' ? record.id.trim() : '';
+      const sessionKey =
+        typeof record.sessionKey === 'string' ? record.sessionKey.trim() : '';
+      const message = typeof record.message === 'string' ? record.message.trim() : '';
+      const turnId = typeof record.turnId === 'string' ? record.turnId.trim() : '';
+      const idempotencyKey =
+        typeof record.idempotencyKey === 'string'
+          ? record.idempotencyKey.trim()
+          : '';
+      if (!id || !sessionKey || !message || !turnId || !idempotencyKey) return;
+
+      const now = Date.now();
+      const createdAt =
+        typeof record.createdAt === 'number' && Number.isFinite(record.createdAt)
+          ? Math.max(0, record.createdAt)
+          : now;
+      const retryCountRaw =
+        typeof record.retryCount === 'number' && Number.isFinite(record.retryCount)
+          ? record.retryCount
+          : 0;
+      const retryCount = Math.max(0, Math.floor(retryCountRaw));
+      const nextRetryAtRaw =
+        typeof record.nextRetryAt === 'number' && Number.isFinite(record.nextRetryAt)
+          ? record.nextRetryAt
+          : createdAt;
+      const nextRetryAt = Math.max(createdAt, nextRetryAtRaw);
+      const lastError =
+        typeof record.lastError === 'string' && record.lastError.trim()
+          ? record.lastError.trim()
+          : null;
+
+      next.push({
+        id,
+        sessionKey,
+        message,
+        turnId,
+        idempotencyKey,
+        createdAt,
+        retryCount,
+        nextRetryAt,
+        lastError,
+      });
+    });
+
+    next.sort((a, b) => a.createdAt - b.createdAt);
+    return next;
+  } catch {
+    return [];
+  }
+}
+
 export default function App() {
   const [gatewayUrl, setGatewayUrl] = useState(DEFAULT_GATEWAY_URL);
   const [authToken, setAuthToken] = useState('');
@@ -955,6 +1018,7 @@ export default function App() {
           savedQuickTextRightIcon,
           savedSessionKey,
           savedSessionPrefs,
+          savedOutboxQueue,
         ] = await Promise.all([
           kvStore.getItemAsync(STORAGE_KEYS.gatewayUrl),
           kvStore.getItemAsync(STORAGE_KEYS.authToken),
@@ -967,6 +1031,7 @@ export default function App() {
           kvStore.getItemAsync(STORAGE_KEYS.quickTextRightIcon),
           kvStore.getItemAsync(STORAGE_KEYS.sessionKey),
           kvStore.getItemAsync(STORAGE_KEYS.sessionPrefs),
+          kvStore.getItemAsync(STORAGE_KEYS.outboxQueue),
         ]);
         if (!alive) return;
 
@@ -998,6 +1063,39 @@ export default function App() {
           setActiveSessionKey(savedSessionKey.trim());
         }
         setSessionPreferences(parseSessionPreferences(savedSessionPrefs));
+        const restoredOutbox = parseOutboxQueue(savedOutboxQueue);
+        if (restoredOutbox.length > 0) {
+          setOutboxQueue(restoredOutbox);
+          setGatewayEventState('queued');
+
+          const turnsBySession = new Map<string, ChatTurn[]>();
+          restoredOutbox.forEach((item) => {
+            const turns = turnsBySession.get(item.sessionKey) ?? [];
+            turns.push({
+              id: item.turnId,
+              userText: item.message,
+              assistantText: item.lastError
+                ? `Retrying automatically... (${item.lastError})`
+                : 'Waiting for connection...',
+              state: 'queued',
+              createdAt: item.createdAt,
+            });
+            turnsBySession.set(item.sessionKey, turns);
+          });
+
+          turnsBySession.forEach((turns, sessionKey) => {
+            const ordered = [...turns].sort((a, b) => a.createdAt - b.createdAt);
+            sessionTurnsRef.current.set(sessionKey, ordered);
+          });
+
+          const restoredActiveSessionKey =
+            (savedSessionKey?.trim() || activeSessionKeyRef.current).trim() ||
+            DEFAULT_SESSION_KEY;
+          const restoredActiveTurns = turnsBySession.get(restoredActiveSessionKey);
+          if (restoredActiveTurns?.length) {
+            setChatTurns([...restoredActiveTurns].sort((a, b) => a.createdAt - b.createdAt));
+          }
+        }
         if (savedIdentity) {
           openClawIdentityMemory.set(
             OPENCLAW_IDENTITY_STORAGE_KEY,
@@ -1118,6 +1216,24 @@ export default function App() {
       );
     });
   }, [persistSetting, sessionPreferences, settingsReady]);
+
+  useEffect(() => {
+    if (!settingsReady) return;
+    void (async () => {
+      try {
+        if (outboxQueue.length === 0) {
+          await kvStore.deleteItemAsync(STORAGE_KEYS.outboxQueue);
+          return;
+        }
+        await kvStore.setItemAsync(
+          STORAGE_KEYS.outboxQueue,
+          JSON.stringify(outboxQueue),
+        );
+      } catch {
+        // ignore outbox persistence errors
+      }
+    })();
+  }, [outboxQueue, settingsReady]);
 
   useEffect(() => {
     if (!isGatewayConnected) {
