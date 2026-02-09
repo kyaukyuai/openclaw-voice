@@ -31,7 +31,7 @@ Speak -> edit -> send -> stream response.
 
 - Fast voice-to-chat workflow optimized for iOS
 - Reusable `GatewayClient` SDK on npm (`openclaw-voice`)
-- Streaming response handling with reconnect and pairing flow support
+- Streaming + recovery handling for unstable mobile networks
 - Secure device identity signing via Ed25519
 
 ## Run The App (5 Minutes)
@@ -133,14 +133,16 @@ Notes:
 
 ## Features
 
-- Speech-to-text input using `expo-speech-recognition`
-- Editable transcript before sending
-- OpenClaw Gateway connection with URL + token/password
+- Voice input with hold-to-record (`expo-speech-recognition`)
+- Editable transcript and quick text insert buttons
+- Speech language switch (`ja-JP` / `en-US`)
+- Dedicated **Settings** screen and **Sessions** screen
+- Session management: list, switch, rename, pin/unpin, create
+- Gateway connect/reconnect flow with startup auto-connect retry
+- History sync and manual refresh with status notice
 - Streaming response rendering with per-turn states (`WAIT`, `OK`, `ERR`)
-- Auto reconnect support
-- Session management: list, switch, rename, pin/unpin, delete (`sessions.list` / `chat.history` / `sessions.patch` / `sessions.delete`)
-- Persistent settings for gateway URL, token/password, theme, speech language, and session key
-- Local device identity generation/signing for gateway auth
+- Markdown response rendering with URL linkification
+- Persistent local settings and secure local device identity reuse
 
 ## Environment Variables
 
@@ -155,7 +157,7 @@ cp .env.example .env
 - `EXPO_PUBLIC_DEFAULT_SESSION_KEY` (default: `main`)
 - `EXPO_PUBLIC_GATEWAY_CLIENT_ID` (default: `openclaw-ios`)
 - `EXPO_PUBLIC_GATEWAY_DISPLAY_NAME` (default: `OpenClawVoice`)
-- `EXPO_PUBLIC_DEBUG_MODE` (`true` to show warnings in dev, default: `false`)
+- `EXPO_PUBLIC_DEBUG_MODE` (`true` to show dev warnings and runtime debug panel, default: `false`)
 
 ## Connection Defaults
 
@@ -175,7 +177,7 @@ Device identity is generated locally and reused when persistent storage is avail
 - `npm run web` - Run web target
 - `npm run typecheck` - Run TypeScript checks
 - `npm run lint` - Run repository lint checks
-- `npm test` - Run manifest switch regression tests
+- `npm test` - Run regression tests (runtime logic + manifest switch)
 - `npm run smoke:pack-install` - Pack tarball and verify install/import from a clean temp app
 - `npm run build:package` - Build npm package files to `dist/`
 
@@ -203,6 +205,12 @@ OPENCLAW_SMOKE_SKIP_INSTALL=1 npm run smoke:pack-install
 - Preferred exposure path order: Tailscale/WireGuard -> Cloudflare Tunnel + access control -> Hardened VPS reverse proxy.
 - Do not expose raw Gateway ports publicly.
 - Rotate credentials and keep TLS/server packages up to date.
+
+## Funding
+
+If this project helps your workflow, you can support maintenance on GitHub Sponsors:
+
+- [@kyaukyuai](https://github.com/sponsors/kyaukyuai)
 
 ## Troubleshooting
 
