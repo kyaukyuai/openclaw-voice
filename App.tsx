@@ -1,5 +1,12 @@
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+} from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import Markdown, { MarkdownIt } from 'react-native-markdown-display';
 import {
@@ -74,6 +81,8 @@ const STORAGE_KEYS = {
   speechLang: 'mobile-openclaw.speech-lang',
   quickTextLeft: 'mobile-openclaw.quick-text-left',
   quickTextRight: 'mobile-openclaw.quick-text-right',
+  quickTextLeftIcon: 'mobile-openclaw.quick-text-left-icon',
+  quickTextRightIcon: 'mobile-openclaw.quick-text-right-icon',
   sessionKey: 'mobile-openclaw.session-key',
   sessionPrefs: 'mobile-openclaw.session-prefs',
 };
@@ -151,6 +160,7 @@ type HistoryListItem =
 type AppTheme = 'dark' | 'light';
 type SpeechLang = 'ja-JP' | 'en-US';
 type QuickTextButtonSide = 'left' | 'right';
+type QuickTextIcon = ComponentProps<typeof Ionicons>['name'];
 type FocusField =
   | 'gateway-url'
   | 'auth-token'
@@ -174,6 +184,22 @@ const DEFAULT_THEME: AppTheme =
 const DEFAULT_SPEECH_LANG: SpeechLang = 'ja-JP';
 const DEFAULT_QUICK_TEXT_LEFT = 'ありがとう';
 const DEFAULT_QUICK_TEXT_RIGHT = 'お願いします';
+const DEFAULT_QUICK_TEXT_LEFT_ICON: QuickTextIcon = 'chatbubble-ellipses-outline';
+const DEFAULT_QUICK_TEXT_RIGHT_ICON: QuickTextIcon = 'chatbubble-ellipses-outline';
+const QUICK_TEXT_ICON_OPTIONS: Array<{
+  value: QuickTextIcon;
+  label: string;
+}> = [
+  { value: 'chatbubble-ellipses-outline', label: 'Chat' },
+  { value: 'flash-outline', label: 'Flash' },
+  { value: 'checkmark-done-outline', label: 'Done' },
+  { value: 'bookmark-outline', label: 'Bookmark' },
+  { value: 'heart-outline', label: 'Heart' },
+  { value: 'star-outline', label: 'Star' },
+];
+const QUICK_TEXT_ICON_SET = new Set<QuickTextIcon>(
+  QUICK_TEXT_ICON_OPTIONS.map((option) => option.value),
+);
 const QUICK_TEXT_TOOLTIP_HIDE_MS = 1600;
 const HISTORY_NOTICE_HIDE_MS = 2200;
 const DUPLICATE_SEND_BLOCK_MS = 1400;
@@ -552,6 +578,17 @@ function formatClockLabel(timestamp: number): string {
   });
 }
 
+function normalizeQuickTextIcon(
+  value: string | null | undefined,
+  fallback: QuickTextIcon,
+): QuickTextIcon {
+  const candidate = (value ?? '').trim() as QuickTextIcon;
+  if (QUICK_TEXT_ICON_SET.has(candidate)) {
+    return candidate;
+  }
+  return fallback;
+}
+
 function parseSessionPreferences(raw: string | null): SessionPreferences {
   if (!raw) return {};
   try {
@@ -589,6 +626,12 @@ export default function App() {
   const [speechLang, setSpeechLang] = useState<SpeechLang>(DEFAULT_SPEECH_LANG);
   const [quickTextLeft, setQuickTextLeft] = useState(DEFAULT_QUICK_TEXT_LEFT);
   const [quickTextRight, setQuickTextRight] = useState(DEFAULT_QUICK_TEXT_RIGHT);
+  const [quickTextLeftIcon, setQuickTextLeftIcon] = useState<QuickTextIcon>(
+    DEFAULT_QUICK_TEXT_LEFT_ICON,
+  );
+  const [quickTextRightIcon, setQuickTextRightIcon] = useState<QuickTextIcon>(
+    DEFAULT_QUICK_TEXT_RIGHT_ICON,
+  );
   const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
   const [isSessionPanelOpen, setIsSessionPanelOpen] = useState(false);
   const [settingsReady, setSettingsReady] = useState(false);
@@ -769,6 +812,8 @@ export default function App() {
           savedSpeechLang,
           savedQuickTextLeft,
           savedQuickTextRight,
+          savedQuickTextLeftIcon,
+          savedQuickTextRightIcon,
           savedSessionKey,
           savedSessionPrefs,
         ] = await Promise.all([
@@ -779,6 +824,8 @@ export default function App() {
           kvStore.getItemAsync(STORAGE_KEYS.speechLang),
           kvStore.getItemAsync(STORAGE_KEYS.quickTextLeft),
           kvStore.getItemAsync(STORAGE_KEYS.quickTextRight),
+          kvStore.getItemAsync(STORAGE_KEYS.quickTextLeftIcon),
+          kvStore.getItemAsync(STORAGE_KEYS.quickTextRightIcon),
           kvStore.getItemAsync(STORAGE_KEYS.sessionKey),
           kvStore.getItemAsync(STORAGE_KEYS.sessionPrefs),
         ]);
@@ -797,6 +844,16 @@ export default function App() {
         }
         if (savedQuickTextRight != null) {
           setQuickTextRight(savedQuickTextRight);
+        }
+        if (savedQuickTextLeftIcon != null) {
+          setQuickTextLeftIcon(
+            normalizeQuickTextIcon(savedQuickTextLeftIcon, DEFAULT_QUICK_TEXT_LEFT_ICON),
+          );
+        }
+        if (savedQuickTextRightIcon != null) {
+          setQuickTextRightIcon(
+            normalizeQuickTextIcon(savedQuickTextRightIcon, DEFAULT_QUICK_TEXT_RIGHT_ICON),
+          );
         }
         if (savedSessionKey?.trim()) {
           setActiveSessionKey(savedSessionKey.trim());
@@ -881,6 +938,20 @@ export default function App() {
       }
     });
   }, [persistSetting, quickTextRight, settingsReady]);
+
+  useEffect(() => {
+    if (!settingsReady) return;
+    persistSetting(async () => {
+      await kvStore.setItemAsync(STORAGE_KEYS.quickTextLeftIcon, quickTextLeftIcon);
+    });
+  }, [persistSetting, quickTextLeftIcon, settingsReady]);
+
+  useEffect(() => {
+    if (!settingsReady) return;
+    persistSetting(async () => {
+      await kvStore.setItemAsync(STORAGE_KEYS.quickTextRightIcon, quickTextRightIcon);
+    });
+  }, [persistSetting, quickTextRightIcon, settingsReady]);
 
   useEffect(() => {
     if (!settingsReady) return;
@@ -2708,6 +2779,39 @@ export default function App() {
                             )
                           }
                         />
+                        <Text
+                          style={[styles.label, styles.quickTextIconLabel]}
+                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                        >
+                          Icon
+                        </Text>
+                        <View style={styles.quickTextIconPickerRow}>
+                          {QUICK_TEXT_ICON_OPTIONS.map((option) => {
+                            const selected = quickTextLeftIcon === option.value;
+                            return (
+                              <Pressable
+                                key={`left-${option.value}`}
+                                style={[
+                                  styles.quickTextIconOptionButton,
+                                  selected && styles.quickTextIconOptionButtonSelected,
+                                ]}
+                                accessibilityRole="button"
+                                accessibilityLabel={`Set left quick text icon to ${option.label}`}
+                                onPress={() => {
+                                  Keyboard.dismiss();
+                                  setFocusedField(null);
+                                  setQuickTextLeftIcon(option.value);
+                                }}
+                              >
+                                <Ionicons
+                                  name={option.value}
+                                  size={16}
+                                  color={selected ? currentBadgeIconColor : optionIconColor}
+                                />
+                              </Pressable>
+                            );
+                          })}
+                        </View>
                       </View>
                       <View style={styles.quickTextConfigItem}>
                         <Text style={styles.label} maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}>
@@ -2742,6 +2846,39 @@ export default function App() {
                             )
                           }
                         />
+                        <Text
+                          style={[styles.label, styles.quickTextIconLabel]}
+                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                        >
+                          Icon
+                        </Text>
+                        <View style={styles.quickTextIconPickerRow}>
+                          {QUICK_TEXT_ICON_OPTIONS.map((option) => {
+                            const selected = quickTextRightIcon === option.value;
+                            return (
+                              <Pressable
+                                key={`right-${option.value}`}
+                                style={[
+                                  styles.quickTextIconOptionButton,
+                                  selected && styles.quickTextIconOptionButtonSelected,
+                                ]}
+                                accessibilityRole="button"
+                                accessibilityLabel={`Set right quick text icon to ${option.label}`}
+                                onPress={() => {
+                                  Keyboard.dismiss();
+                                  setFocusedField(null);
+                                  setQuickTextRightIcon(option.value);
+                                }}
+                              >
+                                <Ionicons
+                                  name={option.value}
+                                  size={16}
+                                  color={selected ? currentBadgeIconColor : optionIconColor}
+                                />
+                              </Pressable>
+                            );
+                          })}
+                        </View>
                       </View>
                     </View>
                   </View>
@@ -3540,7 +3677,7 @@ export default function App() {
                   disabled={!canUseQuickTextLeft}
                 >
                   <Ionicons
-                    name="chatbubble-ellipses-outline"
+                    name={quickTextLeftIcon}
                     size={20}
                     style={styles.quickTextButtonIcon}
                   />
@@ -3652,7 +3789,7 @@ export default function App() {
                   disabled={!canUseQuickTextRight}
                 >
                   <Ionicons
-                    name="chatbubble-ellipses-outline"
+                    name={quickTextRightIcon}
                     size={20}
                     style={styles.quickTextButtonIcon}
                   />
@@ -4153,6 +4290,31 @@ function createStyles(isDarkTheme: boolean) {
       minHeight: 72,
       maxHeight: 120,
       paddingTop: 8,
+    },
+    quickTextIconLabel: {
+      marginTop: 6,
+    },
+    quickTextIconPickerRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginTop: 6,
+    },
+    quickTextIconOptionButton: {
+      width: 34,
+      height: 34,
+      borderRadius: 8,
+      borderWidth: 1.5,
+      borderColor: colors.inputBorder,
+      backgroundColor: colors.inputBg,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    quickTextIconOptionButtonSelected: {
+      borderColor: colors.inputBorderFocused,
+      backgroundColor: isDarkTheme
+        ? 'rgba(37,99,235,0.22)'
+        : 'rgba(37,99,235,0.10)',
     },
     sessionActionButton: {
       minHeight: 36,
