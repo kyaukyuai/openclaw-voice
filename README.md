@@ -124,7 +124,7 @@ Notes:
       <img src="https://raw.githubusercontent.com/kyaukyuai/openclaw-voice/main/docs/screenshots/sending.png" width="230" alt="Sending state" />
     </td>
     <td align="center" width="25%">
-      <strong>Response (Light)</strong><br>
+      <strong>Response</strong><br>
       <sub>Streamed response displayed</sub><br><br>
       <img src="https://raw.githubusercontent.com/kyaukyuai/openclaw-voice/main/docs/screenshots/response-light.png" width="230" alt="Response in light theme" />
     </td>
