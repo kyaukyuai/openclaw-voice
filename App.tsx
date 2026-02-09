@@ -20,6 +20,7 @@ import {
   Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  findNodeHandle,
   Platform,
   Pressable,
   SafeAreaView,
@@ -160,6 +161,7 @@ type HistoryListItem =
 type AppTheme = 'dark' | 'light';
 type SpeechLang = 'ja-JP' | 'en-US';
 type QuickTextButtonSide = 'left' | 'right';
+type QuickTextFocusField = 'quick-text-left' | 'quick-text-right';
 type QuickTextIcon = ComponentProps<typeof Ionicons>['name'];
 type FocusField =
   | 'gateway-url'
@@ -214,6 +216,7 @@ const QUICK_TEXT_ICON_SET = new Set<QuickTextIcon>(
 );
 const QUICK_TEXT_TOOLTIP_HIDE_MS = 1600;
 const HISTORY_NOTICE_HIDE_MS = 2200;
+const AUTH_TOKEN_AUTO_MASK_MS = 12000;
 const DUPLICATE_SEND_BLOCK_MS = 1400;
 const IDEMPOTENCY_REUSE_WINDOW_MS = 60_000;
 const SEND_TIMEOUT_MS = 30_000;
@@ -652,6 +655,7 @@ function parseSessionPreferences(raw: string | null): SessionPreferences {
 export default function App() {
   const [gatewayUrl, setGatewayUrl] = useState(DEFAULT_GATEWAY_URL);
   const [authToken, setAuthToken] = useState('');
+  const [isAuthTokenMasked, setIsAuthTokenMasked] = useState(true);
   const [speechLang, setSpeechLang] = useState<SpeechLang>(DEFAULT_SPEECH_LANG);
   const [quickTextLeft, setQuickTextLeft] = useState(DEFAULT_QUICK_TEXT_LEFT);
   const [quickTextRight, setQuickTextRight] = useState(DEFAULT_QUICK_TEXT_RIGHT);
@@ -719,6 +723,7 @@ export default function App() {
   const historyAutoScrollRef = useRef(true);
   const historySyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const historyNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const authTokenMaskTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const outboxRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const healthCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const healthCheckInFlightRef = useRef(false);
@@ -746,6 +751,10 @@ export default function App() {
   const quickTextLongPressResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const quickTextInputRefs = useRef<Record<QuickTextFocusField, TextInput | null>>({
+    'quick-text-left': null,
+    'quick-text-right': null,
+  });
   const quickTextLongPressSideRef = useRef<QuickTextButtonSide | null>(null);
   const holdActivatedRef = useRef(false);
   const keyboardBarAnim = useRef(new Animated.Value(0)).current;
@@ -780,6 +789,38 @@ export default function App() {
       historyNoticeTimerRef.current = null;
     }
   }, []);
+
+  const clearAuthTokenMaskTimer = useCallback(() => {
+    if (authTokenMaskTimerRef.current) {
+      clearTimeout(authTokenMaskTimerRef.current);
+      authTokenMaskTimerRef.current = null;
+    }
+  }, []);
+
+  const forceMaskAuthToken = useCallback(() => {
+    clearAuthTokenMaskTimer();
+    setIsAuthTokenMasked(true);
+  }, [clearAuthTokenMaskTimer]);
+
+  const toggleAuthTokenVisibility = useCallback(() => {
+    setIsAuthTokenMasked((current) => {
+      const next = !current;
+      clearAuthTokenMaskTimer();
+      if (!next) {
+        authTokenMaskTimerRef.current = setTimeout(() => {
+          authTokenMaskTimerRef.current = null;
+          setIsAuthTokenMasked(true);
+        }, AUTH_TOKEN_AUTO_MASK_MS);
+      }
+      return next;
+    });
+  }, [clearAuthTokenMaskTimer]);
+
+  useEffect(() => {
+    if (!shouldShowSettingsScreen) {
+      forceMaskAuthToken();
+    }
+  }, [forceMaskAuthToken, shouldShowSettingsScreen]);
 
   const clearOutboxRetryTimer = useCallback(() => {
     if (outboxRetryTimerRef.current) {
@@ -1885,6 +1926,7 @@ export default function App() {
       setGatewayError(null);
       setGatewayEventState('ready');
       setIsSettingsPanelOpen(false);
+      forceMaskAuthToken();
       if (isAutoConnect) {
         clearStartupAutoConnectRetryTimer();
         startupAutoConnectAttemptRef.current = 0;
@@ -1953,6 +1995,10 @@ export default function App() {
       if (historyNoticeTimerRef.current) {
         clearTimeout(historyNoticeTimerRef.current);
         historyNoticeTimerRef.current = null;
+      }
+      if (authTokenMaskTimerRef.current) {
+        clearTimeout(authTokenMaskTimerRef.current);
+        authTokenMaskTimerRef.current = null;
       }
       if (outboxRetryTimerRef.current) {
         clearTimeout(outboxRetryTimerRef.current);
@@ -2102,13 +2148,42 @@ export default function App() {
     [clearQuickTextLongPressResetTimer, hideQuickTextTooltip],
   );
 
-  const ensureSettingsFieldVisible = useCallback(() => {
+  const ensureSettingsFieldVisible = useCallback((field: QuickTextFocusField) => {
     if (settingsFocusScrollTimerRef.current) {
       clearTimeout(settingsFocusScrollTimerRef.current);
     }
     settingsFocusScrollTimerRef.current = setTimeout(() => {
       settingsFocusScrollTimerRef.current = null;
-      settingsScrollRef.current?.scrollToEnd({ animated: true });
+      const scrollView = settingsScrollRef.current;
+      const input = quickTextInputRefs.current[field];
+      if (!scrollView || !input) {
+        return;
+      }
+      const inputHandle = findNodeHandle(input);
+      if (!inputHandle) return;
+
+      const responder = (scrollView as unknown as {
+        getScrollResponder?: () => unknown;
+      }).getScrollResponder?.() as
+        | {
+            scrollResponderScrollNativeHandleToKeyboard?: (
+              nodeHandle: number,
+              additionalOffset?: number,
+              preventNegativeScrollOffset?: boolean,
+            ) => void;
+          }
+        | undefined;
+
+      if (responder?.scrollResponderScrollNativeHandleToKeyboard) {
+        responder.scrollResponderScrollNativeHandleToKeyboard(
+          inputHandle,
+          Platform.OS === 'ios' ? 28 : 16,
+          true,
+        );
+        return;
+      }
+
+      scrollView.scrollToEnd({ animated: true });
     }, Platform.OS === 'ios' ? 240 : 120);
   }, []);
 
@@ -2165,11 +2240,14 @@ export default function App() {
   const quickTextLeftLabel = quickTextLeft.trim();
   const quickTextRightLabel = quickTextRight.trim();
   const isTranscriptFocused = focusedField === 'transcript';
+  const isQuickTextFieldFocused =
+    focusedField === 'quick-text-left' || focusedField === 'quick-text-right';
+  const isQuickTextSettingsEditMode =
+    shouldShowSettingsScreen && isQuickTextFieldFocused;
   const isGatewayFieldFocused =
     focusedField === 'gateway-url' ||
     focusedField === 'auth-token' ||
-    focusedField === 'quick-text-left' ||
-    focusedField === 'quick-text-right';
+    isQuickTextFieldFocused;
   const showKeyboardActionBar =
     isKeyboardVisible && (isTranscriptFocused || isGatewayFieldFocused);
   const showDoneOnlyAction = showKeyboardActionBar && isGatewayFieldFocused;
@@ -2657,6 +2735,7 @@ export default function App() {
                 Keyboard.dismiss();
                 setFocusedField(null);
                 setIsSettingsPanelOpen(false);
+                forceMaskAuthToken();
                 const next = !isSessionPanelOpen;
                 setIsSessionPanelOpen(next);
                 if (next) {
@@ -2693,7 +2772,13 @@ export default function App() {
                 Keyboard.dismiss();
                 setFocusedField(null);
                 setIsSessionPanelOpen(false);
-                setIsSettingsPanelOpen((current) => !current);
+                setIsSettingsPanelOpen((current) => {
+                  const next = !current;
+                  if (!next) {
+                    forceMaskAuthToken();
+                  }
+                  return next;
+                });
               }}
               disabled={!isGatewayConnected}
             >
@@ -2712,6 +2797,7 @@ export default function App() {
           presentationStyle="fullScreen"
           onRequestClose={() => {
             if (!isGatewayConnected) return;
+            forceMaskAuthToken();
             setIsSettingsPanelOpen(false);
             setFocusedField(null);
             Keyboard.dismiss();
@@ -2773,6 +2859,7 @@ export default function App() {
                 accessibilityLabel="Close settings screen"
                 onPress={() => {
                   if (!isGatewayConnected) return;
+                  forceMaskAuthToken();
                   setIsSettingsPanelOpen(false);
                   setFocusedField(null);
                   Keyboard.dismiss();
@@ -2802,7 +2889,8 @@ export default function App() {
                 keyboardDismissMode="on-drag"
               >
                 <View style={styles.gatewayPanel}>
-                  <View style={styles.settingsSection}>
+                  {!isQuickTextSettingsEditMode ? (
+                    <View style={styles.settingsSection}>
                     <View style={styles.sectionTitleRow}>
                       <Ionicons name="link-outline" size={14} color={sectionIconColor} />
                       <Text
@@ -2844,28 +2932,55 @@ export default function App() {
                     >
                       Token (optional)
                     </Text>
-                    <TextInput
+                    <View
                       style={[
+                        styles.tokenInputRow,
                         styles.input,
                         focusedField === 'auth-token' && styles.inputFocused,
                       ]}
-                      maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                      value={authToken}
-                      onChangeText={setAuthToken}
-                      placeholder="gateway token or password"
-                      placeholderTextColor={placeholderColor}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      returnKeyType="done"
-                      blurOnSubmit
-                      onSubmitEditing={() => Keyboard.dismiss()}
-                      onFocus={() => setFocusedField('auth-token')}
-                      onBlur={() =>
-                        setFocusedField((current) =>
-                          current === 'auth-token' ? null : current,
-                        )
-                      }
-                    />
+                    >
+                      <TextInput
+                        style={styles.tokenInputField}
+                        maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                        value={authToken}
+                        onChangeText={setAuthToken}
+                        placeholder="gateway token or password"
+                        placeholderTextColor={placeholderColor}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        autoComplete="off"
+                        textContentType={isAuthTokenMasked ? 'password' : 'none'}
+                        secureTextEntry={isAuthTokenMasked}
+                        returnKeyType="done"
+                        blurOnSubmit
+                        onSubmitEditing={() => Keyboard.dismiss()}
+                        onFocus={() => setFocusedField('auth-token')}
+                        onBlur={() =>
+                          setFocusedField((current) =>
+                            current === 'auth-token' ? null : current,
+                          )
+                        }
+                      />
+                      <Pressable
+                        style={styles.tokenVisibilityButton}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          isAuthTokenMasked ? 'Show token' : 'Hide token'
+                        }
+                        accessibilityHint={
+                          isAuthTokenMasked
+                            ? 'Temporarily reveals token.'
+                            : 'Hide token value.'
+                        }
+                        onPress={toggleAuthTokenVisibility}
+                      >
+                        <Ionicons
+                          name={isAuthTokenMasked ? 'eye-outline' : 'eye-off-outline'}
+                          size={16}
+                          color={optionIconColor}
+                        />
+                      </Pressable>
+                    </View>
                     <View style={styles.connectionRow}>
                       <Pressable
                         style={[
@@ -2907,9 +3022,11 @@ export default function App() {
                         </Text>
                       </View>
                     ) : null}
-                  </View>
+                    </View>
+                  ) : null}
 
-                  <View style={[styles.settingsSection, styles.settingsSectionSpaced]}>
+                  {!isQuickTextSettingsEditMode ? (
+                    <View style={[styles.settingsSection, styles.settingsSectionSpaced]}>
                     <View style={styles.sectionTitleRow}>
                       <Ionicons
                         name="color-palette-outline"
@@ -2978,9 +3095,11 @@ export default function App() {
                       </Pressable>
                     </View>
 
-                  </View>
+                    </View>
+                  ) : null}
 
-                  <View style={[styles.settingsSection, styles.settingsSectionSpaced]}>
+                  {!isQuickTextSettingsEditMode ? (
+                    <View style={[styles.settingsSection, styles.settingsSectionSpaced]}>
                     <View style={styles.sectionTitleRow}>
                       <Ionicons name="mic-outline" size={14} color={sectionIconColor} />
                       <Text
@@ -3030,21 +3149,53 @@ export default function App() {
                         );
                       })}
                     </View>
-                  </View>
+                    </View>
+                  ) : null}
 
-                  <View style={[styles.settingsSection, styles.settingsSectionSpaced]}>
-                    <View style={styles.sectionTitleRow}>
-                      <Ionicons
-                        name="chatbubble-ellipses-outline"
-                        size={14}
-                        color={sectionIconColor}
-                      />
-                      <Text
-                        style={styles.settingsSectionTitle}
-                        maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                      >
-                        Quick Text
-                      </Text>
+                  <View
+                    style={[
+                      styles.settingsSection,
+                      !isQuickTextSettingsEditMode && styles.settingsSectionSpaced,
+                      isQuickTextSettingsEditMode && styles.settingsSectionFocused,
+                    ]}
+                  >
+                    <View style={styles.quickTextSectionHeaderRow}>
+                      <View style={styles.sectionTitleRow}>
+                        <Ionicons
+                          name="chatbubble-ellipses-outline"
+                          size={14}
+                          color={sectionIconColor}
+                        />
+                        <Text
+                          style={styles.settingsSectionTitle}
+                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                        >
+                          Quick Text
+                        </Text>
+                      </View>
+                      {isQuickTextSettingsEditMode ? (
+                        <Pressable
+                          style={styles.quickTextDoneButton}
+                          accessibilityRole="button"
+                          accessibilityLabel="Done editing quick text"
+                          onPress={() => {
+                            Keyboard.dismiss();
+                            setFocusedField(null);
+                          }}
+                        >
+                          <Ionicons
+                            name="checkmark-outline"
+                            size={12}
+                            color={actionIconColor}
+                          />
+                          <Text
+                            style={styles.quickTextDoneButtonText}
+                            maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                          >
+                            Done
+                          </Text>
+                        </Pressable>
+                      ) : null}
                     </View>
                     <View style={styles.quickTextConfigRow}>
                       <View style={styles.quickTextConfigItem}>
@@ -3052,6 +3203,9 @@ export default function App() {
                           Left
                         </Text>
                         <TextInput
+                          ref={(node) => {
+                            quickTextInputRefs.current['quick-text-left'] = node;
+                          }}
                           style={[
                             styles.input,
                             styles.quickTextConfigInput,
@@ -3072,7 +3226,7 @@ export default function App() {
                           onSubmitEditing={() => Keyboard.dismiss()}
                           onFocus={() => {
                             setFocusedField('quick-text-left');
-                            ensureSettingsFieldVisible();
+                            ensureSettingsFieldVisible('quick-text-left');
                           }}
                           onBlur={() =>
                             setFocusedField((current) =>
@@ -3119,6 +3273,9 @@ export default function App() {
                           Right
                         </Text>
                         <TextInput
+                          ref={(node) => {
+                            quickTextInputRefs.current['quick-text-right'] = node;
+                          }}
                           style={[
                             styles.input,
                             styles.quickTextConfigInput,
@@ -3139,7 +3296,7 @@ export default function App() {
                           onSubmitEditing={() => Keyboard.dismiss()}
                           onFocus={() => {
                             setFocusedField('quick-text-right');
-                            ensureSettingsFieldVisible();
+                            ensureSettingsFieldVisible('quick-text-right');
                           }}
                           onBlur={() =>
                             setFocusedField((current) =>
@@ -3183,7 +3340,7 @@ export default function App() {
                       </View>
                     </View>
                   </View>
-                  {ENABLE_DEBUG_WARNINGS ? (
+                  {ENABLE_DEBUG_WARNINGS && !isQuickTextSettingsEditMode ? (
                     <DebugInfoPanel
                       isDarkTheme={isDarkTheme}
                       connectionState={connectionState}
@@ -4503,11 +4660,40 @@ function createStyles(isDarkTheme: boolean) {
       borderTopWidth: 1,
       borderTopColor: colors.panelBorder,
     },
+    settingsSectionFocused: {
+      marginTop: 0,
+      paddingTop: 0,
+      borderTopWidth: 0,
+    },
     settingsSectionTitle: {
       fontSize: 14,
       color: colors.textPrimary,
       fontWeight: '700',
       marginBottom: 0,
+    },
+    quickTextSectionHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+      marginBottom: 2,
+    },
+    quickTextDoneButton: {
+      minHeight: 28,
+      borderRadius: 8,
+      borderWidth: 1.5,
+      borderColor: colors.inputBorder,
+      backgroundColor: colors.inputBg,
+      paddingHorizontal: 9,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 4,
+    },
+    quickTextDoneButtonText: {
+      fontSize: 11,
+      color: colors.textSecondary,
+      fontWeight: '600',
     },
     settingsOptionRow: {
       flexDirection: 'row',
@@ -4559,6 +4745,31 @@ function createStyles(isDarkTheme: boolean) {
       color: colors.inputText,
       backgroundColor: colors.inputBg,
       fontSize: 13,
+    },
+    tokenInputRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 0,
+      paddingLeft: 12,
+      paddingRight: 6,
+    },
+    tokenInputField: {
+      flex: 1,
+      minHeight: 40,
+      color: colors.inputText,
+      fontSize: 13,
+      paddingVertical: 9,
+      paddingRight: 8,
+    },
+    tokenVisibilityButton: {
+      width: 30,
+      height: 30,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.inputBorder,
+      backgroundColor: colors.iconBg,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     inputFocused: {
       borderColor: colors.inputBorderFocused,
