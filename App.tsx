@@ -81,6 +81,7 @@ if (__DEV__ && !ENABLE_DEBUG_WARNINGS) {
 const STORAGE_KEYS = {
   gatewayUrl: 'mobile-openclaw.gateway-url',
   authToken: 'mobile-openclaw.auth-token',
+  onboardingCompleted: 'mobile-openclaw.onboarding-completed',
   theme: 'mobile-openclaw.theme',
   speechLang: 'mobile-openclaw.speech-lang',
   quickTextLeft: 'mobile-openclaw.quick-text-left',
@@ -235,6 +236,8 @@ const FINAL_RESPONSE_RECOVERY_MAX_ATTEMPTS = 2;
 const HISTORY_SYNC_INITIAL_DELAY_MS = 280;
 const HISTORY_SYNC_RETRY_BASE_MS = 900;
 const HISTORY_SYNC_MAX_ATTEMPTS = 3;
+const ONBOARDING_SAMPLE_MESSAGE =
+  'Hello OpenClaw! Please reply with a short greeting.';
 const DEFAULT_SESSION_KEY =
   (process.env.EXPO_PUBLIC_DEFAULT_SESSION_KEY ?? 'main').trim() || 'main';
 const MAX_TEXT_SCALE = 1.35;
@@ -755,6 +758,9 @@ export default function App() {
   const [sessionRenameTargetKey, setSessionRenameTargetKey] = useState<string | null>(null);
   const [sessionRenameDraft, setSessionRenameDraft] = useState('');
   const [isStartupAutoConnecting, setIsStartupAutoConnecting] = useState(false);
+  const [isOnboardingCompleted, setIsOnboardingCompleted] = useState(false);
+  const [isOnboardingWaitingForResponse, setIsOnboardingWaitingForResponse] =
+    useState(false);
   const [settingsSavePendingCount, setSettingsSavePendingCount] = useState(0);
   const [settingsSaveError, setSettingsSaveError] = useState<string | null>(null);
   const [settingsSavedAt, setSettingsSavedAt] = useState<number | null>(null);
@@ -1025,6 +1031,18 @@ export default function App() {
   }, [chatTurns.length]);
 
   useEffect(() => {
+    if (isOnboardingCompleted || !isOnboardingWaitingForResponse) return;
+    const hasFirstResponse = chatTurns.some(
+      (turn) =>
+        turn.state === 'complete' &&
+        !isIncompleteAssistantContent(turn.assistantText),
+    );
+    if (!hasFirstResponse) return;
+    setIsOnboardingCompleted(true);
+    setIsOnboardingWaitingForResponse(false);
+  }, [chatTurns, isOnboardingCompleted, isOnboardingWaitingForResponse]);
+
+  useEffect(() => {
     let alive = true;
 
     const loadSettings = async () => {
@@ -1042,6 +1060,7 @@ export default function App() {
           savedSessionKey,
           savedSessionPrefs,
           savedOutboxQueue,
+          savedOnboardingCompleted,
         ] = await Promise.all([
           kvStore.getItemAsync(STORAGE_KEYS.gatewayUrl),
           kvStore.getItemAsync(STORAGE_KEYS.authToken),
@@ -1055,6 +1074,7 @@ export default function App() {
           kvStore.getItemAsync(STORAGE_KEYS.sessionKey),
           kvStore.getItemAsync(STORAGE_KEYS.sessionPrefs),
           kvStore.getItemAsync(STORAGE_KEYS.outboxQueue),
+          kvStore.getItemAsync(STORAGE_KEYS.onboardingCompleted),
         ]);
         if (!alive) return;
 
@@ -1087,6 +1107,14 @@ export default function App() {
         }
         setSessionPreferences(parseSessionPreferences(savedSessionPrefs));
         const restoredOutbox = parseOutboxQueue(savedOutboxQueue);
+        const hasExistingSetup =
+          Boolean(savedUrl?.trim()) ||
+          Boolean(savedToken?.trim()) ||
+          Boolean(savedIdentity) ||
+          restoredOutbox.length > 0;
+        if (savedOnboardingCompleted === '1' || hasExistingSetup) {
+          setIsOnboardingCompleted(true);
+        }
         if (restoredOutbox.length > 0) {
           setOutboxQueue(restoredOutbox);
           setGatewayEventState('queued');
@@ -1257,6 +1285,13 @@ export default function App() {
       }
     })();
   }, [outboxQueue, settingsReady]);
+
+  useEffect(() => {
+    if (!settingsReady || !isOnboardingCompleted) return;
+    persistSetting(async () => {
+      await kvStore.setItemAsync(STORAGE_KEYS.onboardingCompleted, '1');
+    });
+  }, [isOnboardingCompleted, persistSetting, settingsReady]);
 
   useEffect(() => {
     if (!isGatewayConnected) {
@@ -1896,6 +1931,20 @@ export default function App() {
           setIsSending(false);
           activeRunIdRef.current = null;
           setActiveRunId(null);
+          if (
+            state === 'complete' &&
+            isOnboardingWaitingForResponse &&
+            !isIncompleteAssistantContent(text)
+          ) {
+            setIsOnboardingWaitingForResponse(false);
+            setIsOnboardingCompleted(true);
+          }
+          if (
+            (state === 'error' || state === 'aborted') &&
+            isOnboardingWaitingForResponse
+          ) {
+            setIsOnboardingWaitingForResponse(false);
+          }
           if (state === 'complete' && shouldAttemptFinalRecovery(text)) {
             scheduleFinalResponseRecovery(eventSessionKey);
           }
@@ -1938,6 +1987,13 @@ export default function App() {
           assistantText: finalAssistantText,
         };
       });
+      if (
+        isOnboardingWaitingForResponse &&
+        !isIncompleteAssistantContent(finalAssistantText)
+      ) {
+        setIsOnboardingWaitingForResponse(false);
+        setIsOnboardingCompleted(true);
+      }
       if (shouldAttemptFinalRecovery(text, finalAssistantText || undefined)) {
         scheduleFinalResponseRecovery(eventSessionKey);
       }
@@ -1961,6 +2017,9 @@ export default function App() {
         state: 'error',
         assistantText: text || message,
       }));
+      if (isOnboardingWaitingForResponse) {
+        setIsOnboardingWaitingForResponse(false);
+      }
       scheduleSessionHistorySync(eventSessionKey);
       void refreshSessions();
       return;
@@ -1980,6 +2039,9 @@ export default function App() {
         state: 'aborted',
         assistantText: turn.assistantText || 'Response was aborted.',
       }));
+      if (isOnboardingWaitingForResponse) {
+        setIsOnboardingWaitingForResponse(false);
+      }
       scheduleSessionHistorySync(eventSessionKey);
       void refreshSessions();
       return;
@@ -2570,6 +2632,19 @@ export default function App() {
   const currentBadgeIconColor = isDarkTheme ? '#9ec0ff' : '#1D4ED8';
   const pinnedBadgeIconColor = isDarkTheme ? '#dbe7ff' : '#4B5563';
   const optionIconColor = isDarkTheme ? '#b8c9e6' : '#5C5C5C';
+  const showOnboardingGuide = settingsReady && !isOnboardingCompleted;
+  const isOnboardingGatewayConfigured = gatewayUrl.trim().length > 0;
+  const isOnboardingConnectDone = isGatewayConnected;
+  const isOnboardingResponseDone = chatTurns.some(
+    (turn) =>
+      turn.state === 'complete' && !isIncompleteAssistantContent(turn.assistantText),
+  );
+  const canRunOnboardingConnectTest = settingsReady && !isGatewayConnecting;
+  const canRunOnboardingSampleSend =
+    isGatewayConnected && !isSending && !isOnboardingWaitingForResponse;
+  const onboardingSampleButtonLabel = isOnboardingWaitingForResponse
+    ? 'Waiting reply...'
+    : 'Send Sample';
   const outboxPendingCount = outboxQueue.length;
   const historyStatusText = isSessionHistoryLoading
     ? 'Loading session...'
@@ -2649,6 +2724,28 @@ export default function App() {
     Keyboard.dismiss();
     setFocusedField(null);
     void sendToGateway(latestRetryText);
+  };
+
+  const handleCompleteOnboarding = () => {
+    Keyboard.dismiss();
+    setFocusedField(null);
+    setIsOnboardingWaitingForResponse(false);
+    setIsOnboardingCompleted(true);
+  };
+
+  const handleOnboardingConnectTest = () => {
+    if (!canRunOnboardingConnectTest) return;
+    Keyboard.dismiss();
+    setFocusedField(null);
+    void connectGateway();
+  };
+
+  const handleOnboardingSendSample = () => {
+    if (!canRunOnboardingSampleSend) return;
+    Keyboard.dismiss();
+    setFocusedField(null);
+    setIsOnboardingWaitingForResponse(true);
+    void sendToGateway(ONBOARDING_SAMPLE_MESSAGE);
   };
 
   const handleRefreshHistory = useCallback(() => {
@@ -3126,6 +3223,169 @@ export default function App() {
                 keyboardDismissMode="on-drag"
               >
                 <View style={styles.gatewayPanel}>
+                  {showOnboardingGuide && !isQuickTextSettingsEditMode ? (
+                    <View style={[styles.settingsSection, styles.onboardingSection]}>
+                      <View style={styles.sectionTitleRow}>
+                        <Ionicons
+                          name="sparkles-outline"
+                          size={14}
+                          color={sectionIconColor}
+                        />
+                        <Text
+                          style={styles.settingsSectionTitle}
+                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                        >
+                          Getting Started
+                        </Text>
+                      </View>
+                      <Text
+                        style={styles.onboardingDescription}
+                        maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                      >
+                        Complete setup in three steps: configure Gateway, test connection,
+                        then send one sample message.
+                      </Text>
+                      <View style={styles.onboardingStepList}>
+                        <View style={styles.onboardingStepRow}>
+                          <Ionicons
+                            name={
+                              isOnboardingGatewayConfigured
+                                ? 'checkmark-circle'
+                                : 'ellipse-outline'
+                            }
+                            size={14}
+                            color={
+                              isOnboardingGatewayConfigured
+                                ? currentBadgeIconColor
+                                : optionIconColor
+                            }
+                          />
+                          <Text
+                            style={[
+                              styles.onboardingStepText,
+                              isOnboardingGatewayConfigured &&
+                                styles.onboardingStepTextDone,
+                            ]}
+                            maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                          >
+                            1. Enter Gateway URL and optional token.
+                          </Text>
+                        </View>
+                        <View style={styles.onboardingStepRow}>
+                          <Ionicons
+                            name={
+                              isOnboardingConnectDone
+                                ? 'checkmark-circle'
+                                : 'ellipse-outline'
+                            }
+                            size={14}
+                            color={
+                              isOnboardingConnectDone
+                                ? currentBadgeIconColor
+                                : optionIconColor
+                            }
+                          />
+                          <Text
+                            style={[
+                              styles.onboardingStepText,
+                              isOnboardingConnectDone &&
+                                styles.onboardingStepTextDone,
+                            ]}
+                            maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                          >
+                            2. Tap Test Connection and confirm status is Connected.
+                          </Text>
+                        </View>
+                        <View style={styles.onboardingStepRow}>
+                          <Ionicons
+                            name={
+                              isOnboardingResponseDone
+                                ? 'checkmark-circle'
+                                : isOnboardingWaitingForResponse
+                                  ? 'time-outline'
+                                  : 'ellipse-outline'
+                            }
+                            size={14}
+                            color={
+                              isOnboardingResponseDone
+                                ? currentBadgeIconColor
+                                : isOnboardingWaitingForResponse
+                                  ? currentBadgeIconColor
+                                  : optionIconColor
+                            }
+                          />
+                          <Text
+                            style={[
+                              styles.onboardingStepText,
+                              isOnboardingResponseDone && styles.onboardingStepTextDone,
+                            ]}
+                            maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                          >
+                            {isOnboardingWaitingForResponse
+                              ? '3. Waiting for first response from Gateway...'
+                              : '3. Send one sample message to verify chat round-trip.'}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={styles.onboardingActionRow}>
+                        <Pressable
+                          style={[
+                            styles.smallButton,
+                            styles.connectButton,
+                            !canRunOnboardingConnectTest && styles.smallButtonDisabled,
+                          ]}
+                          accessibilityRole="button"
+                          accessibilityLabel="Test gateway connection"
+                          onPress={handleOnboardingConnectTest}
+                          disabled={!canRunOnboardingConnectTest}
+                        >
+                          <Text
+                            style={styles.smallButtonText}
+                            maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                          >
+                            {isGatewayConnecting ? 'Connecting...' : 'Test Connection'}
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          style={[
+                            styles.smallButton,
+                            styles.onboardingSecondaryButton,
+                            !canRunOnboardingSampleSend &&
+                              styles.onboardingSecondaryButtonDisabled,
+                          ]}
+                          accessibilityRole="button"
+                          accessibilityLabel={
+                            isOnboardingWaitingForResponse
+                              ? 'Waiting for first onboarding response'
+                              : 'Send onboarding sample message'
+                          }
+                          onPress={handleOnboardingSendSample}
+                          disabled={!canRunOnboardingSampleSend}
+                        >
+                          <Text
+                            style={styles.onboardingSecondaryButtonText}
+                            maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                          >
+                            {onboardingSampleButtonLabel}
+                          </Text>
+                        </Pressable>
+                      </View>
+                      <Pressable
+                        style={styles.onboardingSkipButton}
+                        accessibilityRole="button"
+                        accessibilityLabel="Skip onboarding"
+                        onPress={handleCompleteOnboarding}
+                      >
+                        <Text
+                          style={styles.onboardingSkipButtonText}
+                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                        >
+                          Skip for now
+                        </Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
+
                   {!isQuickTextSettingsEditMode ? (
                     <View style={styles.settingsSection}>
                     <View style={styles.sectionTitleRow}>
@@ -4909,6 +5169,70 @@ function createStyles(isDarkTheme: boolean) {
       color: colors.textPrimary,
       fontWeight: '700',
       marginBottom: 0,
+    },
+    onboardingSection: {
+      borderWidth: 1.5,
+      borderColor: colors.inputBorder,
+      borderRadius: 12,
+      backgroundColor: colors.inputBg,
+      paddingHorizontal: 10,
+      paddingVertical: 9,
+      marginBottom: 12,
+    },
+    onboardingDescription: {
+      marginTop: 2,
+      fontSize: 11,
+      color: colors.label,
+      lineHeight: 15,
+    },
+    onboardingStepList: {
+      marginTop: 7,
+      gap: 5,
+    },
+    onboardingStepRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    onboardingStepText: {
+      flex: 1,
+      fontSize: 11,
+      color: colors.textSecondary,
+      lineHeight: 15,
+    },
+    onboardingStepTextDone: {
+      color: colors.textPrimary,
+      fontWeight: '600',
+    },
+    onboardingActionRow: {
+      marginTop: 8,
+      flexDirection: 'row',
+      gap: 6,
+      alignItems: 'stretch',
+    },
+    onboardingSecondaryButton: {
+      borderWidth: 1.5,
+      borderColor: colors.inputBorder,
+      backgroundColor: colors.inputBg,
+    },
+    onboardingSecondaryButtonDisabled: {
+      opacity: 0.55,
+    },
+    onboardingSecondaryButtonText: {
+      color: colors.textSecondary,
+      fontWeight: '700',
+      fontSize: 12,
+    },
+    onboardingSkipButton: {
+      marginTop: 6,
+      alignSelf: 'flex-end',
+      paddingHorizontal: 4,
+      paddingVertical: 2,
+    },
+    onboardingSkipButtonText: {
+      fontSize: 11,
+      color: colors.label,
+      fontWeight: '600',
     },
     quickTextSectionHeaderRow: {
       flexDirection: 'row',
