@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "OpenClawVoice",
+    "name": "OpenClaw Pocket",
     "slug": "openclaw-voice",
     "entryPoint": "./index.ts",
     "version": "1.0.0",
@@ -17,9 +17,11 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSSpeechRecognitionUsageDescription": "音声入力のために音声認識の使用を許可してください。",
-        "NSMicrophoneUsageDescription": "音声入力のためにマイクの使用を許可してください。"
+        "NSMicrophoneUsageDescription": "音声入力のためにマイクの使用を許可してください。",
+        "NSPhotoLibraryUsageDescription": "画像を選択して共有する機能のために写真ライブラリへのアクセスを使用します。",
+        "NSPhotoLibraryAddUsageDescription": "画像を保存する機能のために写真ライブラリへのアクセスを使用します。"
       },
-      "bundleIdentifier": "com.kyaukyuai.openclawvoice"
+      "bundleIdentifier": "com.kyaukyuai.openclaw-pocket"
     },
     "android": {
       "adaptiveIcon": {

@@ -67,8 +67,8 @@ const REQUESTED_GATEWAY_CLIENT_ID =
   (process.env.EXPO_PUBLIC_GATEWAY_CLIENT_ID ?? 'openclaw-ios').trim() ||
   'openclaw-ios';
 const GATEWAY_DISPLAY_NAME =
-  (process.env.EXPO_PUBLIC_GATEWAY_DISPLAY_NAME ?? 'OpenClawVoice').trim() ||
-  'OpenClawVoice';
+  (process.env.EXPO_PUBLIC_GATEWAY_DISPLAY_NAME ?? 'OpenClaw Pocket').trim() ||
+  'OpenClaw Pocket';
 const ENABLE_DEBUG_WARNINGS = /^(1|true|yes|on)$/i.test(
   (process.env.EXPO_PUBLIC_DEBUG_MODE ?? '').trim(),
 );
@@ -2824,7 +2824,7 @@ export default function App() {
               />
             </View>
             <Text style={styles.headerTitle} maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}>
-              OpenClawVoice
+              OpenClaw Pocket
             </Text>
           </View>
           <View style={styles.headerRight}>

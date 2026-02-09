@@ -85,7 +85,7 @@ setStorage({
 const client = new GatewayClient('wss://your-openclaw-gateway.example.com', {
   token: 'your-token',
   clientId: 'openclaw-ios',
-  displayName: 'OpenClawVoice',
+  displayName: 'OpenClaw Pocket',
   role: 'operator',
   scopes: ['operator.read', 'operator.write'],
   caps: ['talk'],
@@ -156,13 +156,13 @@ cp .env.example .env
 - `EXPO_PUBLIC_DEFAULT_THEME` (`light` or `dark`)
 - `EXPO_PUBLIC_DEFAULT_SESSION_KEY` (default: `main`)
 - `EXPO_PUBLIC_GATEWAY_CLIENT_ID` (default: `openclaw-ios`)
-- `EXPO_PUBLIC_GATEWAY_DISPLAY_NAME` (default: `OpenClawVoice`)
+- `EXPO_PUBLIC_GATEWAY_DISPLAY_NAME` (default: `OpenClaw Pocket`)
 - `EXPO_PUBLIC_DEBUG_MODE` (`true` to show dev warnings and runtime debug panel, default: `false`)
 
 ## Connection Defaults
 
 - `clientId: openclaw-ios`
-- `displayName: OpenClawVoice`
+- `displayName: OpenClaw Pocket`
 - `role: operator`
 - `scopes: operator.read, operator.write`
 - `caps: talk`
