@@ -153,6 +153,10 @@ type SessionPreference = {
   pinned?: boolean;
 };
 type SessionPreferences = Record<string, SessionPreference>;
+type HistoryRefreshNotice = {
+  kind: 'success' | 'error';
+  message: string;
+};
 
 const DEFAULT_GATEWAY_URL = (process.env.EXPO_PUBLIC_DEFAULT_GATEWAY_URL ?? '').trim();
 const DEFAULT_THEME: AppTheme =
@@ -161,6 +165,13 @@ const DEFAULT_SPEECH_LANG: SpeechLang = 'ja-JP';
 const DEFAULT_QUICK_TEXT_LEFT = 'ありがとう';
 const DEFAULT_QUICK_TEXT_RIGHT = 'お願いします';
 const QUICK_TEXT_TOOLTIP_HIDE_MS = 1600;
+const HISTORY_NOTICE_HIDE_MS = 2200;
+const DUPLICATE_SEND_BLOCK_MS = 1400;
+const IDEMPOTENCY_REUSE_WINDOW_MS = 60_000;
+const STARTUP_AUTO_CONNECT_MAX_ATTEMPTS = 3;
+const STARTUP_AUTO_CONNECT_RETRY_BASE_MS = 1400;
+const FINAL_RESPONSE_RECOVERY_BASE_DELAY_MS = 1300;
+const FINAL_RESPONSE_RECOVERY_MAX_ATTEMPTS = 2;
 const DEFAULT_SESSION_KEY =
   (process.env.EXPO_PUBLIC_DEFAULT_SESSION_KEY ?? 'main').trim() || 'main';
 const MAX_TEXT_SCALE = 1.35;
@@ -336,6 +347,20 @@ function errorMessage(err: unknown): string {
 
 function createTurnId(): string {
   return `turn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+function createLocalIdempotencyKey(): string {
+  return `idem-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function normalizeMessageForDedupe(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function isIncompleteAssistantContent(value: string): boolean {
+  const normalized = value.trim();
+  if (!normalized) return true;
+  return normalized === 'Responding...' || normalized === 'No response';
 }
 
 function createSessionKey(): string {
@@ -591,6 +616,9 @@ export default function App() {
   const [settingsSaveError, setSettingsSaveError] = useState<string | null>(null);
   const [settingsSavedAt, setSettingsSavedAt] = useState<number | null>(null);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
+  const [historyLastSyncedAt, setHistoryLastSyncedAt] = useState<number | null>(null);
+  const [historyRefreshNotice, setHistoryRefreshNotice] =
+    useState<HistoryRefreshNotice | null>(null);
   const [theme, setTheme] = useState<AppTheme>(DEFAULT_THEME);
   const [quickTextTooltipSide, setQuickTextTooltipSide] =
     useState<QuickTextButtonSide | null>(null);
@@ -616,6 +644,22 @@ export default function App() {
   const settingsScrollRef = useRef<ScrollView | null>(null);
   const historyAutoScrollRef = useRef(true);
   const historySyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const historyNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const gatewayUrlRef = useRef(gatewayUrl);
+  const connectionStateRef = useRef<ConnectionState>(connectionState);
+  const startupAutoConnectRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const startupAutoConnectAttemptRef = useRef(0);
+  const finalResponseRecoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const sendFingerprintRef = useRef<{
+    sessionKey: string;
+    message: string;
+    sentAt: number;
+    idempotencyKey: string;
+  } | null>(null);
   const holdStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const settingsFocusScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const quickTextTooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -650,6 +694,39 @@ export default function App() {
       });
   }, []);
 
+  const clearHistoryNoticeTimer = useCallback(() => {
+    if (historyNoticeTimerRef.current) {
+      clearTimeout(historyNoticeTimerRef.current);
+      historyNoticeTimerRef.current = null;
+    }
+  }, []);
+
+  const showHistoryRefreshNotice = useCallback(
+    (kind: HistoryRefreshNotice['kind'], message: string) => {
+      clearHistoryNoticeTimer();
+      setHistoryRefreshNotice({ kind, message });
+      historyNoticeTimerRef.current = setTimeout(() => {
+        historyNoticeTimerRef.current = null;
+        setHistoryRefreshNotice(null);
+      }, HISTORY_NOTICE_HIDE_MS);
+    },
+    [clearHistoryNoticeTimer],
+  );
+
+  const clearStartupAutoConnectRetryTimer = useCallback(() => {
+    if (startupAutoConnectRetryTimerRef.current) {
+      clearTimeout(startupAutoConnectRetryTimerRef.current);
+      startupAutoConnectRetryTimerRef.current = null;
+    }
+  }, []);
+
+  const clearFinalResponseRecoveryTimer = useCallback(() => {
+    if (finalResponseRecoveryTimerRef.current) {
+      clearTimeout(finalResponseRecoveryTimerRef.current);
+      finalResponseRecoveryTimerRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     transcriptRef.current = transcript;
   }, [transcript]);
@@ -661,6 +738,14 @@ export default function App() {
   useEffect(() => {
     activeSessionKeyRef.current = activeSessionKey;
   }, [activeSessionKey]);
+
+  useEffect(() => {
+    gatewayUrlRef.current = gatewayUrl;
+  }, [gatewayUrl]);
+
+  useEffect(() => {
+    connectionStateRef.current = connectionState;
+  }, [connectionState]);
 
   useEffect(() => {
     sessionTurnsRef.current.set(activeSessionKey, chatTurns);
@@ -907,6 +992,8 @@ export default function App() {
 
   const disconnectGateway = () => {
     clearSubscriptions();
+    clearFinalResponseRecoveryTimer();
+    clearStartupAutoConnectRetryTimer();
     if (clientRef.current) {
       clientRef.current.disconnect();
       clientRef.current = null;
@@ -971,11 +1058,16 @@ export default function App() {
   }, [connectionState]);
 
   const loadSessionHistory = useCallback(
-    async (sessionKey: string) => {
+    async (
+      sessionKey: string,
+      options?: {
+        silentError?: boolean;
+      },
+    ): Promise<boolean> => {
       const client = clientRef.current;
       if (!client || connectionState !== 'connected') {
         applySessionTurns(sessionKey, sessionTurnsRef.current.get(sessionKey) ?? []);
-        return;
+        return false;
       }
 
       setIsSessionHistoryLoading(true);
@@ -983,9 +1075,16 @@ export default function App() {
         const response = await client.chatHistory(sessionKey, { limit: 80 });
         const turns = buildTurnsFromHistory(response.messages, sessionKey);
         applySessionTurns(sessionKey, turns);
+        if (activeSessionKeyRef.current === sessionKey) {
+          setHistoryLastSyncedAt(Date.now());
+        }
+        return true;
       } catch (err) {
-        setGatewayError(`Failed to load session history: ${errorMessage(err)}`);
+        if (!options?.silentError) {
+          setGatewayError(`Failed to load session history: ${errorMessage(err)}`);
+        }
         applySessionTurns(sessionKey, sessionTurnsRef.current.get(sessionKey) ?? []);
+        return false;
       } finally {
         if (activeSessionKeyRef.current === sessionKey) {
           setIsSessionHistoryLoading(false);
@@ -1149,6 +1248,7 @@ export default function App() {
 
       if (isSending) return;
 
+      const sessionKey = activeSessionKeyRef.current;
       const message =
         (overrideText ?? transcriptRef.current ?? '').trim() ||
         (interimTranscriptRef.current ?? '').trim();
@@ -1156,6 +1256,33 @@ export default function App() {
         setGatewayError('No text to send. Please record your voice first.');
         return;
       }
+      const normalizedMessage = normalizeMessageForDedupe(message);
+      const now = Date.now();
+      const previousSend = sendFingerprintRef.current;
+      const isDuplicateRapidSend =
+        Boolean(previousSend) &&
+        previousSend?.sessionKey === sessionKey &&
+        previousSend?.message === normalizedMessage &&
+        now - previousSend.sentAt < DUPLICATE_SEND_BLOCK_MS;
+      if (isDuplicateRapidSend) {
+        setGatewayError('This message was already sent. Please wait a moment.');
+        return;
+      }
+      const canReuseIdempotencyKey =
+        Boolean(previousSend) &&
+        previousSend?.sessionKey === sessionKey &&
+        previousSend?.message === normalizedMessage &&
+        now - previousSend.sentAt < IDEMPOTENCY_REUSE_WINDOW_MS;
+      const idempotencyKey =
+        canReuseIdempotencyKey && previousSend
+          ? previousSend.idempotencyKey
+          : createLocalIdempotencyKey();
+      sendFingerprintRef.current = {
+        sessionKey,
+        message: normalizedMessage,
+        sentAt: now,
+        idempotencyKey,
+      };
 
       setGatewayError(null);
       setGatewayEventState('sending');
@@ -1175,8 +1302,9 @@ export default function App() {
       ]);
 
       try {
-        const result = await client.chatSend(activeSessionKeyRef.current, message, {
+        const result = await client.chatSend(sessionKey, message, {
           timeoutMs: 30_000,
+          idempotencyKey,
         });
         transcriptRef.current = '';
         interimTranscriptRef.current = '';
@@ -1247,6 +1375,9 @@ export default function App() {
         ) {
           setIsSending(false);
           activeRunIdRef.current = null;
+          if (state === 'complete' && !text.trim()) {
+            scheduleFinalResponseRecovery(activeSessionKeyRef.current);
+          }
         }
         scheduleActiveHistorySync();
       }
@@ -1269,6 +1400,7 @@ export default function App() {
       setIsSending(false);
       activeRunIdRef.current = null;
       runIdToTurnIdRef.current.delete(payload.runId);
+      clearFinalResponseRecoveryTimer();
       const fallbackText =
         payload.stopReason === 'max_tokens'
           ? 'Response was truncated (max tokens reached).'
@@ -1280,11 +1412,15 @@ export default function App() {
         assistantText: text || turn.assistantText || fallbackText,
       }));
       scheduleActiveHistorySync();
+      if (!text.trim() || isIncompleteAssistantContent(text)) {
+        scheduleFinalResponseRecovery(activeSessionKeyRef.current);
+      }
       void refreshSessions();
       return;
     }
 
     if (state === 'error') {
+      clearFinalResponseRecoveryTimer();
       const message = payload.errorMessage ?? 'An error occurred on the Gateway.';
       void triggerHaptic('send-error');
       setGatewayError(`Gateway error: ${message}`);
@@ -1302,6 +1438,7 @@ export default function App() {
     }
 
     if (state === 'aborted') {
+      clearFinalResponseRecoveryTimer();
       void triggerHaptic('send-error');
       setGatewayError('The Gateway response was aborted.');
       setIsSending(false);
@@ -1327,8 +1464,14 @@ export default function App() {
     }
   };
 
-  const connectGateway = async (options?: { auto?: boolean }) => {
+  const connectGateway = async (options?: { auto?: boolean; autoAttempt?: number }) => {
     const isAutoConnect = options?.auto === true;
+    const autoAttempt = options?.autoAttempt ?? 1;
+    if (!isAutoConnect) {
+      clearStartupAutoConnectRetryTimer();
+      setIsStartupAutoConnecting(false);
+    }
+
     if (!settingsReady) {
       setGatewayError('Initializing. Please wait a few seconds and try again.');
       if (isAutoConnect) setIsStartupAutoConnecting(false);
@@ -1343,6 +1486,7 @@ export default function App() {
 
     if (isAutoConnect) {
       setIsStartupAutoConnecting(true);
+      startupAutoConnectAttemptRef.current = autoAttempt;
     }
 
     const connectOnce = async (clientId: string) => {
@@ -1397,9 +1541,36 @@ export default function App() {
       setGatewayError(null);
       setGatewayEventState('ready');
       setIsSettingsPanelOpen(false);
+      if (isAutoConnect) {
+        clearStartupAutoConnectRetryTimer();
+        startupAutoConnectAttemptRef.current = 0;
+      }
     } catch (err) {
       disconnectGateway();
-      setGatewayError(`Gateway connection failed: ${errorMessage(err)}`);
+      const errorText = errorMessage(err);
+      if (isAutoConnect) {
+        if (autoAttempt < STARTUP_AUTO_CONNECT_MAX_ATTEMPTS) {
+          const nextAttempt = autoAttempt + 1;
+          const retryDelay = STARTUP_AUTO_CONNECT_RETRY_BASE_MS * autoAttempt;
+          clearStartupAutoConnectRetryTimer();
+          startupAutoConnectRetryTimerRef.current = setTimeout(() => {
+            startupAutoConnectRetryTimerRef.current = null;
+            if (isUnmountingRef.current) return;
+            if (!gatewayUrlRef.current.trim()) return;
+            if (connectionStateRef.current !== 'disconnected') return;
+            void connectGateway({ auto: true, autoAttempt: nextAttempt });
+          }, retryDelay);
+          setGatewayError(
+            `Gateway auto-connect failed (${autoAttempt}/${STARTUP_AUTO_CONNECT_MAX_ATTEMPTS}). Retrying...`,
+          );
+        } else {
+          setGatewayError(
+            `Gateway auto-connect failed: ${errorText}. Tap Connect to retry manually.`,
+          );
+        }
+      } else {
+        setGatewayError(`Gateway connection failed: ${errorText}`);
+      }
     } finally {
       if (isAutoConnect) {
         setIsStartupAutoConnecting(false);
@@ -1413,7 +1584,8 @@ export default function App() {
     if (!gatewayUrl.trim()) return;
     if (connectionState !== 'disconnected') return;
     startupAutoConnectAttemptedRef.current = true;
-    void connectGateway({ auto: true });
+    startupAutoConnectAttemptRef.current = 1;
+    void connectGateway({ auto: true, autoAttempt: 1 });
   }, [connectionState, gatewayUrl, settingsReady]);
 
   useEffect(() => {
@@ -1427,6 +1599,18 @@ export default function App() {
       if (historySyncTimerRef.current) {
         clearTimeout(historySyncTimerRef.current);
         historySyncTimerRef.current = null;
+      }
+      if (historyNoticeTimerRef.current) {
+        clearTimeout(historyNoticeTimerRef.current);
+        historyNoticeTimerRef.current = null;
+      }
+      if (startupAutoConnectRetryTimerRef.current) {
+        clearTimeout(startupAutoConnectRetryTimerRef.current);
+        startupAutoConnectRetryTimerRef.current = null;
+      }
+      if (finalResponseRecoveryTimerRef.current) {
+        clearTimeout(finalResponseRecoveryTimerRef.current);
+        finalResponseRecoveryTimerRef.current = null;
       }
       if (settingsFocusScrollTimerRef.current) {
         clearTimeout(settingsFocusScrollTimerRef.current);
@@ -1580,6 +1764,34 @@ export default function App() {
     }, 280);
   }, [loadSessionHistory, refreshSessions]);
 
+  const scheduleFinalResponseRecovery = useCallback(
+    (sessionKey: string, attempt = 1) => {
+      if (attempt > FINAL_RESPONSE_RECOVERY_MAX_ATTEMPTS) return;
+      clearFinalResponseRecoveryTimer();
+      finalResponseRecoveryTimerRef.current = setTimeout(() => {
+        finalResponseRecoveryTimerRef.current = null;
+        void (async () => {
+          if (activeSessionKeyRef.current !== sessionKey) return;
+          const synced = await loadSessionHistory(sessionKey, { silentError: true });
+          if (!synced || activeSessionKeyRef.current !== sessionKey) return;
+          void refreshSessions();
+
+          const turns = sessionTurnsRef.current.get(sessionKey) ?? [];
+          const latestTurn = turns[turns.length - 1];
+          const stillIncomplete =
+            !latestTurn ||
+            isTurnWaitingState(latestTurn.state) ||
+            isIncompleteAssistantContent(latestTurn.assistantText);
+
+          if (stillIncomplete) {
+            scheduleFinalResponseRecovery(sessionKey, attempt + 1);
+          }
+        })();
+      }, FINAL_RESPONSE_RECOVERY_BASE_DELAY_MS * attempt);
+    },
+    [clearFinalResponseRecoveryTimer, loadSessionHistory, refreshSessions],
+  );
+
   const formatTurnTime = (createdAt: number): string =>
     new Date(createdAt).toLocaleTimeString('ja-JP', {
       hour: '2-digit',
@@ -1688,6 +1900,9 @@ export default function App() {
     : isSending
       ? `Responding... (${gatewayEventState})`
       : null;
+  const historyLastSyncedLabel = historyLastSyncedAt
+    ? `Updated ${formatClockLabel(historyLastSyncedAt)}`
+    : null;
   const historyItems = useMemo<HistoryListItem[]>(() => {
     if (chatTurns.length === 0) return [];
 
@@ -1757,10 +1972,28 @@ export default function App() {
     if (!isGatewayConnected || isSessionHistoryLoading) return;
     Keyboard.dismiss();
     setFocusedField(null);
+    clearHistoryNoticeTimer();
+    setHistoryRefreshNotice(null);
     const sessionKey = activeSessionKeyRef.current;
-    void loadSessionHistory(sessionKey);
-    void refreshSessions();
-  }, [isGatewayConnected, isSessionHistoryLoading, loadSessionHistory, refreshSessions]);
+    void (async () => {
+      const synced = await loadSessionHistory(sessionKey, { silentError: true });
+      void refreshSessions();
+      if (synced) {
+        const now = Date.now();
+        setHistoryLastSyncedAt(now);
+        showHistoryRefreshNotice('success', `Updated ${formatClockLabel(now)}`);
+        return;
+      }
+      showHistoryRefreshNotice('error', 'Refresh failed');
+    })();
+  }, [
+    clearHistoryNoticeTimer,
+    isGatewayConnected,
+    isSessionHistoryLoading,
+    loadSessionHistory,
+    refreshSessions,
+    showHistoryRefreshNotice,
+  ]);
 
   const handleHoldToTalkPressIn = () => {
     if (isRecognizing || isSending) return;
@@ -2924,6 +3157,28 @@ export default function App() {
                   </Text>
                 </View>
               ) : null}
+              {historyLastSyncedLabel || historyRefreshNotice ? (
+                <View style={styles.historyInfoRow}>
+                  <Text
+                    style={styles.historyLastSyncedText}
+                    maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                  >
+                    {historyLastSyncedLabel ?? ''}
+                  </Text>
+                  {historyRefreshNotice ? (
+                    <Text
+                      style={[
+                        styles.historyRefreshNoticeText,
+                        historyRefreshNotice.kind === 'error' &&
+                          styles.historyRefreshNoticeTextError,
+                      ]}
+                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                    >
+                      {historyRefreshNotice.message}
+                    </Text>
+                  ) : null}
+                </View>
+              ) : null}
               <ScrollView
                 ref={historyScrollRef}
                 contentContainerStyle={styles.chatList}
@@ -3241,8 +3496,9 @@ export default function App() {
                   </View>
                 ) : null}
                 <Pressable
-                  style={[
+                  style={({ pressed }) => [
                     styles.quickTextButton,
+                    pressed && canUseQuickTextLeft && styles.bottomActionButtonPressed,
                     !canUseQuickTextLeft && styles.quickTextButtonDisabled,
                   ]}
                   accessibilityRole="button"
@@ -3273,9 +3529,13 @@ export default function App() {
               </View>
               {canSendDraft ? (
                 <Pressable
-                  style={[
+                  style={({ pressed }) => [
                     styles.roundButton,
                     styles.sendRoundButton,
+                    pressed &&
+                      isGatewayConnected &&
+                      !isSending &&
+                      styles.bottomActionButtonPressed,
                     (!isGatewayConnected || isSending) && styles.roundButtonDisabled,
                   ]}
                   accessibilityRole="button"
@@ -3306,10 +3566,14 @@ export default function App() {
                 </Pressable>
               ) : (
                 <Pressable
-                  style={[
+                  style={({ pressed }) => [
                     styles.roundButton,
                     styles.micRoundButton,
                     isRecognizing && styles.recordingRoundButton,
+                    pressed &&
+                      !isSending &&
+                      settingsReady &&
+                      styles.bottomActionButtonPressed,
                     (isSending || !settingsReady) && styles.roundButtonDisabled,
                   ]}
                   accessibilityRole="button"
@@ -3344,8 +3608,9 @@ export default function App() {
                   </View>
                 ) : null}
                 <Pressable
-                  style={[
+                  style={({ pressed }) => [
                     styles.quickTextButton,
+                    pressed && canUseQuickTextRight && styles.bottomActionButtonPressed,
                     !canUseQuickTextRight && styles.quickTextButtonDisabled,
                   ]}
                   accessibilityRole="button"
@@ -3445,13 +3710,13 @@ function createStyles(isDarkTheme: boolean) {
         errorActionSecondaryBg: 'rgba(255,255,255,0.10)',
         errorActionSecondaryBorder: 'rgba(255,255,255,0.22)',
         errorActionSecondaryText: '#dbe7ff',
-        roundBorder: 'transparent',
+        roundBorder: 'rgba(255,255,255,0.22)',
         micRound: '#2563EB',
         recordingRound: '#DC2626',
         sendRound: '#059669',
         roundDisabled: '#243a63',
         quickActionBg: '#059669',
-        quickActionBorder: 'transparent',
+        quickActionBorder: 'rgba(255,255,255,0.28)',
         quickActionText: '#ffffff',
         quickTooltipBg: '#1a2f5a',
         quickTooltipBorder: 'rgba(110,231,183,0.34)',
@@ -3516,13 +3781,13 @@ function createStyles(isDarkTheme: boolean) {
         errorActionSecondaryBg: '#F2F6FF',
         errorActionSecondaryBorder: 'rgba(37,99,235,0.32)',
         errorActionSecondaryText: '#1D4ED8',
-        roundBorder: 'transparent',
+        roundBorder: 'rgba(255,255,255,0.52)',
         micRound: '#2563EB',
         recordingRound: '#DC2626',
         sendRound: '#059669',
         roundDisabled: '#C4C4C0',
         quickActionBg: '#059669',
-        quickActionBorder: 'transparent',
+        quickActionBorder: 'rgba(255,255,255,0.58)',
         quickActionText: '#ffffff',
         quickTooltipBg: '#ffffff',
         quickTooltipBorder: 'rgba(5,150,105,0.24)',
@@ -3554,6 +3819,14 @@ function createStyles(isDarkTheme: boolean) {
     shadowOpacity: 0.3,
     shadowRadius: 28,
     elevation: 9,
+  } as const;
+
+  const quickFabShadow = {
+    shadowColor: '#059669',
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.24,
+    shadowRadius: 18,
+    elevation: 7,
   } as const;
 
   return StyleSheet.create({
@@ -4177,6 +4450,29 @@ function createStyles(isDarkTheme: boolean) {
       fontSize: 12,
       color: colors.loading,
     },
+    historyInfoRow: {
+      minHeight: 20,
+      marginBottom: 4,
+      paddingRight: 36,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    historyLastSyncedText: {
+      flexShrink: 1,
+      fontSize: 10,
+      color: colors.label,
+    },
+    historyRefreshNoticeText: {
+      flexShrink: 0,
+      fontSize: 10,
+      color: isDarkTheme ? '#9ec0ff' : '#1D4ED8',
+      fontWeight: '600',
+    },
+    historyRefreshNoticeTextError: {
+      color: colors.errorText,
+    },
     historyRefreshButtonFloating: {
       width: 26,
       height: 26,
@@ -4421,7 +4717,7 @@ function createStyles(isDarkTheme: boolean) {
       borderRadius: 30,
       alignItems: 'center',
       justifyContent: 'center',
-      borderWidth: 0,
+      borderWidth: 1.5,
       borderColor: colors.roundBorder,
       ...fabShadow,
     },
@@ -4440,16 +4736,21 @@ function createStyles(isDarkTheme: boolean) {
       shadowOpacity: 0,
       elevation: 0,
     },
+    bottomActionButtonPressed: {
+      transform: [{ scale: 0.95 }],
+      opacity: 0.92,
+    },
     quickTextButton: {
       width: 52,
       height: 52,
       borderRadius: 26,
-      borderWidth: 0,
+      borderWidth: 1.5,
       borderColor: colors.quickActionBorder,
       backgroundColor: colors.quickActionBg,
       alignItems: 'center',
       justifyContent: 'center',
       paddingHorizontal: 6,
+      ...quickFabShadow,
     },
     quickTextButtonSlot: {
       width: 52,
@@ -4459,6 +4760,8 @@ function createStyles(isDarkTheme: boolean) {
     },
     quickTextButtonDisabled: {
       opacity: 0.42,
+      shadowOpacity: 0,
+      elevation: 0,
     },
     quickTextButtonIcon: {
       color: colors.quickActionText,
