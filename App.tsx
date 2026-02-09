@@ -177,6 +177,18 @@ type HistoryRefreshNotice = {
   kind: 'success' | 'error';
   message: string;
 };
+type GatewayHealthState = 'unknown' | 'checking' | 'ok' | 'degraded';
+type OutboxQueueItem = {
+  id: string;
+  sessionKey: string;
+  message: string;
+  turnId: string;
+  idempotencyKey: string;
+  createdAt: number;
+  retryCount: number;
+  nextRetryAt: number;
+  lastError: string | null;
+};
 
 const DEFAULT_GATEWAY_URL = (process.env.EXPO_PUBLIC_DEFAULT_GATEWAY_URL ?? '').trim();
 const DEFAULT_THEME: AppTheme =
@@ -204,6 +216,11 @@ const QUICK_TEXT_TOOLTIP_HIDE_MS = 1600;
 const HISTORY_NOTICE_HIDE_MS = 2200;
 const DUPLICATE_SEND_BLOCK_MS = 1400;
 const IDEMPOTENCY_REUSE_WINDOW_MS = 60_000;
+const SEND_TIMEOUT_MS = 30_000;
+const OUTBOX_RETRY_BASE_MS = 1800;
+const OUTBOX_RETRY_MAX_MS = 20_000;
+const GATEWAY_HEALTH_CHECK_TIMEOUT_MS = 4000;
+const GATEWAY_HEALTH_CHECK_INTERVAL_MS = 18_000;
 const STARTUP_AUTO_CONNECT_MAX_ATTEMPTS = 3;
 const STARTUP_AUTO_CONNECT_RETRY_BASE_MS = 1400;
 const FINAL_RESPONSE_RECOVERY_BASE_DELAY_MS = 1300;
@@ -389,6 +406,18 @@ function createSessionKey(): string {
   return `mobile-openclaw-${Date.now().toString(36)}-${Math.random()
     .toString(36)
     .slice(2, 6)}`;
+}
+
+function createOutboxItemId(): string {
+  return `outbox-${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 6)}`;
+}
+
+function getOutboxRetryDelayMs(retryCount: number): number {
+  const safeRetryCount = Math.max(1, retryCount);
+  const delay = OUTBOX_RETRY_BASE_MS * 2 ** (safeRetryCount - 1);
+  return Math.min(OUTBOX_RETRY_MAX_MS, delay);
 }
 
 function sessionDisplayName(session: SessionEntry): string {
@@ -659,6 +688,11 @@ export default function App() {
   const [historyLastSyncedAt, setHistoryLastSyncedAt] = useState<number | null>(null);
   const [historyRefreshNotice, setHistoryRefreshNotice] =
     useState<HistoryRefreshNotice | null>(null);
+  const [gatewayHealthState, setGatewayHealthState] =
+    useState<GatewayHealthState>('unknown');
+  const [gatewayHealthCheckedAt, setGatewayHealthCheckedAt] =
+    useState<number | null>(null);
+  const [outboxQueue, setOutboxQueue] = useState<OutboxQueueItem[]>([]);
   const [theme, setTheme] = useState<AppTheme>(DEFAULT_THEME);
   const [quickTextTooltipSide, setQuickTextTooltipSide] =
     useState<QuickTextButtonSide | null>(null);
@@ -685,6 +719,12 @@ export default function App() {
   const historyAutoScrollRef = useRef(true);
   const historySyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const historyNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const outboxRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const healthCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const healthCheckInFlightRef = useRef(false);
+  const outboxProcessingRef = useRef(false);
+  const outboxQueueRef = useRef<OutboxQueueItem[]>([]);
+  const gatewayHealthStateRef = useRef<GatewayHealthState>('unknown');
   const gatewayUrlRef = useRef(gatewayUrl);
   const connectionStateRef = useRef<ConnectionState>(connectionState);
   const startupAutoConnectRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -741,6 +781,20 @@ export default function App() {
     }
   }, []);
 
+  const clearOutboxRetryTimer = useCallback(() => {
+    if (outboxRetryTimerRef.current) {
+      clearTimeout(outboxRetryTimerRef.current);
+      outboxRetryTimerRef.current = null;
+    }
+  }, []);
+
+  const clearHealthCheckInterval = useCallback(() => {
+    if (healthCheckIntervalRef.current) {
+      clearInterval(healthCheckIntervalRef.current);
+      healthCheckIntervalRef.current = null;
+    }
+  }, []);
+
   const showHistoryRefreshNotice = useCallback(
     (kind: HistoryRefreshNotice['kind'], message: string) => {
       clearHistoryNoticeTimer();
@@ -767,6 +821,42 @@ export default function App() {
     }
   }, []);
 
+  const runGatewayHealthCheck = useCallback(
+    async (options?: { silent?: boolean; timeoutMs?: number }): Promise<boolean> => {
+      const client = clientRef.current;
+      if (!client || connectionStateRef.current !== 'connected') {
+        setGatewayHealthState('unknown');
+        return false;
+      }
+      if (healthCheckInFlightRef.current) {
+        return gatewayHealthStateRef.current !== 'degraded';
+      }
+
+      healthCheckInFlightRef.current = true;
+      if (!options?.silent) {
+        setGatewayHealthState('checking');
+      }
+      try {
+        const ok = await client.health(
+          options?.timeoutMs ?? GATEWAY_HEALTH_CHECK_TIMEOUT_MS,
+        );
+        if (connectionStateRef.current !== 'connected') return false;
+        setGatewayHealthState(ok ? 'ok' : 'degraded');
+        setGatewayHealthCheckedAt(Date.now());
+        return ok;
+      } catch {
+        if (connectionStateRef.current === 'connected') {
+          setGatewayHealthState('degraded');
+          setGatewayHealthCheckedAt(Date.now());
+        }
+        return false;
+      } finally {
+        healthCheckInFlightRef.current = false;
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
     transcriptRef.current = transcript;
   }, [transcript]);
@@ -786,6 +876,14 @@ export default function App() {
   useEffect(() => {
     connectionStateRef.current = connectionState;
   }, [connectionState]);
+
+  useEffect(() => {
+    outboxQueueRef.current = outboxQueue;
+  }, [outboxQueue]);
+
+  useEffect(() => {
+    gatewayHealthStateRef.current = gatewayHealthState;
+  }, [gatewayHealthState]);
 
   useEffect(() => {
     sessionTurnsRef.current.set(activeSessionKey, chatTurns);
@@ -1062,6 +1160,10 @@ export default function App() {
     clearSubscriptions();
     clearFinalResponseRecoveryTimer();
     clearStartupAutoConnectRetryTimer();
+    clearOutboxRetryTimer();
+    clearHealthCheckInterval();
+    outboxProcessingRef.current = false;
+    healthCheckInFlightRef.current = false;
     if (clientRef.current) {
       clientRef.current.disconnect();
       clientRef.current = null;
@@ -1076,6 +1178,8 @@ export default function App() {
     setIsSessionOperationPending(false);
     setConnectionState('disconnected');
     setGatewayEventState('idle');
+    setGatewayHealthState('unknown');
+    setGatewayHealthCheckedAt(null);
   };
 
   const updateChatTurn = useCallback(
@@ -1143,7 +1247,23 @@ export default function App() {
       try {
         const response = await client.chatHistory(sessionKey, { limit: 80 });
         const turns = buildTurnsFromHistory(response.messages, sessionKey);
-        applySessionTurns(sessionKey, turns);
+        const localTurns = sessionTurnsRef.current.get(sessionKey) ?? [];
+        const queuedTurnIds = new Set(
+          outboxQueueRef.current
+            .filter((item) => item.sessionKey === sessionKey)
+            .map((item) => item.turnId),
+        );
+        const pendingLocalTurns = localTurns.filter((turn) =>
+          queuedTurnIds.has(turn.id) || isTurnWaitingState(turn.state),
+        );
+        const mergedTurns = [...turns];
+        pendingLocalTurns.forEach((turn) => {
+          if (!mergedTurns.some((existing) => existing.id === turn.id)) {
+            mergedTurns.push(turn);
+          }
+        });
+        mergedTurns.sort((a, b) => a.createdAt - b.createdAt);
+        applySessionTurns(sessionKey, mergedTurns);
         if (activeSessionKeyRef.current === sessionKey) {
           setHistoryLastSyncedAt(Date.now());
         }
@@ -1308,14 +1428,179 @@ export default function App() {
     void loadSessionHistory(activeSessionKeyRef.current);
   }, [isGatewayConnected, loadSessionHistory, refreshSessions]);
 
+  useEffect(() => {
+    if (connectionState !== 'connected') {
+      clearHealthCheckInterval();
+      healthCheckInFlightRef.current = false;
+      setGatewayHealthState('unknown');
+      setGatewayHealthCheckedAt(null);
+      return;
+    }
+
+    void runGatewayHealthCheck({ silent: true });
+    clearHealthCheckInterval();
+    healthCheckIntervalRef.current = setInterval(() => {
+      void runGatewayHealthCheck({ silent: true });
+    }, GATEWAY_HEALTH_CHECK_INTERVAL_MS);
+
+    return () => {
+      clearHealthCheckInterval();
+    };
+  }, [clearHealthCheckInterval, connectionState, runGatewayHealthCheck]);
+
+  const processOutboxQueue = useCallback(async () => {
+    if (outboxProcessingRef.current) return;
+    if (connectionStateRef.current !== 'connected') return;
+    if (isSending) return;
+
+    const client = clientRef.current;
+    if (!client) return;
+
+    const head = outboxQueueRef.current[0];
+    if (!head) {
+      clearOutboxRetryTimer();
+      return;
+    }
+
+    const now = Date.now();
+    if (head.nextRetryAt > now) {
+      const waitMs = head.nextRetryAt - now;
+      clearOutboxRetryTimer();
+      outboxRetryTimerRef.current = setTimeout(() => {
+        outboxRetryTimerRef.current = null;
+        void processOutboxQueue();
+      }, waitMs);
+      return;
+    }
+
+    outboxProcessingRef.current = true;
+    clearOutboxRetryTimer();
+
+    const healthy = await runGatewayHealthCheck({ silent: true });
+    if (connectionStateRef.current !== 'connected') {
+      outboxProcessingRef.current = false;
+      return;
+    }
+    if (!healthy) {
+      setOutboxQueue((previous) => {
+        if (previous.length === 0 || previous[0].id !== head.id) return previous;
+        const retryCount = previous[0].retryCount + 1;
+        const nextRetryAt = Date.now() + getOutboxRetryDelayMs(retryCount);
+        return [
+          {
+            ...previous[0],
+            retryCount,
+            nextRetryAt,
+            lastError: 'health check failed',
+          },
+          ...previous.slice(1),
+        ];
+      });
+      setGatewayError('Gateway health check failed. Retrying queued message...');
+      outboxProcessingRef.current = false;
+      return;
+    }
+
+    setGatewayError(null);
+    setGatewayEventState('sending');
+    setIsSending(true);
+    pendingTurnIdRef.current = head.turnId;
+    updateChatTurn(head.turnId, (turn) => ({
+      ...turn,
+      state: 'sending',
+      assistantText:
+        turn.assistantText === 'Waiting for connection...'
+          ? ''
+          : turn.assistantText,
+    }));
+
+    try {
+      const result = await client.chatSend(head.sessionKey, head.message, {
+        timeoutMs: SEND_TIMEOUT_MS,
+        idempotencyKey: head.idempotencyKey,
+      });
+      void triggerHaptic('send-success');
+      activeRunIdRef.current = result.runId;
+      setActiveRunId(result.runId);
+      runIdToTurnIdRef.current.set(result.runId, head.turnId);
+      pendingTurnIdRef.current = null;
+      setOutboxQueue((previous) => previous.filter((item) => item.id !== head.id));
+      updateChatTurn(head.turnId, (turn) => ({
+        ...turn,
+        runId: result.runId,
+        state: 'queued',
+      }));
+      void refreshSessions();
+    } catch (err) {
+      const messageText = errorMessage(err);
+      void triggerHaptic('send-error');
+      pendingTurnIdRef.current = null;
+      setIsSending(false);
+      setOutboxQueue((previous) => {
+        const index = previous.findIndex((item) => item.id === head.id);
+        if (index < 0) return previous;
+        const current = previous[index];
+        const retryCount = current.retryCount + 1;
+        const nextRetryAt = Date.now() + getOutboxRetryDelayMs(retryCount);
+        const nextQueue = [...previous];
+        nextQueue[index] = {
+          ...current,
+          retryCount,
+          nextRetryAt,
+          lastError: messageText,
+        };
+        return nextQueue;
+      });
+      setGatewayError(`Send delayed: ${messageText}. Auto retrying...`);
+      updateChatTurn(head.turnId, (turn) => ({
+        ...turn,
+        state: 'queued',
+        assistantText: `Retrying automatically... (${messageText})`,
+      }));
+    } finally {
+      outboxProcessingRef.current = false;
+    }
+  }, [
+    clearOutboxRetryTimer,
+    isSending,
+    refreshSessions,
+    runGatewayHealthCheck,
+    updateChatTurn,
+  ]);
+
+  useEffect(() => {
+    if (outboxQueue.length === 0) {
+      clearOutboxRetryTimer();
+      return;
+    }
+    if (connectionState !== 'connected') {
+      clearOutboxRetryTimer();
+      return;
+    }
+    if (isSending) return;
+
+    const head = outboxQueue[0];
+    const waitMs = Math.max(0, head.nextRetryAt - Date.now());
+    clearOutboxRetryTimer();
+    if (waitMs > 0) {
+      outboxRetryTimerRef.current = setTimeout(() => {
+        outboxRetryTimerRef.current = null;
+        void processOutboxQueue();
+      }, waitMs);
+      return;
+    }
+
+    void processOutboxQueue();
+  }, [
+    clearOutboxRetryTimer,
+    connectionState,
+    isSending,
+    outboxQueue,
+    processOutboxQueue,
+  ]);
+
   const sendToGateway = useCallback(
     async (overrideText?: string) => {
-      const client = clientRef.current;
-      if (!client || connectionState !== 'connected') {
-        setGatewayError('Please connect to the Gateway first.');
-        return;
-      }
-
       if (isSending) return;
 
       const sessionKey = activeSessionKeyRef.current;
@@ -1345,57 +1630,49 @@ export default function App() {
       const { idempotencyKey } = dispatch;
       sendFingerprintRef.current = dispatch.nextFingerprint;
 
-      setGatewayError(null);
-      setGatewayEventState('sending');
-      setIsSending(true);
-
       const turnId = createTurnId();
-      pendingTurnIdRef.current = turnId;
+      const createdAt = Date.now();
+      const outboxItem: OutboxQueueItem = {
+        id: createOutboxItemId(),
+        sessionKey,
+        message,
+        turnId,
+        idempotencyKey,
+        createdAt,
+        retryCount: 0,
+        nextRetryAt: createdAt,
+        lastError: null,
+      };
+
       setChatTurns((previous) => [
         ...previous,
         {
           id: turnId,
           userText: message,
-          assistantText: '',
-          state: 'sending',
-          createdAt: Date.now(),
+          assistantText:
+            connectionState === 'connected'
+              ? ''
+              : 'Waiting for connection...',
+          state: 'queued',
+          createdAt,
         },
       ]);
+      setOutboxQueue((previous) => [...previous, outboxItem]);
 
-      try {
-        const result = await client.chatSend(sessionKey, message, {
-          timeoutMs: 30_000,
-          idempotencyKey,
-        });
-        transcriptRef.current = '';
-        interimTranscriptRef.current = '';
-        setTranscript('');
-        setInterimTranscript('');
-        void triggerHaptic('send-success');
-        activeRunIdRef.current = result.runId;
-        setActiveRunId(result.runId);
-        runIdToTurnIdRef.current.set(result.runId, turnId);
-        pendingTurnIdRef.current = null;
+      transcriptRef.current = '';
+      interimTranscriptRef.current = '';
+      setTranscript('');
+      setInterimTranscript('');
 
-        updateChatTurn(turnId, (turn) => ({
-          ...turn,
-          runId: result.runId,
-          state: 'queued',
-        }));
-      } catch (err) {
-        const messageText = errorMessage(err);
-        void triggerHaptic('send-error');
-        setIsSending(false);
-        pendingTurnIdRef.current = null;
-        setGatewayError(`Send failed: ${messageText}`);
-        updateChatTurn(turnId, (turn) => ({
-          ...turn,
-          state: 'error',
-          assistantText: `Send failed: ${messageText}`,
-        }));
+      if (connectionState === 'connected') {
+        setGatewayError(null);
+        void processOutboxQueue();
+      } else {
+        setGatewayEventState('queued');
+        setGatewayError('Message queued. Connect to send automatically.');
       }
     },
-    [connectionState, isSending, updateChatTurn],
+    [connectionState, isSending, processOutboxQueue],
   );
 
   const handleChatEvent = (payload: ChatEventPayload) => {
@@ -1677,6 +1954,14 @@ export default function App() {
         clearTimeout(historyNoticeTimerRef.current);
         historyNoticeTimerRef.current = null;
       }
+      if (outboxRetryTimerRef.current) {
+        clearTimeout(outboxRetryTimerRef.current);
+        outboxRetryTimerRef.current = null;
+      }
+      if (healthCheckIntervalRef.current) {
+        clearInterval(healthCheckIntervalRef.current);
+        healthCheckIntervalRef.current = null;
+      }
       if (startupAutoConnectRetryTimerRef.current) {
         clearTimeout(startupAutoConnectRetryTimerRef.current);
         startupAutoConnectRetryTimerRef.current = null;
@@ -1889,7 +2174,7 @@ export default function App() {
     isKeyboardVisible && (isTranscriptFocused || isGatewayFieldFocused);
   const showDoneOnlyAction = showKeyboardActionBar && isGatewayFieldFocused;
   const canSendFromKeyboardBar =
-    hasDraft && !isRecognizing && isGatewayConnected && !isSending;
+    hasDraft && !isRecognizing && !isSending;
   const canUseQuickText = !isRecognizing && settingsReady;
   const canUseQuickTextLeft = canUseQuickText && quickTextLeftLabel.length > 0;
   const canUseQuickTextRight = canUseQuickText && quickTextRightLabel.length > 0;
@@ -1900,13 +2185,13 @@ export default function App() {
   const isTranscriptExpanded = isTranscriptFocused || isRecognizing;
   const sendDisabledReason = !hasDraft
     ? 'No text to send.'
-    : !isGatewayConnected
-      ? 'Not connected.'
-      : isRecognizing
+    : isRecognizing
         ? 'Stop recording to send.'
         : isSending
           ? 'Sending in progress...'
-          : null;
+          : !isGatewayConnected
+            ? 'Will send after reconnect.'
+            : null;
   const bottomHintText = isRecognizing
     ? 'Release when finished speaking.'
     : canSendDraft
@@ -1971,13 +2256,29 @@ export default function App() {
   const currentBadgeIconColor = isDarkTheme ? '#9ec0ff' : '#1D4ED8';
   const pinnedBadgeIconColor = isDarkTheme ? '#dbe7ff' : '#4B5563';
   const optionIconColor = isDarkTheme ? '#b8c9e6' : '#5C5C5C';
+  const outboxPendingCount = outboxQueue.length;
+  const gatewayHealthLabel =
+    gatewayHealthState === 'checking'
+      ? 'Health checking...'
+      : gatewayHealthState === 'degraded'
+        ? 'Health check failed'
+        : gatewayHealthState === 'ok'
+          ? 'Health OK'
+          : null;
   const historyStatusText = isSessionHistoryLoading
     ? 'Loading session...'
     : isSending
       ? `Responding... (${gatewayEventState})`
-      : null;
+      : outboxPendingCount > 0
+        ? `Queued messages: ${outboxPendingCount}`
+        : gatewayHealthState === 'degraded'
+          ? 'Connection is unstable.'
+          : null;
   const historyLastSyncedLabel = historyLastSyncedAt
     ? `Updated ${formatClockLabel(historyLastSyncedAt)}`
+    : null;
+  const historyHealthCheckedLabel = gatewayHealthCheckedAt
+    ? `Checked ${formatClockLabel(gatewayHealthCheckedAt)}`
     : null;
   const historyItems = useMemo<HistoryListItem[]>(() => {
     if (chatTurns.length === 0) return [];
@@ -2023,7 +2324,7 @@ export default function App() {
   }, [chatTurns, interimTranscript, transcript]);
   const canReconnectFromError = settingsReady && !isGatewayConnecting;
   const canRetryFromError =
-    Boolean(latestRetryText) && !isSending && isGatewayConnected;
+    Boolean(latestRetryText) && !isSending;
   const errorBannerMessage = gatewayError ?? speechError;
   const isGatewayErrorBanner = Boolean(gatewayError);
   const errorBannerIconName = isGatewayErrorBanner
@@ -3313,13 +3614,18 @@ export default function App() {
                   </Text>
                 </View>
               ) : null}
-              {historyLastSyncedLabel || historyRefreshNotice ? (
+              {historyLastSyncedLabel ||
+              historyRefreshNotice ||
+              outboxPendingCount > 0 ||
+              gatewayHealthLabel ? (
                 <View style={styles.historyInfoRow}>
                   <Text
                     style={styles.historyLastSyncedText}
                     maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
                   >
-                    {historyLastSyncedLabel ?? ''}
+                    {historyLastSyncedLabel ??
+                      historyHealthCheckedLabel ??
+                      ''}
                   </Text>
                   {historyRefreshNotice ? (
                     <Text
@@ -3331,6 +3637,28 @@ export default function App() {
                       maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
                     >
                       {historyRefreshNotice.message}
+                    </Text>
+                  ) : outboxPendingCount > 0 ? (
+                    <Text
+                      style={[
+                        styles.historyQueueStatusText,
+                        gatewayHealthState === 'degraded' &&
+                          styles.historyQueueStatusTextWarning,
+                      ]}
+                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                    >
+                      Pending {outboxPendingCount}
+                    </Text>
+                  ) : gatewayHealthLabel ? (
+                    <Text
+                      style={[
+                        styles.historyQueueStatusText,
+                        gatewayHealthState === 'degraded' &&
+                          styles.historyQueueStatusTextWarning,
+                      ]}
+                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                    >
+                      {gatewayHealthLabel}
                     </Text>
                   ) : null}
                 </View>
@@ -3688,19 +4016,16 @@ export default function App() {
                   style={({ pressed }) => [
                     styles.roundButton,
                     styles.sendRoundButton,
-                    pressed &&
-                      isGatewayConnected &&
-                      !isSending &&
-                      styles.bottomActionButtonPressed,
-                    (!isGatewayConnected || isSending) && styles.roundButtonDisabled,
+                    pressed && !isSending && styles.bottomActionButtonPressed,
+                    isSending && styles.roundButtonDisabled,
                   ]}
                   accessibilityRole="button"
                   accessibilityLabel={
-                    !isGatewayConnected
-                      ? 'Send disabled: not connected'
-                      : isSending
-                        ? 'Sending in progress'
-                        : 'Send transcript'
+                    isSending
+                      ? 'Sending in progress'
+                      : isGatewayConnected
+                        ? 'Send transcript'
+                        : 'Queue transcript and send after reconnect'
                   }
                   onPress={() => {
                     const text = transcript.trim() || interimTranscript.trim();
@@ -3712,7 +4037,7 @@ export default function App() {
                   onPressIn={() => {
                     void triggerHaptic('button-press');
                   }}
-                  disabled={!isGatewayConnected || isSending}
+                  disabled={isSending}
                 >
                   <Ionicons
                     name={isSending ? 'time-outline' : 'send'}
@@ -4652,6 +4977,15 @@ function createStyles(isDarkTheme: boolean) {
       fontWeight: '600',
     },
     historyRefreshNoticeTextError: {
+      color: colors.errorText,
+    },
+    historyQueueStatusText: {
+      flexShrink: 0,
+      fontSize: 10,
+      color: isDarkTheme ? '#9ec0ff' : '#1D4ED8',
+      fontWeight: '600',
+    },
+    historyQueueStatusTextWarning: {
       color: colors.errorText,
     },
     historyRefreshButtonFloating: {
