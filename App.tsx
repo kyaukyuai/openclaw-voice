@@ -233,6 +233,7 @@ const DEFAULT_SESSION_KEY =
   (process.env.EXPO_PUBLIC_DEFAULT_SESSION_KEY ?? 'main').trim() || 'main';
 const MAX_TEXT_SCALE = 1.35;
 const MAX_TEXT_SCALE_TIGHT = 1.15;
+const HISTORY_BOTTOM_THRESHOLD_PX = 72;
 const SPEECH_LANG_OPTIONS: Array<{ value: SpeechLang; label: string }> = [
   { value: 'ja-JP', label: '日本語' },
   { value: 'en-US', label: 'English' },
@@ -755,6 +756,7 @@ export default function App() {
   const [historyLastSyncedAt, setHistoryLastSyncedAt] = useState<number | null>(null);
   const [historyRefreshNotice, setHistoryRefreshNotice] =
     useState<HistoryRefreshNotice | null>(null);
+  const [showScrollToBottomButton, setShowScrollToBottomButton] = useState(false);
   const [gatewayHealthState, setGatewayHealthState] =
     useState<GatewayHealthState>('unknown');
   const [gatewayHealthCheckedAt, setGatewayHealthCheckedAt] =
@@ -974,6 +976,11 @@ export default function App() {
   }, [activeSessionKey]);
 
   useEffect(() => {
+    historyAutoScrollRef.current = true;
+    setShowScrollToBottomButton(false);
+  }, [activeSessionKey]);
+
+  useEffect(() => {
     gatewayUrlRef.current = gatewayUrl;
   }, [gatewayUrl]);
 
@@ -999,6 +1006,12 @@ export default function App() {
       historyScrollRef.current?.scrollToEnd({ animated: true });
     }, 30);
     return () => clearTimeout(timer);
+  }, [chatTurns.length]);
+
+  useEffect(() => {
+    if (chatTurns.length > 0) return;
+    historyAutoScrollRef.current = true;
+    setShowScrollToBottomButton(false);
   }, [chatTurns.length]);
 
   useEffect(() => {
@@ -2580,6 +2593,13 @@ export default function App() {
     showHistoryRefreshNotice,
   ]);
 
+  const handleScrollHistoryToBottom = useCallback(() => {
+    historyAutoScrollRef.current = true;
+    setShowScrollToBottomButton(false);
+    historyScrollRef.current?.scrollToEnd({ animated: true });
+    void triggerHaptic('button-press');
+  }, [triggerHaptic]);
+
   const handleHoldToTalkPressIn = () => {
     if (isRecognizing || isSending) return;
     void triggerHaptic('button-press');
@@ -2612,9 +2632,11 @@ export default function App() {
       const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
       const distanceFromBottom =
         contentSize.height - (contentOffset.y + layoutMeasurement.height);
-      historyAutoScrollRef.current = distanceFromBottom < 72;
+      const isNearBottom = distanceFromBottom < HISTORY_BOTTOM_THRESHOLD_PX;
+      historyAutoScrollRef.current = isNearBottom;
+      setShowScrollToBottomButton(chatTurns.length > 0 && !isNearBottom);
     },
-    [],
+    [chatTurns.length],
   );
 
   const styles = useMemo(() => createStyles(isDarkTheme), [isDarkTheme]);
@@ -3950,7 +3972,10 @@ export default function App() {
               ) : null}
               <ScrollView
                 ref={historyScrollRef}
-                contentContainerStyle={styles.chatList}
+                contentContainerStyle={[
+                  styles.chatList,
+                  showScrollToBottomButton && styles.chatListWithScrollButton,
+                ]}
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode="on-drag"
                 onScroll={handleHistoryScroll}
@@ -3958,6 +3983,7 @@ export default function App() {
                 onContentSizeChange={() => {
                   if (historyAutoScrollRef.current) {
                     historyScrollRef.current?.scrollToEnd({ animated: true });
+                    setShowScrollToBottomButton(false);
                   }
                 }}
               >
@@ -4059,6 +4085,21 @@ export default function App() {
                   })
                 )}
               </ScrollView>
+              {showScrollToBottomButton ? (
+                <Pressable
+                  style={[styles.iconButton, styles.historyScrollToBottomButtonFloating]}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Scroll history to the latest message"
+                  onPress={handleScrollHistoryToBottom}
+                >
+                  <Ionicons
+                    name="chevron-down-outline"
+                    size={17}
+                    color={isDarkTheme ? '#bccae2' : '#707070'}
+                  />
+                </Pressable>
+              ) : null}
             </View>
           ) : null}
           <View
@@ -5362,9 +5403,21 @@ function createStyles(isDarkTheme: boolean) {
       right: 0,
       zIndex: 2,
     },
+    historyScrollToBottomButtonFloating: {
+      width: 32,
+      height: 32,
+      borderRadius: 10,
+      position: 'absolute',
+      right: 0,
+      bottom: 6,
+      zIndex: 3,
+    },
     chatList: {
       paddingBottom: 10,
       gap: 0,
+    },
+    chatListWithScrollButton: {
+      paddingBottom: 44,
     },
     historyDateRow: {
       flexDirection: 'row',
