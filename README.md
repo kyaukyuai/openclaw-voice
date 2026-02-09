@@ -111,22 +111,22 @@ Notes:
     <td align="center" width="25%">
       <strong>Idle</strong><br>
       <sub>Connected, waiting for input</sub><br><br>
-      <img src="https://raw.githubusercontent.com/kyaukyuai/openclaw-voice/main/docs/screenshots/idle.png" width="200" alt="Idle state" />
+      <img src="https://raw.githubusercontent.com/kyaukyuai/openclaw-voice/main/docs/screenshots/idle.png" width="230" alt="Idle state" />
     </td>
     <td align="center" width="25%">
       <strong>Ready to Send</strong><br>
       <sub>Transcript ready, tap to send</sub><br><br>
-      <img src="https://raw.githubusercontent.com/kyaukyuai/openclaw-voice/main/docs/screenshots/ready-to-send.png" width="200" alt="Ready to send state" />
+      <img src="https://raw.githubusercontent.com/kyaukyuai/openclaw-voice/main/docs/screenshots/ready-to-send.png" width="230" alt="Ready to send state" />
     </td>
     <td align="center" width="25%">
       <strong>Sending</strong><br>
       <sub>Waiting for Gateway response</sub><br><br>
-      <img src="https://raw.githubusercontent.com/kyaukyuai/openclaw-voice/main/docs/screenshots/sending.png" width="200" alt="Sending state" />
+      <img src="https://raw.githubusercontent.com/kyaukyuai/openclaw-voice/main/docs/screenshots/sending.png" width="230" alt="Sending state" />
     </td>
     <td align="center" width="25%">
       <strong>Response (Light)</strong><br>
       <sub>Streamed response displayed</sub><br><br>
-      <img src="https://raw.githubusercontent.com/kyaukyuai/openclaw-voice/main/docs/screenshots/response-light.png" width="200" alt="Response in light theme" />
+      <img src="https://raw.githubusercontent.com/kyaukyuai/openclaw-voice/main/docs/screenshots/response-light.png" width="230" alt="Response in light theme" />
     </td>
   </tr>
 </table>
