@@ -2477,14 +2477,6 @@ export default function App() {
   const pinnedBadgeIconColor = isDarkTheme ? '#dbe7ff' : '#4B5563';
   const optionIconColor = isDarkTheme ? '#b8c9e6' : '#5C5C5C';
   const outboxPendingCount = outboxQueue.length;
-  const gatewayHealthLabel =
-    gatewayHealthState === 'checking'
-      ? 'Health checking...'
-      : gatewayHealthState === 'degraded'
-        ? 'Health check failed'
-        : gatewayHealthState === 'ok'
-          ? 'Health OK'
-          : null;
   const historyStatusText = isSessionHistoryLoading
     ? 'Loading session...'
     : isSending
@@ -2494,12 +2486,12 @@ export default function App() {
         : gatewayHealthState === 'degraded'
           ? 'Connection is unstable.'
           : null;
-  const historyLastSyncedLabel = historyLastSyncedAt
-    ? `Updated ${formatClockLabel(historyLastSyncedAt)}`
-    : null;
-  const historyHealthCheckedLabel = gatewayHealthCheckedAt
-    ? `Checked ${formatClockLabel(gatewayHealthCheckedAt)}`
-    : null;
+  const historyTopStatusText = historyRefreshNotice?.message ?? historyStatusText;
+  const isHistoryTopStatusError =
+    historyRefreshNotice?.kind === 'error' ||
+    (historyRefreshNotice == null && gatewayHealthState === 'degraded');
+  const showHistoryTopStatusSpinner =
+    historyRefreshNotice == null && (isSessionHistoryLoading || isSending);
   const historyItems = useMemo<HistoryListItem[]>(() => {
     if (chatTurns.length === 0) return [];
 
@@ -3908,67 +3900,24 @@ export default function App() {
                   color={isDarkTheme ? '#bccae2' : '#707070'}
                 />
               </Pressable>
-              {historyStatusText ? (
-                <View style={styles.loadingRow}>
-                  <ActivityIndicator
-                    size="small"
-                    color={isDarkTheme ? '#9ec0ff' : '#2563EB'}
-                  />
-                  <Text
-                    style={styles.loadingText}
-                    maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                  >
-                    {historyStatusText}
-                  </Text>
-                </View>
-              ) : null}
-              {historyLastSyncedLabel ||
-              historyRefreshNotice ||
-              outboxPendingCount > 0 ||
-              gatewayHealthLabel ? (
-                <View style={styles.historyInfoRow}>
-                  <Text
-                    style={styles.historyLastSyncedText}
-                    maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                  >
-                    {historyLastSyncedLabel ??
-                      historyHealthCheckedLabel ??
-                      ''}
-                  </Text>
-                  {historyRefreshNotice ? (
-                    <Text
-                      style={[
-                        styles.historyRefreshNoticeText,
-                        historyRefreshNotice.kind === 'error' &&
-                          styles.historyRefreshNoticeTextError,
-                      ]}
-                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                    >
-                      {historyRefreshNotice.message}
-                    </Text>
-                  ) : outboxPendingCount > 0 ? (
-                    <Text
-                      style={[
-                        styles.historyQueueStatusText,
-                        gatewayHealthState === 'degraded' &&
-                          styles.historyQueueStatusTextWarning,
-                      ]}
-                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                    >
-                      Pending {outboxPendingCount}
-                    </Text>
-                  ) : gatewayHealthLabel ? (
-                    <Text
-                      style={[
-                        styles.historyQueueStatusText,
-                        gatewayHealthState === 'degraded' &&
-                          styles.historyQueueStatusTextWarning,
-                      ]}
-                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                    >
-                      {gatewayHealthLabel}
-                    </Text>
+              {historyTopStatusText ? (
+                <View style={styles.historyTopStatusRow}>
+                  {showHistoryTopStatusSpinner ? (
+                    <ActivityIndicator
+                      size="small"
+                      color={isDarkTheme ? '#9ec0ff' : '#2563EB'}
+                    />
                   ) : null}
+                  <Text
+                    style={[
+                      styles.historyTopStatusText,
+                      isHistoryTopStatusError && styles.historyTopStatusTextError,
+                    ]}
+                    maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                    numberOfLines={1}
+                  >
+                    {historyTopStatusText}
+                  </Text>
                 </View>
               ) : null}
               <ScrollView
@@ -5351,48 +5300,20 @@ function createStyles(isDarkTheme: boolean) {
       textAlign: 'center',
       paddingVertical: 48,
     },
-    loadingRow: {
+    historyTopStatusRow: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
-      minHeight: 24,
+      minHeight: 22,
       marginBottom: 4,
       paddingRight: 36,
     },
-    loadingText: {
-      fontSize: 12,
+    historyTopStatusText: {
+      flex: 1,
+      fontSize: 11,
       color: colors.loading,
     },
-    historyInfoRow: {
-      minHeight: 20,
-      marginBottom: 4,
-      paddingRight: 36,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 8,
-    },
-    historyLastSyncedText: {
-      flexShrink: 1,
-      fontSize: 10,
-      color: colors.label,
-    },
-    historyRefreshNoticeText: {
-      flexShrink: 0,
-      fontSize: 10,
-      color: isDarkTheme ? '#9ec0ff' : '#1D4ED8',
-      fontWeight: '600',
-    },
-    historyRefreshNoticeTextError: {
-      color: colors.errorText,
-    },
-    historyQueueStatusText: {
-      flexShrink: 0,
-      fontSize: 10,
-      color: isDarkTheme ? '#9ec0ff' : '#1D4ED8',
-      fontWeight: '600',
-    },
-    historyQueueStatusTextWarning: {
+    historyTopStatusTextError: {
       color: colors.errorText,
     },
     historyRefreshButtonFloating: {
@@ -5423,9 +5344,9 @@ function createStyles(isDarkTheme: boolean) {
     historyDateRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 10,
-      paddingTop: 12,
-      paddingBottom: 8,
+      gap: 8,
+      paddingTop: 8,
+      paddingBottom: 6,
     },
     historyDateLine: {
       flex: 1,
@@ -5433,12 +5354,12 @@ function createStyles(isDarkTheme: boolean) {
       backgroundColor: colors.historyDateLine,
     },
     historyDateText: {
-      fontSize: 11,
+      fontSize: 10,
       fontWeight: '600',
       color: colors.historyDateText,
     },
     historyTurnGroup: {
-      marginBottom: 12,
+      marginBottom: 10,
       gap: 0,
     },
     historyTurnGroupLast: {
