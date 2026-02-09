@@ -12,7 +12,7 @@ Speak -> edit -> send -> stream response.
 
 <p align="center">
   <video
-    src="https://github.com/user-attachments/assets/65f799f3-c87b-4c13-8b5f-23491efd5ec5"
+    src="https://github.com/user-attachments/assets/17678911-a359-490c-a529-67e9b38ff4bb"
     poster="https://raw.githubusercontent.com/kyaukyuai/openclaw-voice/main/docs/screenshots/response-light.png"
     controls
     playsinline
@@ -24,7 +24,7 @@ Speak -> edit -> send -> stream response.
 </p>
 
 <p align="center">
-  <a href="https://github.com/user-attachments/assets/65f799f3-c87b-4c13-8b5f-23491efd5ec5"><strong>Watch demo video (MP4)</strong></a>
+  <a href="https://github.com/user-attachments/assets/17678911-a359-490c-a529-67e9b38ff4bb"><strong>Watch demo video (MP4)</strong></a>
 </p>
 
 ## Why OpenClaw Voice
