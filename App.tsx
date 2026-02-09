@@ -2183,6 +2183,15 @@ export default function App() {
     ExpoSpeechRecognitionModule.stop();
   };
 
+  const clearTranscriptDraft = useCallback(() => {
+    transcriptRef.current = '';
+    interimTranscriptRef.current = '';
+    setTranscript('');
+    setInterimTranscript('');
+    setSpeechError(null);
+    void triggerHaptic('button-press');
+  }, []);
+
   const insertQuickText = useCallback(
     (rawText: string) => {
       const nextText = rawText.trim();
@@ -2367,8 +2376,11 @@ export default function App() {
   const showKeyboardActionBar =
     isKeyboardVisible && (isTranscriptFocused || isGatewayFieldFocused);
   const showDoneOnlyAction = showKeyboardActionBar && isGatewayFieldFocused;
+  const showClearInKeyboardBar = showKeyboardActionBar && isTranscriptFocused;
   const canSendFromKeyboardBar =
     hasDraft && !isRecognizing && !isSending;
+  const canClearFromKeyboardBar =
+    transcript.length > 0 || interimTranscript.length > 0;
   const canUseQuickText = !isRecognizing && settingsReady;
   const canUseQuickTextLeft = canUseQuickText && quickTextLeftLabel.length > 0;
   const canUseQuickTextRight = canUseQuickText && quickTextRightLabel.length > 0;
@@ -4206,6 +4218,32 @@ export default function App() {
                   Done
                 </Text>
               </Pressable>
+              {showClearInKeyboardBar ? (
+                <Pressable
+                  style={[
+                    styles.keyboardActionButton,
+                    styles.keyboardActionButtonWide,
+                    !canClearFromKeyboardBar && styles.keyboardActionButtonDisabled,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear transcript"
+                  onPress={() => {
+                    if (!canClearFromKeyboardBar) return;
+                    clearTranscriptDraft();
+                  }}
+                  disabled={!canClearFromKeyboardBar}
+                >
+                  <Text
+                    style={[
+                      styles.keyboardActionButtonText,
+                      styles.keyboardClearActionButtonText,
+                    ]}
+                    maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                  >
+                    Clear
+                  </Text>
+                </Pressable>
+              ) : null}
               {!showDoneOnlyAction ? (
                 <Pressable
                   style={[
@@ -5539,6 +5577,10 @@ function createStyles(isDarkTheme: boolean) {
       fontSize: 13,
       fontWeight: '600',
       color: colors.textSecondary,
+    },
+    keyboardClearActionButtonText: {
+      color: isDarkTheme ? '#ffb0b0' : '#DC2626',
+      fontWeight: '700',
     },
     keyboardSendActionButton: {
       backgroundColor: colors.sendRound,
