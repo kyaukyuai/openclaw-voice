@@ -32,6 +32,12 @@ export type AutoConnectRetryPlan = {
   message: string;
 };
 
+export type HistorySyncRetryPlan = {
+  shouldRetry: boolean;
+  nextAttempt: number;
+  delayMs: number;
+};
+
 export function normalizeMessageForDedupe(value: unknown): string;
 
 export function createLocalIdempotencyKey(now?: number, random?: number): string;
@@ -71,6 +77,12 @@ export function computeAutoConnectRetryPlan(input: {
   baseDelayMs: number;
   errorText: string;
 }): AutoConnectRetryPlan;
+
+export function computeHistorySyncRetryPlan(input: {
+  attempt: number;
+  maxAttempts: number;
+  baseDelayMs: number;
+}): HistorySyncRetryPlan;
 
 export function shouldStartStartupAutoConnect(input: {
   settingsReady: boolean;

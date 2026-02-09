@@ -6,6 +6,7 @@ const require = createRequire(import.meta.url);
 const {
   buildHistoryRefreshNotice,
   computeAutoConnectRetryPlan,
+  computeHistorySyncRetryPlan,
   mergeHistoryTurnsWithPendingLocal,
   resolveCompletedAssistantText,
   resolveSendDispatch,
@@ -118,6 +119,41 @@ test('computeAutoConnectRetryPlan returns retry plan until max attempts', () => 
     exhausted.message,
     'Gateway auto-connect failed: timeout. Tap Connect to retry manually.',
   );
+});
+
+test('computeHistorySyncRetryPlan returns exponential retry delays', () => {
+  const first = computeHistorySyncRetryPlan({
+    attempt: 1,
+    maxAttempts: 3,
+    baseDelayMs: 900,
+  });
+  assert.deepEqual(first, {
+    shouldRetry: true,
+    nextAttempt: 2,
+    delayMs: 900,
+  });
+
+  const second = computeHistorySyncRetryPlan({
+    attempt: 2,
+    maxAttempts: 3,
+    baseDelayMs: 900,
+  });
+  assert.deepEqual(second, {
+    shouldRetry: true,
+    nextAttempt: 3,
+    delayMs: 1800,
+  });
+
+  const exhausted = computeHistorySyncRetryPlan({
+    attempt: 3,
+    maxAttempts: 3,
+    baseDelayMs: 900,
+  });
+  assert.deepEqual(exhausted, {
+    shouldRetry: false,
+    nextAttempt: 3,
+    delayMs: 0,
+  });
 });
 
 test('shouldStartStartupAutoConnect checks required startup conditions', () => {

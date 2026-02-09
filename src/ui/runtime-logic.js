@@ -143,6 +143,26 @@ function computeAutoConnectRetryPlan({
   };
 }
 
+function computeHistorySyncRetryPlan({
+  attempt,
+  maxAttempts,
+  baseDelayMs,
+}) {
+  if (attempt < maxAttempts) {
+    return {
+      shouldRetry: true,
+      nextAttempt: attempt + 1,
+      delayMs: baseDelayMs * 2 ** (attempt - 1),
+    };
+  }
+
+  return {
+    shouldRetry: false,
+    nextAttempt: attempt,
+    delayMs: 0,
+  };
+}
+
 function shouldStartStartupAutoConnect({
   settingsReady,
   alreadyAttempted,
@@ -179,6 +199,7 @@ module.exports = {
   mergeHistoryTurnsWithPendingLocal,
   resolveSendDispatch,
   computeAutoConnectRetryPlan,
+  computeHistorySyncRetryPlan,
   shouldStartStartupAutoConnect,
   buildHistoryRefreshNotice,
 };

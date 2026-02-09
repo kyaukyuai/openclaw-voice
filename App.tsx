@@ -47,6 +47,7 @@ import {
 import DebugInfoPanel from './src/ui/DebugInfoPanel';
 import {
   buildHistoryRefreshNotice,
+  computeHistorySyncRetryPlan,
   computeAutoConnectRetryPlan,
   mergeHistoryTurnsWithPendingLocal,
   normalizeMessageForDedupe,
@@ -231,6 +232,9 @@ const STARTUP_AUTO_CONNECT_MAX_ATTEMPTS = 3;
 const STARTUP_AUTO_CONNECT_RETRY_BASE_MS = 1400;
 const FINAL_RESPONSE_RECOVERY_BASE_DELAY_MS = 1300;
 const FINAL_RESPONSE_RECOVERY_MAX_ATTEMPTS = 2;
+const HISTORY_SYNC_INITIAL_DELAY_MS = 280;
+const HISTORY_SYNC_RETRY_BASE_MS = 900;
+const HISTORY_SYNC_MAX_ATTEMPTS = 3;
 const DEFAULT_SESSION_KEY =
   (process.env.EXPO_PUBLIC_DEFAULT_SESSION_KEY ?? 'main').trim() || 'main';
 const MAX_TEXT_SCALE = 1.35;
@@ -789,6 +793,10 @@ export default function App() {
   const settingsScrollRef = useRef<ScrollView | null>(null);
   const historyAutoScrollRef = useRef(true);
   const historySyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const historySyncRequestRef = useRef<{
+    sessionKey: string;
+    attempt: number;
+  } | null>(null);
   const historyNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const authTokenMaskTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const outboxRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1334,6 +1342,11 @@ export default function App() {
     clearStartupAutoConnectRetryTimer();
     clearOutboxRetryTimer();
     clearHealthCheckInterval();
+    if (historySyncTimerRef.current) {
+      clearTimeout(historySyncTimerRef.current);
+      historySyncTimerRef.current = null;
+    }
+    historySyncRequestRef.current = null;
     outboxProcessingRef.current = false;
     healthCheckInFlightRef.current = false;
     if (clientRef.current) {
@@ -1845,6 +1858,7 @@ export default function App() {
   const handleChatEvent = (payload: ChatEventPayload) => {
     const activeSessionKey = activeSessionKeyRef.current;
     const hasMatchingSession = payload.sessionKey === activeSessionKey;
+    const eventSessionKey = (payload.sessionKey ?? '').trim() || activeSessionKey;
     const text = toTextContent(payload.message, { trim: false, dedupe: false });
     const state = normalizeChatEventState(payload.state);
     setGatewayEventState(state);
@@ -1883,10 +1897,10 @@ export default function App() {
           activeRunIdRef.current = null;
           setActiveRunId(null);
           if (state === 'complete' && shouldAttemptFinalRecovery(text)) {
-            scheduleFinalResponseRecovery(activeSessionKeyRef.current);
+            scheduleFinalResponseRecovery(eventSessionKey);
           }
         }
-        scheduleActiveHistorySync();
+        scheduleSessionHistorySync(eventSessionKey);
       }
       return;
     }
@@ -1925,9 +1939,9 @@ export default function App() {
         };
       });
       if (shouldAttemptFinalRecovery(text, finalAssistantText || undefined)) {
-        scheduleFinalResponseRecovery(activeSessionKeyRef.current);
+        scheduleFinalResponseRecovery(eventSessionKey);
       }
-      scheduleActiveHistorySync();
+      scheduleSessionHistorySync(eventSessionKey);
       void refreshSessions();
       return;
     }
@@ -1947,6 +1961,7 @@ export default function App() {
         state: 'error',
         assistantText: text || message,
       }));
+      scheduleSessionHistorySync(eventSessionKey);
       void refreshSessions();
       return;
     }
@@ -1965,6 +1980,7 @@ export default function App() {
         state: 'aborted',
         assistantText: turn.assistantText || 'Response was aborted.',
       }));
+      scheduleSessionHistorySync(eventSessionKey);
       void refreshSessions();
       return;
     }
@@ -2122,6 +2138,7 @@ export default function App() {
         clearTimeout(historySyncTimerRef.current);
         historySyncTimerRef.current = null;
       }
+      historySyncRequestRef.current = null;
       if (historyNoticeTimerRef.current) {
         clearTimeout(historyNoticeTimerRef.current);
         historyNoticeTimerRef.current = null;
@@ -2326,15 +2343,89 @@ export default function App() {
     }, Platform.OS === 'ios' ? 240 : 120);
   }, []);
 
-  const scheduleActiveHistorySync = useCallback(() => {
-    if (historySyncTimerRef.current) return;
-    historySyncTimerRef.current = setTimeout(() => {
-      historySyncTimerRef.current = null;
-      const sessionKey = activeSessionKeyRef.current;
-      void loadSessionHistory(sessionKey);
-      void refreshSessions();
-    }, 280);
-  }, [loadSessionHistory, refreshSessions]);
+  const scheduleSessionHistorySync = useCallback(
+    (
+      sessionKey: string,
+      options?: {
+        attempt?: number;
+        delayMs?: number;
+      },
+    ) => {
+      const targetSessionKey = sessionKey.trim();
+      if (!targetSessionKey) return;
+      const attempt = Math.max(1, options?.attempt ?? 1);
+      const delayMs = Math.max(
+        0,
+        options?.delayMs ??
+          (attempt === 1
+            ? HISTORY_SYNC_INITIAL_DELAY_MS
+            : HISTORY_SYNC_RETRY_BASE_MS),
+      );
+
+      historySyncRequestRef.current = {
+        sessionKey: targetSessionKey,
+        attempt,
+      };
+
+      if (historySyncTimerRef.current) {
+        clearTimeout(historySyncTimerRef.current);
+        historySyncTimerRef.current = null;
+      }
+
+      historySyncTimerRef.current = setTimeout(() => {
+        historySyncTimerRef.current = null;
+        const request = historySyncRequestRef.current;
+        if (
+          !request ||
+          request.sessionKey !== targetSessionKey ||
+          request.attempt !== attempt
+        ) {
+          return;
+        }
+
+        void (async () => {
+          const synced = await loadSessionHistory(targetSessionKey, {
+            silentError: attempt > 1,
+          });
+          if (synced) {
+            const currentRequest = historySyncRequestRef.current;
+            if (
+              currentRequest &&
+              currentRequest.sessionKey === targetSessionKey &&
+              currentRequest.attempt === attempt
+            ) {
+              historySyncRequestRef.current = null;
+            }
+            void refreshSessions();
+            return;
+          }
+
+          const retryPlan = computeHistorySyncRetryPlan({
+            attempt,
+            maxAttempts: HISTORY_SYNC_MAX_ATTEMPTS,
+            baseDelayMs: HISTORY_SYNC_RETRY_BASE_MS,
+          });
+          if (!retryPlan.shouldRetry || connectionStateRef.current !== 'connected') {
+            const currentRequest = historySyncRequestRef.current;
+            if (
+              currentRequest &&
+              currentRequest.sessionKey === targetSessionKey &&
+              currentRequest.attempt === attempt
+            ) {
+              historySyncRequestRef.current = null;
+            }
+            return;
+          }
+
+          scheduleSessionHistorySync(targetSessionKey, {
+            attempt: retryPlan.nextAttempt,
+            delayMs: retryPlan.delayMs,
+          });
+        })();
+      }, delayMs);
+    },
+    [loadSessionHistory, refreshSessions],
+  );
 
   const scheduleFinalResponseRecovery = useCallback(
     (sessionKey: string, attempt = 1) => {
@@ -2343,9 +2434,12 @@ export default function App() {
       finalResponseRecoveryTimerRef.current = setTimeout(() => {
         finalResponseRecoveryTimerRef.current = null;
         void (async () => {
-          if (activeSessionKeyRef.current !== sessionKey) return;
           const synced = await loadSessionHistory(sessionKey, { silentError: true });
-          if (!synced || activeSessionKeyRef.current !== sessionKey) return;
+          if (!synced) {
+            if (connectionStateRef.current !== 'connected') return;
+            scheduleFinalResponseRecovery(sessionKey, attempt + 1);
+            return;
+          }
           void refreshSessions();
 
           const turns = sessionTurnsRef.current.get(sessionKey) ?? [];
