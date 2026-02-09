@@ -6,6 +6,8 @@ const require = createRequire(import.meta.url);
 const {
   buildHistoryRefreshNotice,
   computeAutoConnectRetryPlan,
+  mergeHistoryTurnsWithPendingLocal,
+  resolveCompletedAssistantText,
   resolveSendDispatch,
   shouldAttemptFinalRecovery,
   shouldStartStartupAutoConnect,
@@ -172,6 +174,7 @@ test('shouldStartStartupAutoConnect checks required startup conditions', () => {
 
 test('shouldAttemptFinalRecovery and buildHistoryRefreshNotice handle edge cases', () => {
   assert.equal(shouldAttemptFinalRecovery('', ''), true);
+  assert.equal(shouldAttemptFinalRecovery('', 'Final answer'), false);
   assert.equal(shouldAttemptFinalRecovery('Responding...', 'Responding...'), true);
   assert.equal(shouldAttemptFinalRecovery('Completed', 'No response'), true);
   assert.equal(shouldAttemptFinalRecovery('Completed', 'Final answer'), false);
@@ -184,4 +187,100 @@ test('shouldAttemptFinalRecovery and buildHistoryRefreshNotice handle edge cases
     kind: 'error',
     message: 'Refresh failed',
   });
+});
+
+test('resolveCompletedAssistantText prefers final payload then streamed text then fallback', () => {
+  assert.equal(
+    resolveCompletedAssistantText({
+      finalText: 'Final answer from gateway',
+      streamedText: 'partial',
+      stopReason: null,
+    }),
+    'Final answer from gateway',
+  );
+
+  assert.equal(
+    resolveCompletedAssistantText({
+      finalText: '',
+      streamedText: 'streamed but complete answer',
+      stopReason: null,
+    }),
+    'streamed but complete answer',
+  );
+
+  assert.equal(
+    resolveCompletedAssistantText({
+      finalText: '',
+      streamedText: '',
+      stopReason: 'max_tokens',
+    }),
+    'Response was truncated (max tokens reached).',
+  );
+});
+
+test('mergeHistoryTurnsWithPendingLocal keeps synced final turns and appends unsynced pending turns', () => {
+  const historyTurns = [
+    {
+      id: 'turn-a',
+      userText: 'A',
+      assistantText: 'Final A',
+      state: 'complete',
+      createdAt: 1000,
+    },
+    {
+      id: 'turn-c',
+      userText: 'C',
+      assistantText: 'Final C',
+      state: 'complete',
+      createdAt: 3000,
+    },
+  ];
+
+  const localTurns = [
+    {
+      id: 'turn-a',
+      userText: 'A',
+      assistantText: 'Responding...',
+      state: 'streaming',
+      createdAt: 1000,
+    },
+    {
+      id: 'turn-b',
+      userText: 'B',
+      assistantText: 'Waiting for connection...',
+      state: 'queued',
+      createdAt: 2000,
+    },
+    {
+      id: 'turn-d',
+      userText: 'D',
+      assistantText: 'Working...',
+      state: 'streaming',
+      createdAt: 4000,
+    },
+    {
+      id: 'turn-e',
+      userText: 'E',
+      assistantText: 'Should be dropped',
+      state: 'complete',
+      createdAt: 5000,
+    },
+  ];
+
+  const merged = mergeHistoryTurnsWithPendingLocal(
+    historyTurns,
+    localTurns,
+    new Set(['turn-b']),
+  );
+
+  assert.equal(merged.length, 4);
+  assert.deepEqual(
+    merged.map((turn) => turn.id),
+    ['turn-a', 'turn-b', 'turn-c', 'turn-d'],
+  );
+  assert.equal(
+    merged.find((turn) => turn.id === 'turn-a')?.assistantText,
+    'Final A',
+  );
+  assert.equal(merged.some((turn) => turn.id === 'turn-e'), false);
 });

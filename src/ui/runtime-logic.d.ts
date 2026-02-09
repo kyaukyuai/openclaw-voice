@@ -40,6 +40,25 @@ export function isIncompleteAssistantContent(value: unknown): boolean;
 
 export function shouldAttemptFinalRecovery(textValue: unknown, assistantValue?: unknown): boolean;
 
+export function resolveCompletedAssistantText(input: {
+  finalText?: unknown;
+  streamedText?: unknown;
+  stopReason?: unknown;
+}): string;
+
+export type HistoryTurnLike = {
+  id: string;
+  state: string;
+  createdAt: number;
+  [key: string]: unknown;
+};
+
+export function mergeHistoryTurnsWithPendingLocal<T extends HistoryTurnLike>(
+  historyTurns?: T[] | null,
+  localTurns?: T[] | null,
+  queuedTurnIds?: Iterable<string> | null,
+): T[];
+
 export function resolveSendDispatch(
   previousFingerprint: SendFingerprint | null | undefined,
   input: SendDispatchInput,

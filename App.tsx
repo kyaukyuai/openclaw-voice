@@ -48,7 +48,9 @@ import DebugInfoPanel from './src/ui/DebugInfoPanel';
 import {
   buildHistoryRefreshNotice,
   computeAutoConnectRetryPlan,
+  mergeHistoryTurnsWithPendingLocal,
   normalizeMessageForDedupe,
+  resolveCompletedAssistantText,
   resolveSendDispatch,
   shouldAttemptFinalRecovery,
   shouldStartStartupAutoConnect,
@@ -1423,16 +1425,11 @@ export default function App() {
             .filter((item) => item.sessionKey === sessionKey)
             .map((item) => item.turnId),
         );
-        const pendingLocalTurns = localTurns.filter((turn) =>
-          queuedTurnIds.has(turn.id) || isTurnWaitingState(turn.state),
+        const mergedTurns = mergeHistoryTurnsWithPendingLocal(
+          turns,
+          localTurns,
+          queuedTurnIds,
         );
-        const mergedTurns = [...turns];
-        pendingLocalTurns.forEach((turn) => {
-          if (!mergedTurns.some((existing) => existing.id === turn.id)) {
-            mergedTurns.push(turn);
-          }
-        });
-        mergedTurns.sort((a, b) => a.createdAt - b.createdAt);
         applySessionTurns(sessionKey, mergedTurns);
         if (activeSessionKeyRef.current === sessionKey) {
           setHistoryLastSyncedAt(Date.now());
@@ -1913,20 +1910,24 @@ export default function App() {
       setActiveRunId(null);
       runIdToTurnIdRef.current.delete(payload.runId);
       clearFinalResponseRecoveryTimer();
-      const fallbackText =
-        payload.stopReason === 'max_tokens'
-          ? 'Response was truncated (max tokens reached).'
-          : 'Gateway returned no text content for this response.';
-      updateChatTurn(turnId, (turn) => ({
-        ...turn,
-        runId: payload.runId,
-        state: 'complete',
-        assistantText: text || turn.assistantText || fallbackText,
-      }));
-      scheduleActiveHistorySync();
-      if (shouldAttemptFinalRecovery(text)) {
+      let finalAssistantText = '';
+      updateChatTurn(turnId, (turn) => {
+        finalAssistantText = resolveCompletedAssistantText({
+          finalText: text,
+          streamedText: turn.assistantText,
+          stopReason: payload.stopReason,
+        });
+        return {
+          ...turn,
+          runId: payload.runId,
+          state: 'complete',
+          assistantText: finalAssistantText,
+        };
+      });
+      if (shouldAttemptFinalRecovery(text, finalAssistantText || undefined)) {
         scheduleFinalResponseRecovery(activeSessionKeyRef.current);
       }
+      scheduleActiveHistorySync();
       void refreshSessions();
       return;
     }
@@ -5298,15 +5299,15 @@ function createStyles(isDarkTheme: boolean) {
       minHeight: 0,
     },
     transcriptCardCompact: {
-      paddingTop: 10,
-      paddingBottom: 10,
+      paddingTop: 8,
+      paddingBottom: 8,
     },
     transcriptEditor: {
       minHeight: 96,
       gap: 6,
     },
     transcriptEditorCompact: {
-      minHeight: 56,
+      minHeight: 48,
       gap: 0,
     },
     transcriptEditorExpanded: {
@@ -5326,7 +5327,7 @@ function createStyles(isDarkTheme: boolean) {
       lineHeight: 22,
     },
     transcriptInputCompact: {
-      minHeight: 44,
+      minHeight: 38,
       lineHeight: 20,
     },
     transcriptInputExpanded: {

@@ -19,9 +19,59 @@ function isIncompleteAssistantContent(value) {
 
 function shouldAttemptFinalRecovery(textValue, assistantValue = '') {
   const normalizedText = String(textValue ?? '').trim();
-  if (!normalizedText) return true;
+  if (!normalizedText) {
+    return isIncompleteAssistantContent(assistantValue);
+  }
   if (isIncompleteAssistantContent(normalizedText)) return true;
   return isIncompleteAssistantContent(assistantValue);
+}
+
+function resolveCompletedAssistantText({
+  finalText,
+  streamedText = '',
+  stopReason,
+} = {}) {
+  const normalizedFinalText = String(finalText ?? '');
+  const normalizedStreamedText = String(streamedText ?? '');
+  if (normalizedFinalText) return normalizedFinalText;
+  if (normalizedStreamedText) return normalizedStreamedText;
+  if (stopReason === 'max_tokens') {
+    return 'Response was truncated (max tokens reached).';
+  }
+  return 'Gateway returned no text content for this response.';
+}
+
+const WAITING_TURN_STATES = new Set(['sending', 'queued', 'delta', 'streaming']);
+
+function mergeHistoryTurnsWithPendingLocal(
+  historyTurns = [],
+  localTurns = [],
+  queuedTurnIds = new Set(),
+) {
+  const mergedTurns = Array.isArray(historyTurns) ? [...historyTurns] : [];
+  const localCandidates = Array.isArray(localTurns) ? localTurns : [];
+  const queuedIds =
+    queuedTurnIds instanceof Set ? queuedTurnIds : new Set(queuedTurnIds ?? []);
+
+  localCandidates.forEach((turn) => {
+    if (!turn || typeof turn !== 'object') return;
+    const turnId = String(turn.id ?? '').trim();
+    if (!turnId) return;
+    const turnState = String(turn.state ?? '').trim();
+    const shouldKeepLocal =
+      queuedIds.has(turnId) || WAITING_TURN_STATES.has(turnState);
+    if (!shouldKeepLocal) return;
+    if (!mergedTurns.some((existing) => existing?.id === turnId)) {
+      mergedTurns.push(turn);
+    }
+  });
+
+  mergedTurns.sort((a, b) => {
+    const left = Number(a?.createdAt ?? 0);
+    const right = Number(b?.createdAt ?? 0);
+    return left - right;
+  });
+  return mergedTurns;
 }
 
 function resolveSendDispatch(previousFingerprint, input, options = {}) {
@@ -125,6 +175,8 @@ module.exports = {
   createLocalIdempotencyKey,
   isIncompleteAssistantContent,
   shouldAttemptFinalRecovery,
+  resolveCompletedAssistantText,
+  mergeHistoryTurnsWithPendingLocal,
   resolveSendDispatch,
   computeAutoConnectRetryPlan,
   shouldStartStartupAutoConnect,
