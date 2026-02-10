@@ -185,6 +185,21 @@ type HistoryRefreshNotice = {
   message: string;
 };
 type GatewayHealthState = 'unknown' | 'checking' | 'ok' | 'degraded';
+type GatewayConnectDiagnosticKind =
+  | 'invalid-url'
+  | 'timeout'
+  | 'tls'
+  | 'auth'
+  | 'dns'
+  | 'network'
+  | 'server'
+  | 'pairing'
+  | 'unknown';
+type GatewayConnectDiagnostic = {
+  kind: GatewayConnectDiagnosticKind;
+  summary: string;
+  guidance: string;
+};
 type OutboxQueueItem = {
   id: string;
   sessionKey: string;
@@ -410,6 +425,119 @@ function errorMessage(err: unknown): string {
   }
   if (err instanceof Error) return err.message;
   return String(err);
+}
+
+function classifyGatewayConnectFailure(input: {
+  error: unknown;
+  hasToken: boolean;
+}): GatewayConnectDiagnostic {
+  const raw = errorMessage(input.error).trim();
+  const normalized = raw.toLowerCase();
+
+  if (
+    normalized.includes('pairing') ||
+    normalized.includes('allow this device')
+  ) {
+    return {
+      kind: 'pairing',
+      summary: 'Pairing approval required.',
+      guidance: 'Approve this device on OpenClaw, then retry.',
+    };
+  }
+
+  if (normalized.includes('timeout')) {
+    return {
+      kind: 'timeout',
+      summary: 'Connection timed out.',
+      guidance: 'Check URL reachability and Gateway health, then retry.',
+    };
+  }
+
+  if (
+    normalized.includes('certificate') ||
+    normalized.includes('tls') ||
+    normalized.includes('ssl') ||
+    normalized.includes('handshake') ||
+    normalized.includes('self signed') ||
+    normalized.includes('unable to verify')
+  ) {
+    return {
+      kind: 'tls',
+      summary: 'TLS/certificate validation failed.',
+      guidance: 'Use a trusted certificate and a valid wss:// endpoint.',
+    };
+  }
+
+  if (
+    normalized.includes('invalid_request') ||
+    normalized.includes('unauthorized') ||
+    normalized.includes('forbidden') ||
+    normalized.includes('401') ||
+    normalized.includes('403') ||
+    normalized.includes('auth') ||
+    normalized.includes('token')
+  ) {
+    return {
+      kind: 'auth',
+      summary: input.hasToken
+        ? 'Authentication failed.'
+        : 'Gateway rejected the request.',
+      guidance: input.hasToken
+        ? 'Verify token/scopes and Gateway client permissions.'
+        : 'Set token if required, and verify client permissions.',
+    };
+  }
+
+  if (
+    normalized.includes('enotfound') ||
+    normalized.includes('getaddrinfo') ||
+    normalized.includes('dns') ||
+    normalized.includes('name resolution') ||
+    normalized.includes('host not found')
+  ) {
+    return {
+      kind: 'dns',
+      summary: 'Gateway host could not be resolved.',
+      guidance: 'Check host name, DNS, and network/VPN configuration.',
+    };
+  }
+
+  if (
+    normalized.includes('network request failed') ||
+    normalized.includes('econnrefused') ||
+    normalized.includes('connection refused') ||
+    normalized.includes('offline') ||
+    normalized.includes('network') ||
+    normalized.includes('unreachable') ||
+    normalized.includes('reset')
+  ) {
+    return {
+      kind: 'network',
+      summary: 'Network connection failed.',
+      guidance: 'Check internet connectivity and Gateway endpoint access.',
+    };
+  }
+
+  if (
+    normalized.includes('500') ||
+    normalized.includes('502') ||
+    normalized.includes('503') ||
+    normalized.includes('504') ||
+    normalized.includes('service unavailable') ||
+    normalized.includes('bad gateway')
+  ) {
+    return {
+      kind: 'server',
+      summary: 'Gateway returned a server error.',
+      guidance: 'Check Gateway logs and server health before retrying.',
+    };
+  }
+
+  return {
+    kind: 'unknown',
+    summary: 'Connection failed for an unknown reason.',
+    guidance: 'Check URL, token, and network, then retry.',
+  };
 }
 
 function createTurnId(): string {
@@ -773,6 +901,8 @@ export default function App() {
     useState<GatewayHealthState>('unknown');
   const [gatewayHealthCheckedAt, setGatewayHealthCheckedAt] =
     useState<number | null>(null);
+  const [gatewayConnectDiagnostic, setGatewayConnectDiagnostic] =
+    useState<GatewayConnectDiagnostic | null>(null);
   const [outboxQueue, setOutboxQueue] = useState<OutboxQueueItem[]>([]);
   const [theme, setTheme] = useState<AppTheme>(DEFAULT_THEME);
   const [quickTextTooltipSide, setQuickTextTooltipSide] =
@@ -1400,6 +1530,7 @@ export default function App() {
     setGatewayEventState('idle');
     setGatewayHealthState('unknown');
     setGatewayHealthCheckedAt(null);
+    setGatewayConnectDiagnostic(null);
   };
 
   const updateChatTurn = useCallback(
@@ -2060,6 +2191,8 @@ export default function App() {
   const connectGateway = async (options?: { auto?: boolean; autoAttempt?: number }) => {
     const isAutoConnect = options?.auto === true;
     const autoAttempt = options?.autoAttempt ?? 1;
+    const trimmedGatewayUrl = gatewayUrl.trim();
+    const hasToken = authToken.trim().length > 0;
     if (!isAutoConnect) {
       clearStartupAutoConnectRetryTimer();
       setIsStartupAutoConnecting(false);
@@ -2071,8 +2204,39 @@ export default function App() {
       return;
     }
 
-    if (!gatewayUrl.trim()) {
+    if (!trimmedGatewayUrl) {
       setGatewayError('Please enter a Gateway URL.');
+      if (isAutoConnect) setIsStartupAutoConnecting(false);
+      return;
+    }
+
+    let parsedGatewayUrl: URL;
+    try {
+      parsedGatewayUrl = new URL(trimmedGatewayUrl);
+    } catch {
+      const invalidUrlDiagnostic: GatewayConnectDiagnostic = {
+        kind: 'invalid-url',
+        summary: 'Gateway URL is invalid.',
+        guidance: 'Use ws:// or wss:// with a valid host.',
+      };
+      setGatewayConnectDiagnostic(invalidUrlDiagnostic);
+      setGatewayError(
+        `${invalidUrlDiagnostic.summary} ${invalidUrlDiagnostic.guidance}`,
+      );
+      if (isAutoConnect) setIsStartupAutoConnecting(false);
+      return;
+    }
+
+    if (!/^wss?:$/i.test(parsedGatewayUrl.protocol)) {
+      const invalidSchemeDiagnostic: GatewayConnectDiagnostic = {
+        kind: 'invalid-url',
+        summary: 'Gateway URL must start with ws:// or wss://.',
+        guidance: `Current protocol is ${parsedGatewayUrl.protocol}`,
+      };
+      setGatewayConnectDiagnostic(invalidSchemeDiagnostic);
+      setGatewayError(
+        `${invalidSchemeDiagnostic.summary} ${invalidSchemeDiagnostic.guidance}`,
+      );
       if (isAutoConnect) setIsStartupAutoConnecting(false);
       return;
     }
@@ -2085,10 +2249,11 @@ export default function App() {
     const connectOnce = async (clientId: string) => {
       disconnectGateway();
       setGatewayError(null);
+      setGatewayConnectDiagnostic(null);
       setSessionsError(null);
       setConnectionState('connecting');
 
-      const client = new GatewayClient(gatewayUrl.trim(), {
+      const client = new GatewayClient(trimmedGatewayUrl, {
         token: authToken.trim() || undefined,
         autoReconnect: true,
         platform: 'ios',
@@ -2102,6 +2267,11 @@ export default function App() {
         setGatewayError(
           'Pairing approval required. Please allow this device on OpenClaw.',
         );
+        setGatewayConnectDiagnostic({
+          kind: 'pairing',
+          summary: 'Pairing approval required.',
+          guidance: 'Approve this device from OpenClaw pairing screen.',
+        });
         setGatewayEventState('pairing-required');
       };
 
@@ -2132,6 +2302,7 @@ export default function App() {
     try {
       await connectOnce(REQUESTED_GATEWAY_CLIENT_ID);
       setGatewayError(null);
+      setGatewayConnectDiagnostic(null);
       setGatewayEventState('ready');
       setIsSettingsPanelOpen(false);
       forceMaskAuthToken();
@@ -2142,12 +2313,17 @@ export default function App() {
     } catch (err) {
       disconnectGateway();
       const errorText = errorMessage(err);
+      const diagnostic = classifyGatewayConnectFailure({
+        error: err,
+        hasToken,
+      });
+      setGatewayConnectDiagnostic(diagnostic);
       if (isAutoConnect) {
         const retryPlan = computeAutoConnectRetryPlan({
           attempt: autoAttempt,
           maxAttempts: STARTUP_AUTO_CONNECT_MAX_ATTEMPTS,
           baseDelayMs: STARTUP_AUTO_CONNECT_RETRY_BASE_MS,
-          errorText,
+          errorText: `${diagnostic.summary} ${errorText}`,
         });
         if (retryPlan.shouldRetry) {
           clearStartupAutoConnectRetryTimer();
@@ -2163,7 +2339,7 @@ export default function App() {
           setGatewayError(retryPlan.message);
         }
       } else {
-        setGatewayError(`Gateway connection failed: ${errorText}`);
+        setGatewayError(`${diagnostic.summary} ${diagnostic.guidance}`);
       }
     } finally {
       if (isAutoConnect) {
@@ -2645,6 +2821,26 @@ export default function App() {
   const onboardingSampleButtonLabel = isOnboardingWaitingForResponse
     ? 'Waiting reply...'
     : 'Send Sample';
+  const showGatewayDiagnostic =
+    !isGatewayConnected && gatewayConnectDiagnostic != null;
+  const gatewayDiagnosticIconName: ComponentProps<typeof Ionicons>['name'] =
+    gatewayConnectDiagnostic?.kind === 'tls'
+      ? 'shield-checkmark-outline'
+      : gatewayConnectDiagnostic?.kind === 'auth'
+        ? 'key-outline'
+        : gatewayConnectDiagnostic?.kind === 'timeout'
+          ? 'time-outline'
+          : gatewayConnectDiagnostic?.kind === 'dns'
+            ? 'globe-outline'
+            : gatewayConnectDiagnostic?.kind === 'network'
+              ? 'cloud-offline-outline'
+              : gatewayConnectDiagnostic?.kind === 'server'
+                ? 'server-outline'
+                : gatewayConnectDiagnostic?.kind === 'pairing'
+                  ? 'people-outline'
+                  : gatewayConnectDiagnostic?.kind === 'invalid-url'
+                    ? 'link-outline'
+                    : 'alert-circle-outline';
   const outboxPendingCount = outboxQueue.length;
   const historyStatusText = isSessionHistoryLoading
     ? 'Loading session...'
@@ -3517,6 +3713,29 @@ export default function App() {
                         >
                           Connecting to saved Gateway...
                         </Text>
+                      </View>
+                    ) : null}
+                    {showGatewayDiagnostic ? (
+                      <View style={styles.gatewayDiagnosticBox}>
+                        <Ionicons
+                          name={gatewayDiagnosticIconName}
+                          size={14}
+                          color={sectionIconColor}
+                        />
+                        <View style={styles.gatewayDiagnosticTextWrap}>
+                          <Text
+                            style={styles.gatewayDiagnosticSummary}
+                            maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                          >
+                            {gatewayConnectDiagnostic?.summary}
+                          </Text>
+                          <Text
+                            style={styles.gatewayDiagnosticHint}
+                            maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+                          >
+                            {gatewayConnectDiagnostic?.guidance}
+                          </Text>
+                        </View>
                       </View>
                     ) : null}
                     </View>
@@ -5599,6 +5818,33 @@ function createStyles(isDarkTheme: boolean) {
       fontSize: 11,
       color: colors.loading,
       fontWeight: '600',
+    },
+    gatewayDiagnosticBox: {
+      marginTop: 8,
+      borderRadius: 10,
+      borderWidth: 1.5,
+      borderColor: colors.inputBorder,
+      backgroundColor: colors.inputBg,
+      paddingHorizontal: 9,
+      paddingVertical: 8,
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 7,
+    },
+    gatewayDiagnosticTextWrap: {
+      flex: 1,
+      gap: 2,
+    },
+    gatewayDiagnosticSummary: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: colors.textPrimary,
+      lineHeight: 15,
+    },
+    gatewayDiagnosticHint: {
+      fontSize: 10,
+      color: colors.textSecondary,
+      lineHeight: 14,
     },
     smallButton: {
       borderRadius: 9,
