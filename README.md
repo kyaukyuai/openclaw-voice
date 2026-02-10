@@ -338,7 +338,31 @@ This repo uses two entry contexts:
 - App runtime: `package.json.main = index.ts`
 - npm package tarball: `main = ./dist/package.js` (switched automatically during pack/publish)
 
-Release steps:
+Recommended release flow (automated):
+
+1. Configure repository secret:
+- `NPM_TOKEN` (npm automation/granular token that can publish this package)
+
+2. Bump version and create tag:
+
+```bash
+npm version patch -m "chore(release): %s"
+```
+
+3. Push commit + tag:
+
+```bash
+git push
+git push --tags
+```
+
+4. GitHub Actions `Release` workflow runs on `v*` tag:
+- Version/tag consistency check
+- `typecheck`, `lint`, `test`, `smoke:pack-install`
+- `npm publish --access public --provenance` (skips if version is already published)
+- GitHub Release auto-created with generated notes
+
+Manual fallback:
 
 ```bash
 npm version patch --no-git-tag-version
