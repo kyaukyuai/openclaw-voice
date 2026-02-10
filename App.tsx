@@ -168,6 +168,7 @@ type SpeechLang = 'ja-JP' | 'en-US';
 type QuickTextButtonSide = 'left' | 'right';
 type QuickTextFocusField = 'quick-text-left' | 'quick-text-right';
 type QuickTextIcon = ComponentProps<typeof Ionicons>['name'];
+type HomeDisplayMode = 'idle' | 'composing' | 'sending';
 type FocusField =
   | 'gateway-url'
   | 'auth-token'
@@ -2953,6 +2954,24 @@ export default function App() {
     quickTextTooltipSide === 'right' && canUseQuickTextRight;
   const isTranscriptEditingWithKeyboard = isKeyboardVisible && isTranscriptFocused;
   const isTranscriptExpanded = isTranscriptFocused || isRecognizing;
+  const homeDisplayMode: HomeDisplayMode = isSending
+    ? 'sending'
+    : isTranscriptFocused || isRecognizing
+      ? 'composing'
+      : 'idle';
+  const isHomeIdleMode = homeDisplayMode === 'idle';
+  const isHomeComposingMode = homeDisplayMode === 'composing';
+  const showHistorySecondaryUi = !isHomeComposingMode;
+  const showHistoryCard = !isTranscriptEditingWithKeyboard;
+  const showHistoryRefreshButton =
+    showHistoryCard &&
+    showHistorySecondaryUi &&
+    !isSending;
+  const transcriptPlaceholder = isTranscriptFocused
+    ? 'Type your message.'
+    : 'Tap to type or hold mic.';
+  const shouldUseCompactTranscriptCard =
+    isHomeIdleMode && !hasDraft && !isTranscriptExpanded;
   const sendDisabledReason = !hasDraft
     ? 'No text to send.'
     : isRecognizing
@@ -3089,6 +3108,18 @@ export default function App() {
     historyRefreshNotice == null &&
     !activeMissingResponseNotice &&
     (isSessionHistoryLoading || isSending);
+  const showHistoryTopStatus =
+    showHistoryCard &&
+    Boolean(historyTopStatusText) &&
+    (showHistorySecondaryUi ||
+      isHistoryTopStatusError ||
+      Boolean(activeMissingResponseNotice) ||
+      showHistoryTopStatusSpinner);
+  const showHistoryDateDivider = showHistorySecondaryUi;
+  const showBottomHintText = !isKeyboardBarMounted && !isHomeComposingMode;
+  const showHistoryScrollButton =
+    showScrollToBottomButton &&
+    !isHomeComposingMode;
   const historyItems = useMemo<HistoryListItem[]>(() => {
     if (chatTurns.length === 0) return [];
 
@@ -4699,28 +4730,30 @@ export default function App() {
       </Modal>
         <View style={styles.headerBoundary} pointerEvents="none" />
         <View style={styles.main}>
-          {!isTranscriptEditingWithKeyboard ? (
+          {showHistoryCard ? (
             <View style={[styles.card, styles.historyCard, styles.historyCardFlat]}>
-              <Pressable
-                style={[
-                  styles.iconButton,
-                  styles.historyRefreshButtonFloating,
-                  (!isGatewayConnected || isSessionHistoryLoading) &&
-                    styles.iconButtonDisabled,
-                ]}
-                hitSlop={7}
-                accessibilityRole="button"
-                accessibilityLabel="Refresh current session history"
-                onPress={handleRefreshHistory}
-                disabled={!isGatewayConnected || isSessionHistoryLoading}
-              >
-                <Ionicons
-                  name="refresh-outline"
-                  size={15}
-                  color={isDarkTheme ? '#bccae2' : '#707070'}
-                />
-              </Pressable>
-              {historyTopStatusText ? (
+              {showHistoryRefreshButton ? (
+                <Pressable
+                  style={[
+                    styles.iconButton,
+                    styles.historyRefreshButtonFloating,
+                    (!isGatewayConnected || isSessionHistoryLoading) &&
+                      styles.iconButtonDisabled,
+                  ]}
+                  hitSlop={7}
+                  accessibilityRole="button"
+                  accessibilityLabel="Refresh current session history"
+                  onPress={handleRefreshHistory}
+                  disabled={!isGatewayConnected || isSessionHistoryLoading}
+                >
+                  <Ionicons
+                    name="refresh-outline"
+                    size={15}
+                    color={isDarkTheme ? '#bccae2' : '#707070'}
+                  />
+                </Pressable>
+              ) : null}
+              {showHistoryTopStatus ? (
                 <View style={styles.historyTopStatusRow}>
                   {showHistoryTopStatusSpinner ? (
                     <ActivityIndicator
@@ -4783,11 +4816,12 @@ export default function App() {
                     style={styles.placeholder}
                     maxFontSizeMultiplier={MAX_TEXT_SCALE}
                   >
-                    Conversation history appears here.
+                    {isHomeComposingMode ? 'No messages yet.' : 'Conversation history appears here.'}
                   </Text>
                 ) : (
                   historyItems.map((item) => {
                     if (item.kind === 'date') {
+                      if (!showHistoryDateDivider) return null;
                       return (
                         <View key={item.id} style={styles.historyDateRow}>
                           <View style={styles.historyDateLine} />
@@ -4876,7 +4910,7 @@ export default function App() {
                   })
                 )}
               </ScrollView>
-              {showScrollToBottomButton ? (
+              {showHistoryScrollButton ? (
                 <Pressable
                   style={[styles.iconButton, styles.historyScrollToBottomButtonFloating]}
                   hitSlop={8}
@@ -4898,14 +4932,14 @@ export default function App() {
               styles.card,
               isRecognizing && styles.recordingCard,
               isTranscriptEditingWithKeyboard && styles.transcriptCardExpanded,
-              !isTranscriptExpanded && styles.transcriptCardCompact,
+              shouldUseCompactTranscriptCard && styles.transcriptCardCompact,
             ]}
           >
             <View
               style={[
                 styles.transcriptEditor,
                 isTranscriptEditingWithKeyboard && styles.transcriptEditorExpanded,
-                !isTranscriptExpanded && styles.transcriptEditorCompact,
+                shouldUseCompactTranscriptCard && styles.transcriptEditorCompact,
               ]}
             >
               <TextInput
@@ -4914,7 +4948,7 @@ export default function App() {
                   focusedField === 'transcript' && styles.inputFocused,
                   isRecognizing && styles.transcriptInputDisabled,
                   isTranscriptEditingWithKeyboard && styles.transcriptInputExpanded,
-                  !isTranscriptExpanded && styles.transcriptInputCompact,
+                  shouldUseCompactTranscriptCard && styles.transcriptInputCompact,
                 ]}
                 maxFontSizeMultiplier={MAX_TEXT_SCALE}
                 value={transcript}
@@ -4922,7 +4956,7 @@ export default function App() {
                   setTranscript(value);
                   setInterimTranscript('');
                 }}
-                placeholder="Long-press the round button below to start voice input."
+                placeholder={transcriptPlaceholder}
                 placeholderTextColor={placeholderColor}
                 multiline
                 textAlignVertical="top"
@@ -5008,6 +5042,7 @@ export default function App() {
         <View
           style={[
             styles.bottomDock,
+            isHomeComposingMode && styles.bottomDockComposing,
             isTranscriptFocused && styles.bottomDockKeyboardOpen,
             isKeyboardVisible && styles.bottomDockKeyboardCompact,
           ]}
@@ -5265,11 +5300,11 @@ export default function App() {
               </View>
             </View>
           )}
-          {isKeyboardBarMounted ? null : (
+          {showBottomHintText ? (
             <Text style={styles.bottomHint} maxFontSizeMultiplier={MAX_TEXT_SCALE}>
               {bottomHintText}
             </Text>
-          )}
+          ) : null}
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -6460,6 +6495,11 @@ function createStyles(isDarkTheme: boolean) {
       backgroundColor: colors.bottomDockBg,
       borderTopLeftRadius: 14,
       borderTopRightRadius: 14,
+    },
+    bottomDockComposing: {
+      paddingTop: 8,
+      paddingBottom: 4,
+      gap: 4,
     },
     bottomDockKeyboardOpen: {
       paddingTop: 12,
