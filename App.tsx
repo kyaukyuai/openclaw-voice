@@ -60,7 +60,6 @@ import type {
   GatewayConnectDiagnostic,
   GatewayHealthState,
   HomeDisplayMode,
-  KeyValueStore,
   QuickTextButtonSide,
   QuickTextFocusField,
   QuickTextIcon,
@@ -124,6 +123,7 @@ import {
   HISTORY_SYNC_INITIAL_DELAY_MS,
   HISTORY_SYNC_RETRY_BASE_MS,
   HISTORY_SYNC_MAX_ATTEMPTS,
+  getKvStore,
   MAX_TEXT_SCALE,
   MAX_TEXT_SCALE_TIGHT,
   HISTORY_BOTTOM_THRESHOLD_PX,
@@ -149,36 +149,25 @@ import {
   normalizeChatEventState,
   getTextOverlapSize,
   mergeAssistantStreamText,
+  isMacDesktopRuntime,
+  supportsSpeechRecognitionOnCurrentPlatform,
 } from './src/utils';
+
+// Import contexts
+import {
+  ThemeProvider,
+  useTheme,
+  SettingsProvider,
+  useSettings,
+  GatewayProvider,
+  useGateway,
+} from './src/contexts';
 
 if (__DEV__ && !ENABLE_DEBUG_WARNINGS) {
   LogBox.ignoreAllLogs(true);
 }
 
-const memoryStore = new Map<string, string>();
-
-const fallbackStore: KeyValueStore = {
-  async getItemAsync(key) {
-    return memoryStore.get(key) ?? null;
-  },
-  async setItemAsync(key, value) {
-    memoryStore.set(key, value);
-  },
-  async deleteItemAsync(key) {
-    memoryStore.delete(key);
-  },
-};
-
-function resolveKeyValueStore(): KeyValueStore {
-  try {
-    const secureStore = require('expo-secure-store') as KeyValueStore;
-    return secureStore;
-  } catch {
-    return fallbackStore;
-  }
-}
-
-const kvStore = resolveKeyValueStore();
+const kvStore = getKvStore();
 const openClawIdentityMemory = new Map<string, string>();
 
 const openClawStorage: OpenClawStorage = {
@@ -431,22 +420,31 @@ function parseOutboxQueue(raw: string | null): OutboxQueueItem[] {
   }
 }
 
-export default function App() {
-  const [gatewayUrl, setGatewayUrl] = useState(DEFAULT_GATEWAY_URL);
-  const [authToken, setAuthToken] = useState('');
+function AppContent() {
+  // Settings are now managed by SettingsContext
+  const {
+    gatewayUrl,
+    setGatewayUrl,
+    authToken,
+    setAuthToken,
+    speechLang,
+    setSpeechLang,
+    quickTextLeft,
+    setQuickTextLeft,
+    quickTextRight,
+    setQuickTextRight,
+    quickTextLeftIcon,
+    setQuickTextLeftIcon,
+    quickTextRightIcon,
+    setQuickTextRightIcon,
+    isOnboardingCompleted,
+    setOnboardingCompleted: setIsOnboardingCompleted,
+    isReady: settingsReady,
+  } = useSettings();
+
   const [isAuthTokenMasked, setIsAuthTokenMasked] = useState(true);
-  const [speechLang, setSpeechLang] = useState<SpeechLang>(DEFAULT_SPEECH_LANG);
-  const [quickTextLeft, setQuickTextLeft] = useState(DEFAULT_QUICK_TEXT_LEFT);
-  const [quickTextRight, setQuickTextRight] = useState(DEFAULT_QUICK_TEXT_RIGHT);
-  const [quickTextLeftIcon, setQuickTextLeftIcon] = useState<QuickTextIcon>(
-    DEFAULT_QUICK_TEXT_LEFT_ICON,
-  );
-  const [quickTextRightIcon, setQuickTextRightIcon] = useState<QuickTextIcon>(
-    DEFAULT_QUICK_TEXT_RIGHT_ICON,
-  );
   const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
   const [isSessionPanelOpen, setIsSessionPanelOpen] = useState(false);
-  const [settingsReady, setSettingsReady] = useState(false);
   const [connectionState, setConnectionState] =
     useState<ConnectionState>('disconnected');
   const [gatewayError, setGatewayError] = useState<string | null>(null);
@@ -464,7 +462,7 @@ export default function App() {
   const [sessionRenameTargetKey, setSessionRenameTargetKey] = useState<string | null>(null);
   const [sessionRenameDraft, setSessionRenameDraft] = useState('');
   const [isStartupAutoConnecting, setIsStartupAutoConnecting] = useState(false);
-  const [isOnboardingCompleted, setIsOnboardingCompleted] = useState(false);
+  // isOnboardingCompleted is now managed by SettingsContext
   const [isOnboardingWaitingForResponse, setIsOnboardingWaitingForResponse] =
     useState(false);
   const [settingsSavePendingCount, setSettingsSavePendingCount] = useState(0);
@@ -486,7 +484,8 @@ export default function App() {
   const [gatewayConnectDiagnostic, setGatewayConnectDiagnostic] =
     useState<GatewayConnectDiagnostic | null>(null);
   const [outboxQueue, setOutboxQueue] = useState<OutboxQueueItem[]>([]);
-  const [theme, setTheme] = useState<AppTheme>(DEFAULT_THEME);
+  // Theme is now managed by ThemeContext
+  const { theme, setTheme, isDark: isDarkTheme } = useTheme();
   const [quickTextTooltipSide, setQuickTextTooltipSide] =
     useState<QuickTextButtonSide | null>(null);
   const [focusedField, setFocusedField] = useState<FocusField>(null);
@@ -498,6 +497,7 @@ export default function App() {
   const [transcript, setTranscript] = useState('');
   const [interimTranscript, setInterimTranscript] = useState('');
   const [speechError, setSpeechError] = useState<string | null>(null);
+  const [localStateReady, setLocalStateReady] = useState(false);
 
   const clientRef = useRef<GatewayClient | null>(null);
   const activeSessionKeyRef = useRef(DEFAULT_SESSION_KEY);
@@ -570,8 +570,12 @@ export default function App() {
   const isGatewayConnected = connectionState === 'connected';
   const isGatewayConnecting =
     connectionState === 'connecting' || connectionState === 'reconnecting';
-  const shouldShowSettingsScreen = !isGatewayConnected || isSettingsPanelOpen;
-  const isDarkTheme = theme === 'dark';
+  const isMacRuntime = isMacDesktopRuntime();
+  const shouldForceSettingsScreen = !isGatewayConnected && !isMacRuntime;
+  const shouldShowSettingsScreen = shouldForceSettingsScreen || isSettingsPanelOpen;
+  const canToggleSettingsPanel = isGatewayConnected || isMacRuntime;
+  const canDismissSettingsScreen = isGatewayConnected || isMacRuntime;
+  // isDarkTheme is now provided by useTheme()
 
   const persistSetting = useCallback((task: () => Promise<void>) => {
     setSettingsSavePendingCount((current) => current + 1);
@@ -855,79 +859,31 @@ export default function App() {
     setIsOnboardingWaitingForResponse(false);
   }, [chatTurns, isOnboardingCompleted, isOnboardingWaitingForResponse]);
 
+  // Load non-settings state (session, outbox, identity)
+  // Settings (gatewayUrl, authToken, speechLang, quickText*, onboarding) are managed by SettingsContext
   useEffect(() => {
     let alive = true;
 
-    const loadSettings = async () => {
+    const loadLocalState = async () => {
       try {
         const [
-          savedUrl,
-          savedToken,
           savedIdentity,
-          savedTheme,
-          savedSpeechLang,
-          savedQuickTextLeft,
-          savedQuickTextRight,
-          savedQuickTextLeftIcon,
-          savedQuickTextRightIcon,
           savedSessionKey,
           savedSessionPrefs,
           savedOutboxQueue,
-          savedOnboardingCompleted,
         ] = await Promise.all([
-          kvStore.getItemAsync(STORAGE_KEYS.gatewayUrl),
-          kvStore.getItemAsync(STORAGE_KEYS.authToken),
           kvStore.getItemAsync(OPENCLAW_IDENTITY_STORAGE_KEY),
-          kvStore.getItemAsync(STORAGE_KEYS.theme),
-          kvStore.getItemAsync(STORAGE_KEYS.speechLang),
-          kvStore.getItemAsync(STORAGE_KEYS.quickTextLeft),
-          kvStore.getItemAsync(STORAGE_KEYS.quickTextRight),
-          kvStore.getItemAsync(STORAGE_KEYS.quickTextLeftIcon),
-          kvStore.getItemAsync(STORAGE_KEYS.quickTextRightIcon),
           kvStore.getItemAsync(STORAGE_KEYS.sessionKey),
           kvStore.getItemAsync(STORAGE_KEYS.sessionPrefs),
           kvStore.getItemAsync(STORAGE_KEYS.outboxQueue),
-          kvStore.getItemAsync(STORAGE_KEYS.onboardingCompleted),
         ]);
         if (!alive) return;
 
-        if (savedUrl) setGatewayUrl(savedUrl);
-        if (savedToken) setAuthToken(savedToken);
-        if (savedTheme === 'dark' || savedTheme === 'light') {
-          setTheme(savedTheme);
-        }
-        if (savedSpeechLang === 'ja-JP' || savedSpeechLang === 'en-US') {
-          setSpeechLang(savedSpeechLang);
-        }
-        if (savedQuickTextLeft != null) {
-          setQuickTextLeft(savedQuickTextLeft);
-        }
-        if (savedQuickTextRight != null) {
-          setQuickTextRight(savedQuickTextRight);
-        }
-        if (savedQuickTextLeftIcon != null) {
-          setQuickTextLeftIcon(
-            normalizeQuickTextIcon(savedQuickTextLeftIcon, DEFAULT_QUICK_TEXT_LEFT_ICON),
-          );
-        }
-        if (savedQuickTextRightIcon != null) {
-          setQuickTextRightIcon(
-            normalizeQuickTextIcon(savedQuickTextRightIcon, DEFAULT_QUICK_TEXT_RIGHT_ICON),
-          );
-        }
         if (savedSessionKey?.trim()) {
           setActiveSessionKey(savedSessionKey.trim());
         }
         setSessionPreferences(parseSessionPreferences(savedSessionPrefs));
         const restoredOutbox = parseOutboxQueue(savedOutboxQueue);
-        const hasExistingSetup =
-          Boolean(savedUrl?.trim()) ||
-          Boolean(savedToken?.trim()) ||
-          Boolean(savedIdentity) ||
-          restoredOutbox.length > 0;
-        if (savedOnboardingCompleted === '1' || hasExistingSetup) {
-          setIsOnboardingCompleted(true);
-        }
         if (restoredOutbox.length > 0) {
           setOutboxQueue(restoredOutbox);
           setGatewayEventState('queued');
@@ -966,12 +922,16 @@ export default function App() {
             savedIdentity,
           );
         }
+      } catch {
+        // Ignore errors
       } finally {
-        if (alive) setSettingsReady(true);
+        if (alive) {
+          setLocalStateReady(true);
+        }
       }
     };
 
-    void loadSettings();
+    void loadLocalState();
 
     return () => {
       alive = false;
@@ -2046,6 +2006,9 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (!localStateReady) {
+      return;
+    }
     if (
       !shouldStartStartupAutoConnect({
         settingsReady,
@@ -2059,7 +2022,7 @@ export default function App() {
     startupAutoConnectAttemptedRef.current = true;
     startupAutoConnectAttemptRef.current = 1;
     void connectGateway({ auto: true, autoAttempt: 1 });
-  }, [connectionState, gatewayUrl, settingsReady]);
+  }, [connectionState, gatewayUrl, localStateReady, settingsReady]);
 
   useEffect(() => {
     return () => {
@@ -2122,11 +2085,21 @@ export default function App() {
       quickTextLongPressSideRef.current = null;
       disconnectGateway();
       clearSubscriptions();
-      ExpoSpeechRecognitionModule.abort();
+      if (supportsSpeechRecognitionOnCurrentPlatform()) {
+        ExpoSpeechRecognitionModule.abort();
+      }
     };
   }, []);
 
   const startRecognition = async () => {
+    if (!supportsSpeechRecognitionOnCurrentPlatform()) {
+      setSpeechError(
+        isMacDesktopRuntime()
+          ? 'macOSでは音声入力未対応です。'
+          : 'Webでは音声入力未対応です。',
+      );
+      return;
+    }
     if (isRecognizing) return;
 
     expectedSpeechStopRef.current = false;
@@ -2154,6 +2127,7 @@ export default function App() {
   };
 
   const stopRecognition = () => {
+    if (!supportsSpeechRecognitionOnCurrentPlatform()) return;
     expectedSpeechStopRef.current = true;
     ExpoSpeechRecognitionModule.stop();
   };
@@ -2555,6 +2529,10 @@ export default function App() {
     hasDraft && !isRecognizing && !isSending;
   const canClearFromKeyboardBar =
     transcript.length > 0 || interimTranscript.length > 0;
+  const speechRecognitionSupported = supportsSpeechRecognitionOnCurrentPlatform();
+  const speechUnsupportedMessage = isMacDesktopRuntime()
+    ? 'macOSでは音声入力未対応です。'
+    : 'Webでは音声入力未対応です。';
   const canUseQuickText = !isRecognizing && settingsReady;
   const canUseQuickTextLeft = canUseQuickText && quickTextLeftLabel.length > 0;
   const canUseQuickTextRight = canUseQuickText && quickTextRightLabel.length > 0;
@@ -2739,9 +2717,11 @@ export default function App() {
                   : 'Connect Gateway'
                 : bottomActionStatus === 'error'
                   ? 'Check top banner'
-                  : canSendDraft
-                    ? 'Tap send'
-                    : 'Hold to record';
+                    : canSendDraft
+                      ? 'Tap send'
+                      : speechRecognitionSupported
+                        ? 'Hold to record'
+                        : speechUnsupportedMessage;
   const showBottomStatus = !isKeyboardBarMounted && !isHomeComposingMode;
   const showHistoryDateDivider = showHistorySecondaryUi;
   const showHistoryScrollButton =
@@ -2925,7 +2905,7 @@ export default function App() {
   }, [triggerHaptic]);
 
   const handleHoldToTalkPressIn = () => {
-    if (isRecognizing || isSending) return;
+    if (!speechRecognitionSupported || isRecognizing || isSending) return;
     void triggerHaptic('button-press');
     Keyboard.dismiss();
     setFocusedField(null);
@@ -3333,7 +3313,7 @@ export default function App() {
               style={[
                 styles.iconButton,
                 isSettingsPanelOpen && styles.iconButtonActive,
-                !isGatewayConnected && styles.iconButtonDisabled,
+                !canToggleSettingsPanel && styles.iconButtonDisabled,
               ]}
               hitSlop={7}
               accessibilityRole="button"
@@ -3343,7 +3323,7 @@ export default function App() {
                   : 'Show settings screen'
               }
               onPress={() => {
-                if (!isGatewayConnected) return;
+                if (!canToggleSettingsPanel) return;
                 Keyboard.dismiss();
                 setFocusedField(null);
                 setIsSessionPanelOpen(false);
@@ -3355,7 +3335,7 @@ export default function App() {
                   return next;
                 });
               }}
-              disabled={!isGatewayConnected}
+              disabled={!canToggleSettingsPanel}
             >
               <Ionicons
                 name="settings-outline"
@@ -3371,7 +3351,7 @@ export default function App() {
           animationType="slide"
           presentationStyle="fullScreen"
           onRequestClose={() => {
-            if (!isGatewayConnected) return;
+            if (!canDismissSettingsScreen) return;
             forceMaskAuthToken();
             setIsSettingsPanelOpen(false);
             setFocusedField(null);
@@ -3427,19 +3407,19 @@ export default function App() {
               <Pressable
                 style={[
                   styles.iconButton,
-                  !isGatewayConnected && styles.iconButtonDisabled,
+                  !canDismissSettingsScreen && styles.iconButtonDisabled,
                 ]}
                 hitSlop={7}
                 accessibilityRole="button"
                 accessibilityLabel="Close settings screen"
                 onPress={() => {
-                  if (!isGatewayConnected) return;
+                  if (!canDismissSettingsScreen) return;
                   forceMaskAuthToken();
                   setIsSettingsPanelOpen(false);
                   setFocusedField(null);
                   Keyboard.dismiss();
                 }}
-                disabled={!isGatewayConnected}
+                disabled={!canDismissSettingsScreen}
               >
                 <Ionicons
                   name="close"
@@ -4921,11 +4901,14 @@ export default function App() {
                       !isSending &&
                       settingsReady &&
                       styles.bottomActionButtonPressed,
-                    (isSending || !settingsReady) && styles.roundButtonDisabled,
+                    (isSending || !settingsReady || !speechRecognitionSupported) &&
+                      styles.roundButtonDisabled,
                   ]}
                   accessibilityRole="button"
                   accessibilityLabel={
-                    isRecognizing
+                    !speechRecognitionSupported
+                      ? 'Voice input is unavailable on web'
+                      : isRecognizing
                       ? 'Stop voice recording'
                       : isSending
                         ? 'Recording disabled while sending'
@@ -4933,10 +4916,16 @@ export default function App() {
                   }
                   onPressIn={handleHoldToTalkPressIn}
                   onPressOut={handleHoldToTalkPressOut}
-                  disabled={isSending || !settingsReady}
+                  disabled={isSending || !settingsReady || !speechRecognitionSupported}
                 >
                   <Ionicons
-                    name={isRecognizing ? 'stop' : 'mic'}
+                    name={
+                      !speechRecognitionSupported
+                        ? 'mic-off'
+                        : isRecognizing
+                          ? 'stop'
+                          : 'mic'
+                    }
                     size={26}
                     color="#ffffff"
                   />
@@ -5029,6 +5018,21 @@ export default function App() {
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
+  );
+}
+
+/**
+ * Root App component with Providers
+ */
+export default function App() {
+  return (
+    <ThemeProvider>
+      <SettingsProvider>
+        <GatewayProvider>
+          <AppContent />
+        </GatewayProvider>
+      </SettingsProvider>
+    </ThemeProvider>
   );
 }
 

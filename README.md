@@ -55,6 +55,13 @@ Optional environment check:
 
 ```bash
 npm run doctor:ios
+npm run doctor:macos
+```
+
+macOS app run path (Apple Silicon, Metro not required):
+
+```bash
+npm run ios:mac
 ```
 
 Debug run path (development, Metro required):
@@ -144,6 +151,33 @@ If Debug app does not attach to Metro, pass URL explicitly:
 EXPO_DEV_SERVER_URL=http://192.168.0.10:8081 npm run ios:dev:device:open
 ```
 
+### macOS App Support
+
+This project supports macOS app usage on Apple Silicon as:
+
+- iOS app running on Mac (`Designed for iPad/iPhone`)
+- Core flow: Gateway connection, text input/send, history display, quick text actions
+- Current limitation: voice input is disabled on macOS (`macOSでは音声入力未対応です。`)
+
+Validate macOS runtime:
+
+```bash
+npm run doctor:macos
+```
+
+Build and launch macOS app:
+
+```bash
+npm run ios:mac
+```
+
+Optional desktop web path (secondary):
+
+```bash
+npm run web
+npm run web:check
+```
+
 ## Use It As npm Package
 
 Install:
@@ -215,6 +249,7 @@ Notes:
 ## Features
 
 - Voice input with hold-to-record (`expo-speech-recognition`)
+- macOS app mode uses text-first operation (voice input disabled)
 - Editable transcript and quick text insert buttons
 - Speech language switch (`ja-JP` / `en-US`)
 - Dedicated **Settings** screen and **Sessions** screen
@@ -254,6 +289,7 @@ Device identity is generated locally and reused when persistent storage is avail
 
 - `npm run setup` - Install deps, prepare native iOS project, install Pods
 - `npm run doctor:ios` - Validate iOS development environment and connectivity
+- `npm run doctor:macos` - Validate macOS app runtime availability (`Designed for iPad/iPhone`)
 - `npm run doctor:android` - Validate Android SDK/adb/device environment
 - `npm run doctor:release` - Check release prerequisites (release workflow, docs gate, GitHub secret/permissions when available)
 - `npm run check:release-docs` - Ensure `CHANGELOG.md` and `README.md` stay aligned with package metadata
@@ -268,8 +304,11 @@ Device identity is generated locally and reused when persistent storage is avail
 - `npm run ios:dev:device:open` - Launch installed iOS app on connected device (uses `EXPO_DEV_SERVER_URL` when set)
 - `npm run ios:release` - Build and run iOS Release app (Metro not required)
 - `npm run ios:release:device` - Build and run iOS Release app on device (Metro not required)
+- `npm run ios:mac` - Build and launch macOS app (Apple Silicon, Release)
+- `npm run ios:mac:debug` - Build and launch macOS app in Debug (Metro required)
 - `npm run android` - Build and run Android app
 - `npm run web` - Run web target
+- `npm run web:check` - Export web bundle to validate desktop/web compatibility
 - `npm run typecheck` - Run TypeScript checks
 - `npm run lint` - Run repository lint checks
 - `npm test` - Run regression tests (runtime logic + manifest switch)
@@ -315,6 +354,19 @@ For `No script URL provided` / `Could not connect to development server`:
 - Reinstall Debug app with `--no-bundler` from another terminal
 - Or use Release build (`npx expo run:ios --device --configuration Release`)
 
+For macOS app build error `Provisioning profile ... doesn't include the currently selected device ... Mac`:
+
+- Open Xcode and ensure your Apple ID/team is configured for automatic signing
+- Re-run with provisioning updates enabled (default):
+  - `npm run ios:mac`
+- If needed, set explicitly:
+  - `IOS_ALLOW_PROVISIONING_UPDATES=1 npm run ios:mac`
+
+For `expo export --platform web` dependency errors (`react-dom` / `react-native-web` missing):
+
+- Install required web dependencies: `npx expo install react-dom react-native-web`
+- Re-run: `npm run web:check`
+
 See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for more.
 
 ## Contributing
@@ -326,6 +378,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 GitHub Actions runs on push/PR:
 
 - Type check (`npm run typecheck`)
+- Web export check (`npm run web:check`)
 - Package dry-run (`npm pack --dry-run`)
 - Manifest restore check after pack (`package.json.main` stays `index.ts`)
 - Lint (`npm run lint`)

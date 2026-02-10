@@ -20,6 +20,7 @@
   "scripts": {
     "setup": "bash scripts/setup.sh",
     "doctor:ios": "node scripts/doctor-ios.mjs",
+    "doctor:macos": "node scripts/doctor-macos.mjs",
     "doctor:android": "node scripts/doctor-android.mjs",
     "doctor:release": "node scripts/doctor-release.mjs",
     "check:release-docs": "node scripts/check-release-docs.mjs",
@@ -35,7 +36,10 @@
     "ios:dev:device:open": "bash scripts/launch-ios-device.sh",
     "ios:release": "expo run:ios --configuration Release",
     "ios:release:device": "npm run ios:release -- --device",
+    "ios:mac": "bash scripts/run-ios-on-mac.sh",
+    "ios:mac:debug": "IOS_CONFIGURATION=Debug bash scripts/run-ios-on-mac.sh",
     "web": "expo start --web",
+    "web:check": "expo export --platform web --output-dir /tmp/openclaw-web-export-check",
     "typecheck": "tsc --noEmit",
     "lint": "node scripts/lint.mjs",
     "test": "node --test tests/*.test.mjs",
@@ -58,8 +62,10 @@
     "expo-speech-recognition": "^3.1.0",
     "expo-status-bar": "~3.0.9",
     "react": "19.1.0",
+    "react-dom": "19.1.0",
     "react-native": "0.81.5",
-    "react-native-markdown-display": "^7.0.2"
+    "react-native-markdown-display": "^7.0.2",
+    "react-native-web": "^0.21.0"
   },
   "devDependencies": {
     "@types/react": "~19.1.0",

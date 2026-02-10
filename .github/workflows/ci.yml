@@ -25,6 +25,9 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      - name: Web export check
+        run: npm run web:check
+
       - name: Release docs gate
         run: npm run check:release-docs
 

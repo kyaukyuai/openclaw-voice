@@ -45,6 +45,10 @@ cat <<'EOF'
 
 [setup] Done.
 Next steps:
+  macOS app (Apple Silicon, iOS app on Mac):
+    1) npm run doctor:macos
+    2) npm run ios:mac
+
   Debug (Metro required):
     1) npm run dev:metro
     2) npm run ios:dev:device:install
