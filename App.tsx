@@ -12,6 +12,7 @@ import Markdown, { MarkdownIt } from 'react-native-markdown-display';
 import {
   ActivityIndicator,
   Animated,
+  FlatList,
   Image,
   Keyboard,
   KeyboardAvoidingView,
@@ -961,7 +962,7 @@ export default function App() {
   const subscriptionsRef = useRef<Array<() => void>>([]);
   const transcriptRef = useRef('');
   const interimTranscriptRef = useRef('');
-  const historyScrollRef = useRef<ScrollView | null>(null);
+  const historyScrollRef = useRef<FlatList<HistoryListItem> | null>(null);
   const settingsScrollRef = useRef<ScrollView | null>(null);
   const historyAutoScrollRef = useRef(true);
   const historySyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2938,12 +2939,6 @@ export default function App() {
     [clearFinalResponseRecoveryTimer, loadSessionHistory, refreshSessions],
   );
 
-  const formatTurnTime = (createdAt: number): string =>
-    new Date(createdAt).toLocaleTimeString('ja-JP', {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-
   const draftText = transcript.trim() || interimTranscript.trim();
   const hasDraft = Boolean(draftText);
   const canSendDraft = hasDraft && !isRecognizing;
@@ -3522,6 +3517,107 @@ export default function App() {
     }),
     [isDarkTheme, markdownStyles],
   );
+  const renderHistoryItem = useCallback(
+    ({ item }: { item: HistoryListItem }) => {
+      if (item.kind === 'date') {
+        if (!showHistoryDateDivider) return null;
+        return (
+          <View style={styles.historyDateRow}>
+            <View style={styles.historyDateLine} />
+            <Text
+              style={styles.historyDateText}
+              maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+            >
+              {item.label}
+            </Text>
+            <View style={styles.historyDateLine} />
+          </View>
+        );
+      }
+
+      const turn = item.turn;
+      const waiting = isTurnWaitingState(turn.state);
+      const error = isTurnErrorState(turn.state);
+      const assistantText = turn.assistantText || (waiting ? 'Responding...' : 'No response');
+      const turnTime = new Date(turn.createdAt).toLocaleTimeString('ja-JP', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+
+      return (
+        <View
+          style={[
+            styles.historyTurnGroup,
+            item.isLast && styles.historyTurnGroupLast,
+          ]}
+        >
+          <View style={styles.historyUserRow}>
+            <View style={styles.turnUserBubble}>
+              <Text
+                style={styles.turnUser}
+                maxFontSizeMultiplier={MAX_TEXT_SCALE}
+              >
+                {turn.userText}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.historyAssistantRow}>
+            <View style={styles.assistantAvatar}>
+              <Ionicons
+                name="flash"
+                size={11}
+                color={isDarkTheme ? '#ffffff' : '#1d4ed8'}
+              />
+            </View>
+            <View
+              style={[
+                styles.turnAssistantBubble,
+                error && styles.turnAssistantBubbleError,
+              ]}
+            >
+              <Markdown
+                markdownit={markdownParser}
+                style={error ? markdownErrorStyles : markdownStyles}
+                onLinkPress={(url) => {
+                  void Linking.openURL(url).catch(() => {});
+                  return false;
+                }}
+              >
+                {assistantText}
+              </Markdown>
+            </View>
+          </View>
+          <View style={styles.historyMetaRow}>
+            <View
+              style={[
+                styles.historyMetaDot,
+                waiting
+                  ? styles.historyMetaDotWaiting
+                  : error
+                    ? styles.historyMetaDotError
+                    : styles.historyMetaDotOk,
+              ]}
+            />
+            <Text
+              style={styles.historyMetaText}
+              maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+            >
+              {turnTime}
+            </Text>
+          </View>
+        </View>
+      );
+    },
+    [
+      isDarkTheme,
+      markdownErrorStyles,
+      markdownParser,
+      markdownStyles,
+      showHistoryDateDivider,
+      styles,
+    ],
+  );
+  const historyItemKeyExtractor = useCallback((item: HistoryListItem) => item.id, []);
 
   useEffect(() => {
     if (showKeyboardActionBar) {
@@ -4927,12 +5023,23 @@ export default function App() {
                   </Text>
                 </View>
               ) : null}
-              <ScrollView
+              <FlatList
                 ref={historyScrollRef}
+                data={historyItems}
+                keyExtractor={historyItemKeyExtractor}
+                renderItem={renderHistoryItem}
                 contentContainerStyle={[
                   styles.chatList,
                   showScrollToBottomButton && styles.chatListWithScrollButton,
                 ]}
+                ListEmptyComponent={
+                  <Text
+                    style={styles.placeholder}
+                    maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                  >
+                    {isHomeComposingMode ? 'No messages yet.' : 'Conversation history appears here.'}
+                  </Text>
+                }
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode="on-drag"
                 onScroll={handleHistoryScroll}
@@ -4943,106 +5050,11 @@ export default function App() {
                     setShowScrollToBottomButton(false);
                   }
                 }}
-              >
-                {chatTurns.length === 0 ? (
-                  <Text
-                    style={styles.placeholder}
-                    maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                  >
-                    {isHomeComposingMode ? 'No messages yet.' : 'Conversation history appears here.'}
-                  </Text>
-                ) : (
-                  historyItems.map((item) => {
-                    if (item.kind === 'date') {
-                      if (!showHistoryDateDivider) return null;
-                      return (
-                        <View key={item.id} style={styles.historyDateRow}>
-                          <View style={styles.historyDateLine} />
-                          <Text
-                            style={styles.historyDateText}
-                            maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                          >
-                            {item.label}
-                          </Text>
-                          <View style={styles.historyDateLine} />
-                        </View>
-                      );
-                    }
-
-                    const turn = item.turn;
-                    const waiting = isTurnWaitingState(turn.state);
-                    const error = isTurnErrorState(turn.state);
-                    const assistantText =
-                      turn.assistantText ||
-                      (waiting ? 'Responding...' : 'No response');
-
-                    return (
-                      <View
-                        key={item.id}
-                        style={[
-                          styles.historyTurnGroup,
-                          item.isLast && styles.historyTurnGroupLast,
-                        ]}
-                      >
-                        <View style={styles.historyUserRow}>
-                          <View style={styles.turnUserBubble}>
-                            <Text
-                              style={styles.turnUser}
-                              maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                            >
-                              {turn.userText}
-                            </Text>
-                          </View>
-                        </View>
-                        <View style={styles.historyAssistantRow}>
-                          <View style={styles.assistantAvatar}>
-                            <Ionicons
-                              name="flash"
-                              size={11}
-                              color={isDarkTheme ? '#ffffff' : '#1d4ed8'}
-                            />
-                          </View>
-                          <View
-                            style={[
-                              styles.turnAssistantBubble,
-                              error && styles.turnAssistantBubbleError,
-                            ]}
-                          >
-                            <Markdown
-                              markdownit={markdownParser}
-                              style={error ? markdownErrorStyles : markdownStyles}
-                              onLinkPress={(url) => {
-                                void Linking.openURL(url).catch(() => {});
-                                return false;
-                              }}
-                            >
-                              {assistantText}
-                            </Markdown>
-                          </View>
-                        </View>
-                        <View style={styles.historyMetaRow}>
-                          <View
-                            style={[
-                              styles.historyMetaDot,
-                              waiting
-                                ? styles.historyMetaDotWaiting
-                                : error
-                                  ? styles.historyMetaDotError
-                                  : styles.historyMetaDotOk,
-                            ]}
-                          />
-                          <Text
-                            style={styles.historyMetaText}
-                            maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                          >
-                            {formatTurnTime(turn.createdAt)}
-                          </Text>
-                        </View>
-                      </View>
-                    );
-                  })
-                )}
-              </ScrollView>
+                removeClippedSubviews={Platform.OS === 'android'}
+                initialNumToRender={12}
+                maxToRenderPerBatch={8}
+                windowSize={7}
+              />
               {showHistoryScrollButton ? (
                 <Pressable
                   style={[styles.iconButton, styles.historyScrollToBottomButtonFloating]}
