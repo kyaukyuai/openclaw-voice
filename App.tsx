@@ -60,9 +60,9 @@ import {
 
 const CONNECTION_LABELS: Record<ConnectionState, string> = {
   disconnected: 'Disconnected',
-  connecting: 'Connecting...',
+  connecting: 'Connecting',
   connected: 'Connected',
-  reconnecting: 'Reconnecting...',
+  reconnecting: 'Connecting',
 };
 const REQUESTED_GATEWAY_CLIENT_ID =
   (process.env.EXPO_PUBLIC_GATEWAY_CLIENT_ID ?? 'openclaw-ios').trim() ||
@@ -169,6 +169,15 @@ type QuickTextButtonSide = 'left' | 'right';
 type QuickTextFocusField = 'quick-text-left' | 'quick-text-right';
 type QuickTextIcon = ComponentProps<typeof Ionicons>['name'];
 type HomeDisplayMode = 'idle' | 'composing' | 'sending';
+type BottomActionStatus =
+  | 'disconnected'
+  | 'connecting'
+  | 'ready'
+  | 'recording'
+  | 'sending'
+  | 'retrying'
+  | 'complete'
+  | 'error';
 type FocusField =
   | 'gateway-url'
   | 'auth-token'
@@ -217,6 +226,17 @@ type OutboxQueueItem = {
   retryCount: number;
   nextRetryAt: number;
   lastError: string | null;
+};
+
+const BOTTOM_ACTION_STATUS_LABELS: Record<BottomActionStatus, string> = {
+  disconnected: 'Disconnected',
+  connecting: 'Connecting',
+  ready: 'Ready',
+  recording: 'Recording',
+  sending: 'Sending',
+  retrying: 'Retrying',
+  complete: 'Complete',
+  error: 'Error',
 };
 
 const DEFAULT_GATEWAY_URL = (process.env.EXPO_PUBLIC_DEFAULT_GATEWAY_URL ?? '').trim();
@@ -2972,22 +2992,6 @@ export default function App() {
     : 'Tap to type or hold mic.';
   const shouldUseCompactTranscriptCard =
     isHomeIdleMode && !hasDraft && !isTranscriptExpanded;
-  const sendDisabledReason = !hasDraft
-    ? 'No text to send.'
-    : isRecognizing
-        ? 'Stop recording to send.'
-        : isSending
-          ? 'Sending in progress...'
-          : !isGatewayConnected
-            ? 'Will send after reconnect.'
-            : null;
-  const bottomHintText = isRecognizing
-    ? 'Release when finished speaking.'
-    : canSendDraft
-      ? sendDisabledReason ?? 'Ready to send'
-      : isGatewayConnected
-        ? 'Hold to record'
-        : 'Please connect';
   const canSwitchSession = !isSending && !isSessionOperationPending;
   const canRefreshSessions =
     isGatewayConnected && !isSessionsLoading && !isSessionOperationPending;
@@ -3087,36 +3091,59 @@ export default function App() {
     Boolean(activeMissingResponseNotice) &&
     isGatewayConnected &&
     !isMissingResponseRecoveryInFlight;
-  const historyStatusText = isSessionHistoryLoading
-    ? 'Loading session...'
-    : isSending
-      ? `Responding... (${gatewayEventState})`
-      : outboxPendingCount > 0
-        ? `Queued messages: ${outboxPendingCount}`
-        : gatewayHealthState === 'degraded'
-          ? 'Connection is unstable.'
-          : null;
-  const historyTopStatusText =
-    historyRefreshNotice?.message ??
-    activeMissingResponseNotice?.message ??
-    historyStatusText;
-  const isHistoryTopStatusError =
-    historyRefreshNotice?.kind === 'error' ||
-    Boolean(activeMissingResponseNotice) ||
-    (historyRefreshNotice == null && gatewayHealthState === 'degraded');
-  const showHistoryTopStatusSpinner =
-    historyRefreshNotice == null &&
-    !activeMissingResponseNotice &&
-    (isSessionHistoryLoading || isSending);
-  const showHistoryTopStatus =
+  const historyRefreshErrorMessage =
+    historyRefreshNotice?.kind === 'error' ? historyRefreshNotice.message : null;
+  const historyUpdatedLabel =
+    historyLastSyncedAt != null
+      ? `Updated ${formatClockLabel(historyLastSyncedAt)}`
+      : null;
+  const showHistoryUpdatedMeta =
     showHistoryCard &&
-    Boolean(historyTopStatusText) &&
-    (showHistorySecondaryUi ||
-      isHistoryTopStatusError ||
-      Boolean(activeMissingResponseNotice) ||
-      showHistoryTopStatusSpinner);
+    showHistorySecondaryUi &&
+    Boolean(historyUpdatedLabel);
+  const hasRetryingState =
+    outboxPendingCount > 0 || Boolean(activeMissingResponseNotice);
+  const hasErrorState =
+    Boolean(gatewayError) ||
+    Boolean(speechError) ||
+    Boolean(historyRefreshErrorMessage);
+  const bottomActionStatus: BottomActionStatus = isRecognizing
+    ? 'recording'
+    : isSending
+      ? 'sending'
+      : hasRetryingState
+        ? 'retrying'
+        : hasErrorState
+          ? 'error'
+          : !isGatewayConnected
+            ? isGatewayConnecting || isStartupAutoConnecting
+              ? 'connecting'
+              : 'disconnected'
+            : gatewayEventState === 'complete'
+              ? 'complete'
+              : 'ready';
+  const bottomActionDetailText =
+    bottomActionStatus === 'recording'
+      ? 'Release to stop'
+      : bottomActionStatus === 'sending'
+        ? 'Waiting response'
+        : bottomActionStatus === 'retrying'
+          ? outboxPendingCount > 0
+            ? `Queued ${outboxPendingCount}`
+            : 'Retry available'
+          : bottomActionStatus === 'complete'
+            ? 'Ready for next'
+            : bottomActionStatus === 'connecting'
+              ? 'Please wait'
+              : bottomActionStatus === 'disconnected'
+                ? 'Connect Gateway'
+                : bottomActionStatus === 'error'
+                  ? 'Check top banner'
+                  : canSendDraft
+                    ? 'Tap send'
+                    : 'Hold to record';
+  const showBottomStatus = !isKeyboardBarMounted && !isHomeComposingMode;
   const showHistoryDateDivider = showHistorySecondaryUi;
-  const showBottomHintText = !isKeyboardBarMounted && !isHomeComposingMode;
   const showHistoryScrollButton =
     showScrollToBottomButton &&
     !isHomeComposingMode;
@@ -3165,11 +3192,32 @@ export default function App() {
   const canReconnectFromError = settingsReady && !isGatewayConnecting;
   const canRetryFromError =
     Boolean(latestRetryText) && !isSending;
-  const errorBannerMessage = gatewayError ?? speechError;
-  const isGatewayErrorBanner = Boolean(gatewayError);
-  const errorBannerIconName = isGatewayErrorBanner
+  const topBannerKind:
+    | 'gateway'
+    | 'recovery'
+    | 'history'
+    | 'speech'
+    | null = gatewayError
+    ? 'gateway'
+    : activeMissingResponseNotice
+      ? 'recovery'
+      : historyRefreshErrorMessage
+        ? 'history'
+        : speechError
+          ? 'speech'
+          : null;
+  const topBannerMessage =
+    gatewayError ??
+    activeMissingResponseNotice?.message ??
+    historyRefreshErrorMessage ??
+    speechError;
+  const topBannerIconName = topBannerKind === 'gateway'
     ? 'cloud-offline-outline'
-    : 'mic-off-outline';
+    : topBannerKind === 'recovery'
+      ? 'time-outline'
+      : topBannerKind === 'history'
+        ? 'refresh-outline'
+        : 'mic-off-outline';
 
   const handleReconnectFromError = () => {
     if (!canReconnectFromError) return;
@@ -3198,6 +3246,24 @@ export default function App() {
       attempt: 1,
       delayMs: 0,
     });
+  };
+
+  const handleDismissTopBanner = () => {
+    if (topBannerKind === 'gateway') {
+      setGatewayError(null);
+      return;
+    }
+    if (topBannerKind === 'recovery') {
+      setMissingResponseNotice(null);
+      return;
+    }
+    if (topBannerKind === 'history') {
+      setHistoryRefreshNotice(null);
+      return;
+    }
+    if (topBannerKind === 'speech') {
+      setSpeechError(null);
+    }
   };
 
   const handleCompleteOnboarding = () => {
@@ -4729,6 +4795,103 @@ export default function App() {
         </SafeAreaView>
       </Modal>
         <View style={styles.headerBoundary} pointerEvents="none" />
+        {topBannerMessage && topBannerKind ? (
+          <View
+            style={[
+              styles.topBanner,
+              topBannerKind === 'speech' && styles.topBannerSpeech,
+            ]}
+            accessibilityRole="alert"
+            accessibilityLiveRegion="polite"
+          >
+            <Ionicons
+              name={topBannerIconName}
+              size={13}
+              style={styles.topBannerIcon}
+            />
+            <Text
+              style={styles.topBannerText}
+              maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
+              numberOfLines={1}
+            >
+              {topBannerMessage}
+            </Text>
+            <View style={styles.topBannerActionRow}>
+              {topBannerKind === 'gateway' ? (
+                <>
+                  <Pressable
+                    style={[
+                      styles.topBannerActionButton,
+                      !canReconnectFromError && styles.topBannerActionButtonDisabled,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Reconnect to Gateway"
+                    onPress={handleReconnectFromError}
+                    disabled={!canReconnectFromError}
+                  >
+                    <Ionicons name="refresh-outline" size={14} style={styles.topBannerActionIcon} />
+                  </Pressable>
+                  <Pressable
+                    style={[
+                      styles.topBannerActionButton,
+                      !canRetryFromError && styles.topBannerActionButtonDisabled,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Retry sending the latest message"
+                    onPress={handleRetryFromError}
+                    disabled={!canRetryFromError}
+                  >
+                    <Ionicons name="arrow-redo-outline" size={14} style={styles.topBannerActionIcon} />
+                  </Pressable>
+                </>
+              ) : null}
+              {topBannerKind === 'recovery' ? (
+                <>
+                  <Pressable
+                    style={[
+                      styles.topBannerActionButton,
+                      !canRetryMissingResponse && styles.topBannerActionButtonDisabled,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Retry fetching final response"
+                    onPress={handleRetryMissingResponse}
+                    disabled={!canRetryMissingResponse}
+                  >
+                    <Ionicons
+                      name={isMissingResponseRecoveryInFlight ? 'sync-outline' : 'arrow-redo-outline'}
+                      size={14}
+                      style={styles.topBannerActionIcon}
+                    />
+                  </Pressable>
+                  {!isGatewayConnected ? (
+                    <Pressable
+                      style={[
+                        styles.topBannerActionButton,
+                        !canReconnectFromError && styles.topBannerActionButtonDisabled,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Reconnect to Gateway"
+                      onPress={handleReconnectFromError}
+                      disabled={!canReconnectFromError}
+                    >
+                      <Ionicons name="refresh-outline" size={14} style={styles.topBannerActionIcon} />
+                    </Pressable>
+                  ) : null}
+                </>
+              ) : null}
+              {topBannerKind === 'history' || topBannerKind === 'speech' ? (
+                <Pressable
+                  style={styles.topBannerActionButton}
+                  accessibilityRole="button"
+                  accessibilityLabel="Dismiss error banner"
+                  onPress={handleDismissTopBanner}
+                >
+                  <Ionicons name="close-outline" size={14} style={styles.topBannerActionIcon} />
+                </Pressable>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
         <View style={styles.main}>
           {showHistoryCard ? (
             <View style={[styles.card, styles.historyCard, styles.historyCardFlat]}>
@@ -4753,45 +4916,15 @@ export default function App() {
                   />
                 </Pressable>
               ) : null}
-              {showHistoryTopStatus ? (
-                <View style={styles.historyTopStatusRow}>
-                  {showHistoryTopStatusSpinner ? (
-                    <ActivityIndicator
-                      size="small"
-                      color={isDarkTheme ? '#9ec0ff' : '#2563EB'}
-                    />
-                  ) : null}
+              {showHistoryUpdatedMeta ? (
+                <View style={styles.historyMetaTopRow}>
                   <Text
-                    style={[
-                      styles.historyTopStatusText,
-                      isHistoryTopStatusError && styles.historyTopStatusTextError,
-                    ]}
+                    style={styles.historyMetaTopText}
                     maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
                     numberOfLines={1}
                   >
-                    {historyTopStatusText}
+                    {historyUpdatedLabel}
                   </Text>
-                  {activeMissingResponseNotice ? (
-                    <Pressable
-                      style={[
-                        styles.historyTopStatusActionButton,
-                        !canRetryMissingResponse &&
-                          styles.historyTopStatusActionButtonDisabled,
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel="Retry fetching final response"
-                      onPress={handleRetryMissingResponse}
-                      disabled={!canRetryMissingResponse}
-                    >
-                      <Text
-                        style={styles.historyTopStatusActionText}
-                        maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                        numberOfLines={1}
-                      >
-                        {isMissingResponseRecoveryInFlight ? 'Retrying...' : 'Retry fetch'}
-                      </Text>
-                    </Pressable>
-                  ) : null}
                 </View>
               ) : null}
               <ScrollView
@@ -4976,68 +5109,6 @@ export default function App() {
             </View>
           </View>
         </View>
-
-        {errorBannerMessage ? (
-          <View
-            style={[
-              styles.errorBanner,
-              isGatewayErrorBanner
-                ? styles.errorBannerGateway
-                : styles.errorBannerSpeech,
-            ]}
-            accessibilityRole="alert"
-            accessibilityLiveRegion="polite"
-          >
-            <Ionicons
-              name={errorBannerIconName}
-              size={14}
-              style={styles.errorBannerIcon}
-            />
-            <Text
-              style={styles.errorBannerText}
-              maxFontSizeMultiplier={MAX_TEXT_SCALE}
-              numberOfLines={2}
-            >
-              {errorBannerMessage}
-            </Text>
-            {isGatewayErrorBanner ? (
-              <View style={styles.errorBannerActionRow}>
-                <Pressable
-                  style={[
-                    styles.errorBannerActionButton,
-                    !canReconnectFromError && styles.errorBannerActionButtonDisabled,
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel="Reconnect to Gateway"
-                  onPress={handleReconnectFromError}
-                  disabled={!canReconnectFromError}
-                >
-                  <Ionicons
-                    name="refresh-outline"
-                    size={15}
-                    style={styles.errorBannerActionIcon}
-                  />
-                </Pressable>
-                <Pressable
-                  style={[
-                    styles.errorBannerActionButton,
-                    !canRetryFromError && styles.errorBannerActionButtonDisabled,
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel="Retry sending the latest message"
-                  onPress={handleRetryFromError}
-                  disabled={!canRetryFromError}
-                >
-                  <Ionicons
-                    name="arrow-redo-outline"
-                    size={15}
-                    style={styles.errorBannerActionIcon}
-                  />
-                </Pressable>
-              </View>
-            ) : null}
-          </View>
-        ) : null}
 
         <View
           style={[
@@ -5300,10 +5371,43 @@ export default function App() {
               </View>
             </View>
           )}
-          {showBottomHintText ? (
-            <Text style={styles.bottomHint} maxFontSizeMultiplier={MAX_TEXT_SCALE}>
-              {bottomHintText}
-            </Text>
+          {showBottomStatus ? (
+            <View style={styles.bottomStateRow}>
+              <View
+                style={[
+                  styles.bottomStateDot,
+                  bottomActionStatus === 'connecting' && styles.bottomStateDotConnecting,
+                  bottomActionStatus === 'disconnected' && styles.bottomStateDotDisconnected,
+                  bottomActionStatus === 'recording' && styles.bottomStateDotRecording,
+                  bottomActionStatus === 'sending' && styles.bottomStateDotSending,
+                  bottomActionStatus === 'retrying' && styles.bottomStateDotRetrying,
+                  bottomActionStatus === 'complete' && styles.bottomStateDotComplete,
+                  bottomActionStatus === 'error' && styles.bottomStateDotError,
+                ]}
+              />
+              <Text
+                style={[
+                  styles.bottomStateLabel,
+                  bottomActionStatus === 'connecting' && styles.bottomStateLabelConnecting,
+                  bottomActionStatus === 'disconnected' && styles.bottomStateLabelDisconnected,
+                  bottomActionStatus === 'recording' && styles.bottomStateLabelRecording,
+                  bottomActionStatus === 'sending' && styles.bottomStateLabelSending,
+                  bottomActionStatus === 'retrying' && styles.bottomStateLabelRetrying,
+                  bottomActionStatus === 'complete' && styles.bottomStateLabelComplete,
+                  bottomActionStatus === 'error' && styles.bottomStateLabelError,
+                ]}
+                maxFontSizeMultiplier={MAX_TEXT_SCALE}
+              >
+                {BOTTOM_ACTION_STATUS_LABELS[bottomActionStatus]}
+              </Text>
+              <Text
+                style={styles.bottomStateDetail}
+                maxFontSizeMultiplier={MAX_TEXT_SCALE}
+                numberOfLines={1}
+              >
+                {bottomActionDetailText}
+              </Text>
+            </View>
           ) : null}
         </View>
       </KeyboardAvoidingView>
@@ -5364,11 +5468,14 @@ function createStyles(isDarkTheme: boolean) {
         errorBg: '#15213f',
         errorBorder: '#DC2626',
         errorText: '#ffb0b0',
-        errorActionPrimaryBg: '#2563EB',
-        errorActionPrimaryText: '#ffffff',
-        errorActionSecondaryBg: 'rgba(255,255,255,0.10)',
-        errorActionSecondaryBorder: 'rgba(255,255,255,0.22)',
-        errorActionSecondaryText: '#dbe7ff',
+        topBannerBg: 'rgba(220,38,38,0.14)',
+        topBannerBorder: 'rgba(220,38,38,0.42)',
+        topBannerText: '#ffb0b0',
+        topBannerSpeechBg: 'rgba(217,119,6,0.16)',
+        topBannerSpeechBorder: 'rgba(217,119,6,0.38)',
+        topBannerActionBg: 'rgba(255,255,255,0.10)',
+        topBannerActionBorder: 'rgba(255,255,255,0.22)',
+        topBannerActionIcon: '#dbe7ff',
         roundBorder: 'rgba(255,255,255,0.22)',
         micRound: '#2563EB',
         recordingRound: '#DC2626',
@@ -5380,7 +5487,15 @@ function createStyles(isDarkTheme: boolean) {
         quickTooltipBg: '#1a2f5a',
         quickTooltipBorder: 'rgba(110,231,183,0.34)',
         quickTooltipText: '#e8fff7',
-        bottomHint: '#b8c9e6',
+        bottomStateNeutral: '#b8c9e6',
+        bottomStateConnecting: '#f1c58b',
+        bottomStateDisconnected: '#95a8ca',
+        bottomStateRecording: '#ffb0b0',
+        bottomStateSending: '#9ec0ff',
+        bottomStateRetrying: '#f1c58b',
+        bottomStateComplete: '#75e2ba',
+        bottomStateError: '#ffb0b0',
+        bottomStateDetail: '#95a8ca',
         bottomDockBg: 'transparent',
         bottomDockBorder: 'rgba(255,255,255,0.08)',
       }
@@ -5435,11 +5550,14 @@ function createStyles(isDarkTheme: boolean) {
         errorBg: '#FFFFFF',
         errorBorder: '#DC2626',
         errorText: '#DC2626',
-        errorActionPrimaryBg: '#2563EB',
-        errorActionPrimaryText: '#ffffff',
-        errorActionSecondaryBg: '#F2F6FF',
-        errorActionSecondaryBorder: 'rgba(37,99,235,0.32)',
-        errorActionSecondaryText: '#1D4ED8',
+        topBannerBg: 'rgba(220,38,38,0.08)',
+        topBannerBorder: 'rgba(220,38,38,0.2)',
+        topBannerText: '#B91C1C',
+        topBannerSpeechBg: 'rgba(217,119,6,0.08)',
+        topBannerSpeechBorder: 'rgba(217,119,6,0.2)',
+        topBannerActionBg: '#F7F7F4',
+        topBannerActionBorder: 'rgba(0,0,0,0.1)',
+        topBannerActionIcon: '#7f1d1d',
         roundBorder: 'rgba(255,255,255,0.52)',
         micRound: '#2563EB',
         recordingRound: '#DC2626',
@@ -5451,7 +5569,15 @@ function createStyles(isDarkTheme: boolean) {
         quickTooltipBg: '#ffffff',
         quickTooltipBorder: 'rgba(5,150,105,0.24)',
         quickTooltipText: '#065f46',
-        bottomHint: '#5C5C5C',
+        bottomStateNeutral: '#5C5C5C',
+        bottomStateConnecting: '#B45309',
+        bottomStateDisconnected: '#8A8A84',
+        bottomStateRecording: '#B91C1C',
+        bottomStateSending: '#1D4ED8',
+        bottomStateRetrying: '#B45309',
+        bottomStateComplete: '#047857',
+        bottomStateError: '#B91C1C',
+        bottomStateDetail: '#8A8A84',
         bottomDockBg: 'transparent',
         bottomDockBorder: 'rgba(0,0,0,0.04)',
       };
@@ -6180,6 +6306,56 @@ function createStyles(isDarkTheme: boolean) {
       marginBottom: 3,
       opacity: 0.9,
     },
+    topBanner: {
+      width: '100%',
+      minHeight: 30,
+      borderRadius: 9,
+      borderWidth: 1,
+      borderColor: colors.topBannerBorder,
+      backgroundColor: colors.topBannerBg,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      marginBottom: 4,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    topBannerSpeech: {
+      borderColor: colors.topBannerSpeechBorder,
+      backgroundColor: colors.topBannerSpeechBg,
+    },
+    topBannerIcon: {
+      color: colors.topBannerText,
+    },
+    topBannerText: {
+      flex: 1,
+      color: colors.topBannerText,
+      fontSize: 11,
+      lineHeight: 14,
+      fontWeight: '600',
+    },
+    topBannerActionRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      flexShrink: 0,
+    },
+    topBannerActionButton: {
+      width: 24,
+      height: 24,
+      borderRadius: 7,
+      borderWidth: 1,
+      borderColor: colors.topBannerActionBorder,
+      backgroundColor: colors.topBannerActionBg,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    topBannerActionButtonDisabled: {
+      opacity: 0.5,
+    },
+    topBannerActionIcon: {
+      color: colors.topBannerActionIcon,
+    },
     main: {
       flex: 1,
       gap: 8,
@@ -6267,40 +6443,15 @@ function createStyles(isDarkTheme: boolean) {
       textAlign: 'center',
       paddingVertical: 48,
     },
-    historyTopStatusRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      minHeight: 22,
+    historyMetaTopRow: {
+      minHeight: 20,
       marginBottom: 4,
       paddingRight: 36,
-    },
-    historyTopStatusText: {
-      flex: 1,
-      fontSize: 11,
-      color: colors.loading,
-    },
-    historyTopStatusTextError: {
-      color: colors.errorText,
-    },
-    historyTopStatusActionButton: {
-      minHeight: 22,
-      borderRadius: 8,
-      borderWidth: 1.5,
-      borderColor: colors.inputBorder,
-      backgroundColor: colors.inputBg,
-      paddingHorizontal: 8,
-      alignItems: 'center',
       justifyContent: 'center',
-      flexShrink: 0,
     },
-    historyTopStatusActionButtonDisabled: {
-      opacity: 0.55,
-    },
-    historyTopStatusActionText: {
-      fontSize: 10,
-      fontWeight: '600',
-      color: colors.textSecondary,
+    historyMetaTopText: {
+      fontSize: 11,
+      color: colors.historyMetaText,
     },
     historyRefreshButtonFloating: {
       width: 26,
@@ -6431,58 +6582,6 @@ function createStyles(isDarkTheme: boolean) {
     turnAssistantBubbleError: {
       borderWidth: 1.5,
       borderColor: colors.turnAssistantErrorBorder,
-    },
-    errorBanner: {
-      width: '100%',
-      minHeight: 36,
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: colors.errorBorder,
-      backgroundColor: colors.errorBg,
-      paddingHorizontal: 10,
-      paddingVertical: 7,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      ...surfaceShadow,
-    },
-    errorBannerGateway: {
-      borderColor: colors.errorBorder,
-      backgroundColor: colors.errorBg,
-    },
-    errorBannerSpeech: {
-      borderColor: isDarkTheme ? 'rgba(217,119,6,0.46)' : 'rgba(217,119,6,0.28)',
-      backgroundColor: isDarkTheme ? 'rgba(217,119,6,0.16)' : 'rgba(217,119,6,0.08)',
-    },
-    errorBannerIcon: {
-      color: colors.errorText,
-    },
-    errorBannerText: {
-      flex: 1,
-      color: colors.errorText,
-      fontSize: 12,
-      lineHeight: 16,
-    },
-    errorBannerActionRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-    },
-    errorBannerActionButton: {
-      width: 28,
-      height: 28,
-      borderRadius: 9,
-      borderWidth: 1.5,
-      backgroundColor: colors.errorActionSecondaryBg,
-      borderColor: colors.errorActionSecondaryBorder,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    errorBannerActionButtonDisabled: {
-      opacity: 0.55,
-    },
-    errorBannerActionIcon: {
-      color: colors.errorActionSecondaryText,
     },
     bottomDock: {
       alignItems: 'center',
@@ -6636,9 +6735,73 @@ function createStyles(isDarkTheme: boolean) {
       color: colors.quickTooltipText,
       textAlign: 'center',
     },
-    bottomHint: {
+    bottomStateRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      minHeight: 18,
+      paddingHorizontal: 8,
+      width: '100%',
+    },
+    bottomStateDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: colors.bottomStateNeutral,
+      flexShrink: 0,
+    },
+    bottomStateDotConnecting: {
+      backgroundColor: colors.bottomStateConnecting,
+    },
+    bottomStateDotDisconnected: {
+      backgroundColor: colors.bottomStateDisconnected,
+    },
+    bottomStateDotRecording: {
+      backgroundColor: colors.bottomStateRecording,
+    },
+    bottomStateDotSending: {
+      backgroundColor: colors.bottomStateSending,
+    },
+    bottomStateDotRetrying: {
+      backgroundColor: colors.bottomStateRetrying,
+    },
+    bottomStateDotComplete: {
+      backgroundColor: colors.bottomStateComplete,
+    },
+    bottomStateDotError: {
+      backgroundColor: colors.bottomStateError,
+    },
+    bottomStateLabel: {
       fontSize: 12,
-      color: colors.bottomHint,
+      fontWeight: '600',
+      color: colors.bottomStateNeutral,
+    },
+    bottomStateLabelConnecting: {
+      color: colors.bottomStateConnecting,
+    },
+    bottomStateLabelDisconnected: {
+      color: colors.bottomStateDisconnected,
+    },
+    bottomStateLabelRecording: {
+      color: colors.bottomStateRecording,
+    },
+    bottomStateLabelSending: {
+      color: colors.bottomStateSending,
+    },
+    bottomStateLabelRetrying: {
+      color: colors.bottomStateRetrying,
+    },
+    bottomStateLabelComplete: {
+      color: colors.bottomStateComplete,
+    },
+    bottomStateLabelError: {
+      color: colors.bottomStateError,
+    },
+    bottomStateDetail: {
+      fontSize: 12,
+      color: colors.bottomStateDetail,
+      flexShrink: 1,
     },
   });
 }
