@@ -1,18 +1,25 @@
 # Troubleshooting
 
+## First checks
+
+```bash
+npm run doctor:ios
+npm run setup
+```
+
 ## `Cannot find native module 'ExpoSecureStore'`
 
 ```bash
 npm install expo-secure-store
 npx pod-install ios
-npm run ios -- --device
+npm run ios:dev:device:install
 ```
 
 If it still fails:
 
 ```bash
 rm -rf ios/build
-npm run ios -- --device
+npm run setup
 ```
 
 ## `xcodebuild exited with code 70` / destination not found
@@ -22,7 +29,32 @@ npm run ios -- --device
 - Retry with explicit device mode:
 
 ```bash
-npm run ios -- --device
+npm run ios:dev:device:install
+```
+
+## `Connecting to: iPhone` never finishes
+
+If Expo CLI keeps showing `Connecting to: iPhone` forever, installation may already be complete and only the CLI attach step is stuck.
+
+```bash
+# Stop the stuck command, then launch installed app directly:
+npm run ios:dev:device:open
+```
+
+If Debug build still cannot attach to Metro:
+
+```bash
+EXPO_DEV_SERVER_URL=http://192.168.0.10:8081 npm run ios:dev:device:open
+```
+
+If you get `The requested application ... is not installed`:
+
+```bash
+# 1) Install debug build to the physical device
+npm run ios:dev:device:install
+
+# 2) Launch and attach to Metro URL
+EXPO_DEV_SERVER_URL=http://192.168.0.10:8081 npm run ios:dev:device:open
 ```
 
 ## Repeated pairing requests

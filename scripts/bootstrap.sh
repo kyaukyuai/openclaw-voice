@@ -4,18 +4,19 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-echo "[1/4] Installing dependencies with npm install..."
-npm install
+echo "[bootstrap] Running setup..."
+npm run setup
 
-if [ ! -d "ios" ]; then
-  echo "[2/4] iOS native project not found. Running Expo prebuild..."
-  npx expo prebuild --platform ios --non-interactive
-else
-  echo "[2/4] iOS native project already exists."
-fi
+cat <<'EOF'
 
-echo "[3/4] Installing CocoaPods dependencies..."
-npx pod-install ios
+[bootstrap] Setup completed.
+Use one of the following run paths:
 
-echo "[4/4] Launching app on iOS device..."
-npm run ios -- --device
+Debug (Metro required):
+  1) npm run dev:metro
+  2) npm run ios:dev:device:install
+  3) EXPO_DEV_SERVER_URL=<metro-url> npm run ios:dev:device:open
+
+Release (Metro not required):
+  npm run ios:release:device
+EOF

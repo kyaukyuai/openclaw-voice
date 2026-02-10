@@ -46,45 +46,51 @@ Prerequisites:
 Quick setup:
 
 ```bash
-bash scripts/bootstrap.sh
+npm run setup
 ```
 
-What it does:
-
-- Installs dependencies with `npm install`
-- Generates iOS native project (if missing)
-- Installs CocoaPods
-- Launches the app on a physical device (`npm run ios -- --device`, Debug build)
-
-Manual setup:
+Optional environment check:
 
 ```bash
-npm install
-npm run ios
+npm run doctor:ios
 ```
+
+Debug run path (development, Metro required):
+
+```bash
+# Terminal A
+npm run dev:metro
+
+# Terminal B
+npm run ios:dev:device:install
+```
+
+If `Connecting to: iPhone` keeps spinning forever, stop that terminal (`Ctrl+C`) and launch directly:
+
+```bash
+EXPO_DEV_SERVER_URL=<metro-url> npm run ios:dev:device:open
+```
+
+Release run path (device testing, Metro not required):
+
+```bash
+npm run ios:release:device
+```
+
+`scripts/bootstrap.sh` runs `npm run setup` and prints these run paths.
 
 ### What Is Metro?
 
 `Metro` is the JavaScript bundler/dev server used by React Native/Expo in development.
 In Debug builds, the app loads JS from Metro (usually `:8081`) with fast refresh.
 
-- Debug build (`npm run ios`, `expo run:ios`) -> Metro required
+- Debug build (`npm run ios`, `npm run ios:dev`) -> Metro required
 - Release build (`--configuration Release`) -> Metro not required (bundle is embedded)
 
-If you see `Could not connect to development server`, run with two terminals:
+If Debug app does not attach to Metro, pass URL explicitly:
 
 ```bash
-# Terminal A
-npx expo start --dev-client --host tunnel --clear
-
-# Terminal B
-npx expo run:ios --device --no-bundler
-```
-
-Metro-free install for device testing:
-
-```bash
-npx expo run:ios --device --configuration Release
+EXPO_DEV_SERVER_URL=http://192.168.0.10:8081 npm run ios:dev:device:open
 ```
 
 ## Use It As npm Package
@@ -195,8 +201,17 @@ Device identity is generated locally and reused when persistent storage is avail
 
 ## Scripts
 
+- `npm run setup` - Install deps, prepare native iOS project, install Pods
+- `npm run doctor:ios` - Validate iOS development environment and connectivity
+- `npm run dev:metro` - Start Metro for dev-client (tunnel mode)
 - `npm run start` - Start Expo dev server
-- `npm run ios` - Build and run iOS app
+- `npm run ios` - Alias for `npm run ios:dev`
+- `npm run ios:dev` - Build and run iOS Debug app (Metro required)
+- `npm run ios:dev:device` - Build and run iOS Debug app on device (Metro required)
+- `npm run ios:dev:device:install` - Install iOS Debug app on device (no bundler startup)
+- `npm run ios:dev:device:open` - Launch installed iOS app on connected device (uses `EXPO_DEV_SERVER_URL` when set)
+- `npm run ios:release` - Build and run iOS Release app (Metro not required)
+- `npm run ios:release:device` - Build and run iOS Release app on device (Metro not required)
 - `npm run android` - Build and run Android app
 - `npm run web` - Run web target
 - `npm run typecheck` - Run TypeScript checks
