@@ -282,6 +282,7 @@ const MISSING_RESPONSE_RECOVERY_MAX_ATTEMPTS = 3;
 const HISTORY_SYNC_INITIAL_DELAY_MS = 280;
 const HISTORY_SYNC_RETRY_BASE_MS = 900;
 const HISTORY_SYNC_MAX_ATTEMPTS = 3;
+const BOTTOM_STATUS_COMPLETE_HOLD_MS = 1300;
 const ONBOARDING_SAMPLE_MESSAGE =
   'Hello OpenClaw! Please reply with a short greeting.';
 const DEFAULT_SESSION_KEY =
@@ -947,6 +948,7 @@ export default function App() {
   const [focusedField, setFocusedField] = useState<FocusField>(null);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [isKeyboardBarMounted, setIsKeyboardBarMounted] = useState(false);
+  const [isBottomCompletePulse, setIsBottomCompletePulse] = useState(false);
 
   const [isRecognizing, setIsRecognizing] = useState(false);
   const [transcript, setTranscript] = useState('');
@@ -979,6 +981,9 @@ export default function App() {
     attempt: number;
   } | null>(null);
   const historyNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bottomCompletePulseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const authTokenMaskTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const outboxRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const healthCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1043,6 +1048,13 @@ export default function App() {
     if (historyNoticeTimerRef.current) {
       clearTimeout(historyNoticeTimerRef.current);
       historyNoticeTimerRef.current = null;
+    }
+  }, []);
+
+  const clearBottomCompletePulseTimer = useCallback(() => {
+    if (bottomCompletePulseTimerRef.current) {
+      clearTimeout(bottomCompletePulseTimerRef.current);
+      bottomCompletePulseTimerRef.current = null;
     }
   }, []);
 
@@ -1236,6 +1248,38 @@ export default function App() {
   useEffect(() => {
     gatewayHealthStateRef.current = gatewayHealthState;
   }, [gatewayHealthState]);
+
+  useEffect(() => {
+    const shouldHoldComplete =
+      connectionState === 'connected' &&
+      !isSending &&
+      gatewayEventState === 'complete';
+
+    if (!shouldHoldComplete) {
+      setIsBottomCompletePulse(false);
+      clearBottomCompletePulseTimer();
+      return;
+    }
+
+    setIsBottomCompletePulse(true);
+    clearBottomCompletePulseTimer();
+    bottomCompletePulseTimerRef.current = setTimeout(() => {
+      bottomCompletePulseTimerRef.current = null;
+      setIsBottomCompletePulse(false);
+      setGatewayEventState((previous) =>
+        previous === 'complete' ? 'ready' : previous,
+      );
+    }, BOTTOM_STATUS_COMPLETE_HOLD_MS);
+
+    return () => {
+      clearBottomCompletePulseTimer();
+    };
+  }, [
+    clearBottomCompletePulseTimer,
+    connectionState,
+    gatewayEventState,
+    isSending,
+  ]);
 
   useEffect(() => {
     sessionTurnsRef.current.set(activeSessionKey, chatTurns);
@@ -1601,6 +1645,7 @@ export default function App() {
     clearFinalResponseRecoveryTimer();
     clearMissingResponseRecoveryState();
     clearStartupAutoConnectRetryTimer();
+    clearBottomCompletePulseTimer();
     clearOutboxRetryTimer();
     clearHealthCheckInterval();
     if (historySyncTimerRef.current) {
@@ -1627,6 +1672,7 @@ export default function App() {
     setGatewayHealthState('unknown');
     setGatewayHealthCheckedAt(null);
     setGatewayConnectDiagnostic(null);
+    setIsBottomCompletePulse(false);
   };
 
   const updateChatTurn = useCallback(
@@ -2488,6 +2534,10 @@ export default function App() {
         clearTimeout(historyNoticeTimerRef.current);
         historyNoticeTimerRef.current = null;
       }
+      if (bottomCompletePulseTimerRef.current) {
+        clearTimeout(bottomCompletePulseTimerRef.current);
+        bottomCompletePulseTimerRef.current = null;
+      }
       if (authTokenMaskTimerRef.current) {
         clearTimeout(authTokenMaskTimerRef.current);
         authTokenMaskTimerRef.current = null;
@@ -3097,11 +3147,14 @@ export default function App() {
     showHistorySecondaryUi &&
     Boolean(historyUpdatedLabel);
   const hasRetryingState =
-    outboxPendingCount > 0 || Boolean(activeMissingResponseNotice);
+    Boolean(activeMissingResponseNotice) ||
+    (outboxPendingCount > 0 && connectionState === 'connected');
   const hasErrorState =
     Boolean(gatewayError) ||
     Boolean(speechError) ||
     Boolean(historyRefreshErrorMessage);
+  const isStreamingGatewayEvent =
+    gatewayEventState === 'delta' || gatewayEventState === 'streaming';
   const bottomActionStatus: BottomActionStatus = isRecognizing
     ? 'recording'
     : isSending
@@ -3114,24 +3167,32 @@ export default function App() {
             ? isGatewayConnecting || isStartupAutoConnecting
               ? 'connecting'
               : 'disconnected'
-            : gatewayEventState === 'complete'
+            : isBottomCompletePulse
               ? 'complete'
               : 'ready';
   const bottomActionDetailText =
     bottomActionStatus === 'recording'
       ? 'Release to stop'
       : bottomActionStatus === 'sending'
-        ? 'Waiting response'
+        ? isStreamingGatewayEvent
+          ? 'Streaming response'
+          : 'Waiting response'
         : bottomActionStatus === 'retrying'
-          ? outboxPendingCount > 0
-            ? `Queued ${outboxPendingCount}`
-            : 'Retry available'
+          ? activeMissingResponseNotice
+            ? isMissingResponseRecoveryInFlight
+              ? 'Fetching final output'
+              : 'Retry available'
+            : `Queued ${outboxPendingCount}`
           : bottomActionStatus === 'complete'
-            ? 'Ready for next'
+            ? 'Sent successfully'
             : bottomActionStatus === 'connecting'
-              ? 'Please wait'
+              ? outboxPendingCount > 0
+                ? `Queued ${outboxPendingCount}`
+                : 'Please wait'
               : bottomActionStatus === 'disconnected'
-                ? 'Connect Gateway'
+                ? outboxPendingCount > 0
+                  ? `Queued ${outboxPendingCount}`
+                  : 'Connect Gateway'
                 : bottomActionStatus === 'error'
                   ? 'Check top banner'
                   : canSendDraft
