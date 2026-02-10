@@ -21,6 +21,8 @@
     "setup": "bash scripts/setup.sh",
     "doctor:ios": "node scripts/doctor-ios.mjs",
     "doctor:android": "node scripts/doctor-android.mjs",
+    "doctor:release": "node scripts/doctor-release.mjs",
+    "check:release-docs": "node scripts/check-release-docs.mjs",
     "android:emulator:setup": "bash scripts/setup-android-emulator.sh",
     "android:emulator:start": "bash scripts/start-android-emulator.sh",
     "dev:metro": "expo start --dev-client --host tunnel --clear",

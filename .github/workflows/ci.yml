@@ -25,6 +25,9 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      - name: Release docs gate
+        run: npm run check:release-docs
+
       - name: Package dry run
         run: npm pack --dry-run
 

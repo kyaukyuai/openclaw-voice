@@ -5,6 +5,7 @@
 [![Expo SDK 54](https://img.shields.io/badge/Expo-SDK%2054-000020?logo=expo&logoColor=white)](https://expo.dev/)
 [![React Native 0.81](https://img.shields.io/badge/React%20Native-0.81-61DAFB?logo=react&logoColor=1f2937)](https://reactnative.dev/)
 [![TypeScript 5.x](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![npm version](https://img.shields.io/npm/v/openclaw-voice)](https://www.npmjs.com/package/openclaw-voice)
 
 Voice-first OpenClaw experience for mobile and code.
 
@@ -254,6 +255,8 @@ Device identity is generated locally and reused when persistent storage is avail
 - `npm run setup` - Install deps, prepare native iOS project, install Pods
 - `npm run doctor:ios` - Validate iOS development environment and connectivity
 - `npm run doctor:android` - Validate Android SDK/adb/device environment
+- `npm run doctor:release` - Check release prerequisites (release workflow, docs gate, GitHub secret/permissions when available)
+- `npm run check:release-docs` - Ensure `CHANGELOG.md` and `README.md` stay aligned with package metadata
 - `npm run android:emulator:setup` - Install Android SDK pieces and create default emulator (`Pixel_8_API_35`)
 - `npm run android:emulator:start` - Start default Android emulator
 - `npm run dev:metro` - Start Metro for dev-client (tunnel mode)
@@ -361,6 +364,13 @@ git push --tags
 - `typecheck`, `lint`, `test`, `smoke:pack-install`
 - `npm publish --access public --provenance` (skips if version is already published)
 - GitHub Release auto-created with generated notes
+
+Optional preflight checks:
+
+```bash
+npm run doctor:release
+gh workflow run release.yml
+```
 
 Manual fallback:
 
