@@ -88,3 +88,41 @@ Check:
 - Transcript has content before sending
 - Gateway logs for upstream provider/model errors
 - History card status (`WAIT`, `ERR`, `OK`) for the failing turn
+
+## Android: `Failed to resolve the Android SDK path` / `spawn adb ENOENT`
+
+Run:
+
+```bash
+npm run doctor:android
+```
+
+Then configure SDK path:
+
+```bash
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+export PATH="$ANDROID_HOME/platform-tools:$PATH"
+```
+
+Retry:
+
+```bash
+npm run android
+```
+
+## Android: `Package path is not valid. Valid system image paths are: null`
+
+This means `avdmanager` cannot read SDK metadata, typically because `cmdline-tools;latest` is missing in your SDK root.
+
+Run:
+
+```bash
+npm run android:emulator:setup
+```
+
+Then launch emulator:
+
+```bash
+npm run android:emulator:start
+```

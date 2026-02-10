@@ -20,6 +20,9 @@
   "scripts": {
     "setup": "bash scripts/setup.sh",
     "doctor:ios": "node scripts/doctor-ios.mjs",
+    "doctor:android": "node scripts/doctor-android.mjs",
+    "android:emulator:setup": "bash scripts/setup-android-emulator.sh",
+    "android:emulator:start": "bash scripts/start-android-emulator.sh",
     "dev:metro": "expo start --dev-client --host tunnel --clear",
     "start": "expo start",
     "android": "expo run:android",

@@ -264,6 +264,8 @@ const ONBOARDING_SAMPLE_MESSAGE =
   'Hello OpenClaw! Please reply with a short greeting.';
 const DEFAULT_SESSION_KEY =
   (process.env.EXPO_PUBLIC_DEFAULT_SESSION_KEY ?? 'main').trim() || 'main';
+const GATEWAY_PLATFORM: 'ios' | 'android' | 'web' =
+  Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'web';
 const MAX_TEXT_SCALE = 1.35;
 const MAX_TEXT_SCALE_TIGHT = 1.15;
 const HISTORY_BOTTOM_THRESHOLD_PX = 72;
@@ -2339,7 +2341,7 @@ export default function App() {
       const client = new GatewayClient(trimmedGatewayUrl, {
         token: authToken.trim() || undefined,
         autoReconnect: true,
-        platform: 'ios',
+        platform: GATEWAY_PLATFORM,
         clientId,
         displayName: GATEWAY_DISPLAY_NAME,
         scopes: ['operator.read', 'operator.write'],

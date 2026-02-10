@@ -32,7 +32,8 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.RECORD_AUDIO"
-      ]
+      ],
+      "package": "com.kyaukyuai.openclawpocket"
     },
     "web": {
       "favicon": "./assets/favicon.png"

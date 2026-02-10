@@ -41,6 +41,7 @@ Prerequisites:
 - Node.js 18+
 - Xcode + iOS runtime
 - CocoaPods
+- Android Studio + Android SDK (for Android runs)
 - A running OpenClaw Gateway endpoint (`wss://...`)
 
 Quick setup:
@@ -78,6 +79,18 @@ npm run ios:release:device
 ```
 
 `scripts/bootstrap.sh` runs `npm run setup` and prints these run paths.
+
+Android run path:
+
+```bash
+npm run doctor:android
+npm run android:emulator:setup   # one-time
+npm run android:emulator:start   # start emulator
+npm run android
+```
+
+If `doctor:android` reports SDK errors, set `ANDROID_HOME` (or `ANDROID_SDK_ROOT`) and ensure `adb` is available.
+If AVD creation fails with `Valid system image paths are: null`, install `cmdline-tools;latest` inside your SDK and rerun `npm run android:emulator:setup`.
 
 ### What Is Metro?
 
@@ -203,6 +216,9 @@ Device identity is generated locally and reused when persistent storage is avail
 
 - `npm run setup` - Install deps, prepare native iOS project, install Pods
 - `npm run doctor:ios` - Validate iOS development environment and connectivity
+- `npm run doctor:android` - Validate Android SDK/adb/device environment
+- `npm run android:emulator:setup` - Install Android SDK pieces and create default emulator (`Pixel_8_API_35`)
+- `npm run android:emulator:start` - Start default Android emulator
 - `npm run dev:metro` - Start Metro for dev-client (tunnel mode)
 - `npm run start` - Start Expo dev server
 - `npm run ios` - Alias for `npm run ios:dev`
