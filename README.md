@@ -54,13 +54,37 @@ What it does:
 - Installs dependencies with `npm install`
 - Generates iOS native project (if missing)
 - Installs CocoaPods
-- Launches the app on a physical device (`npm run ios -- --device`)
+- Launches the app on a physical device (`npm run ios -- --device`, Debug build)
 
 Manual setup:
 
 ```bash
 npm install
 npm run ios
+```
+
+### What Is Metro?
+
+`Metro` is the JavaScript bundler/dev server used by React Native/Expo in development.
+In Debug builds, the app loads JS from Metro (usually `:8081`) with fast refresh.
+
+- Debug build (`npm run ios`, `expo run:ios`) -> Metro required
+- Release build (`--configuration Release`) -> Metro not required (bundle is embedded)
+
+If you see `Could not connect to development server`, run with two terminals:
+
+```bash
+# Terminal A
+npx expo start --dev-client --host tunnel --clear
+
+# Terminal B
+npx expo run:ios --device --no-bundler
+```
+
+Metro-free install for device testing:
+
+```bash
+npx expo run:ios --device --configuration Release
 ```
 
 ## Use It As npm Package
@@ -214,7 +238,13 @@ If this project helps your workflow, you can support maintenance on GitHub Spons
 
 ## Troubleshooting
 
-See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+For `No script URL provided` / `Could not connect to development server`:
+
+- Start Metro explicitly (`npx expo start --dev-client --host tunnel --clear`)
+- Reinstall Debug app with `--no-bundler` from another terminal
+- Or use Release build (`npx expo run:ios --device --configuration Release`)
+
+See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for more.
 
 ## Contributing
 
