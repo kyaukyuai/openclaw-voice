@@ -92,6 +92,43 @@ npm run android
 If `doctor:android` reports SDK errors, set `ANDROID_HOME` (or `ANDROID_SDK_ROOT`) and ensure `adb` is available.
 If AVD creation fails with `Valid system image paths are: null`, install `cmdline-tools;latest` inside your SDK and rerun `npm run android:emulator:setup`.
 
+### Android: Verified Device/Emulator Steps
+
+Verified on macOS with Expo SDK 54 and Android API 35.
+
+1. Set SDK environment variables:
+
+```bash
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+```
+
+2. Validate toolchain:
+
+```bash
+npm run doctor:android
+```
+
+3. Emulator path:
+
+```bash
+npm run android:emulator:setup
+npm run android:emulator:start
+npm run android
+```
+
+4. Physical device path (USB debugging enabled):
+
+```bash
+adb devices
+npm run android
+```
+
+Expected result:
+- `adb devices` shows at least one `device`
+- Expo installs and launches the app without SDK-path errors
+
 ### What Is Metro?
 
 `Metro` is the JavaScript bundler/dev server used by React Native/Expo in development.
