@@ -27,7 +27,6 @@ import {
   type Storage as OpenClawStorage,
 } from './src/openclaw';
 import {
-  shouldStartStartupAutoConnect,
   isIncompleteAssistantContent,
 } from './src/ui/runtime-logic';
 
@@ -105,6 +104,7 @@ import { useGatewayConnectionFlow } from './src/ios-runtime/useGatewayConnection
 import { useOutboxRuntime } from './src/ios-runtime/useOutboxRuntime';
 import { useSessionHistoryRuntime } from './src/ios-runtime/useSessionHistoryRuntime';
 import { useSpeechRuntime } from './src/ios-runtime/useSpeechRuntime';
+import { useAppLifecycleRuntime } from './src/ios-runtime/useAppLifecycleRuntime';
 import {
   useRuntimePersistenceEffects,
   useRuntimeUiEffects,
@@ -1050,87 +1050,40 @@ function AppContent() {
     setActiveRunId,
   });
 
-  useEffect(() => {
-    if (!localStateReady) {
-      return;
-    }
-    if (
-      !shouldStartStartupAutoConnect({
-        settingsReady,
-        alreadyAttempted: startupAutoConnectAttemptedRef.current,
-        gatewayUrl,
-        connectionState,
-      })
-    ) {
-      return;
-    }
-    startupAutoConnectAttemptedRef.current = true;
-    startupAutoConnectAttemptRef.current = 1;
-    void connectGateway({ auto: true, autoAttempt: 1 });
-  }, [connectionState, gatewayUrl, localStateReady, settingsReady]);
-
-  useEffect(() => {
-    return () => {
-      isUnmountingRef.current = true;
-      invalidateRefreshEpoch();
-      expectedSpeechStopRef.current = true;
-      if (holdStartTimerRef.current) {
-        clearTimeout(holdStartTimerRef.current);
-        holdStartTimerRef.current = null;
-      }
-      if (historySyncTimerRef.current) {
-        clearTimeout(historySyncTimerRef.current);
-        historySyncTimerRef.current = null;
-      }
-      historySyncRequestRef.current = null;
-      if (historyNoticeTimerRef.current) {
-        clearTimeout(historyNoticeTimerRef.current);
-        historyNoticeTimerRef.current = null;
-      }
-      if (bottomCompletePulseTimerRef.current) {
-        clearTimeout(bottomCompletePulseTimerRef.current);
-        bottomCompletePulseTimerRef.current = null;
-      }
-      if (authTokenMaskTimerRef.current) {
-        clearTimeout(authTokenMaskTimerRef.current);
-        authTokenMaskTimerRef.current = null;
-      }
-      if (outboxRetryTimerRef.current) {
-        clearTimeout(outboxRetryTimerRef.current);
-        outboxRetryTimerRef.current = null;
-      }
-      if (startupAutoConnectRetryTimerRef.current) {
-        clearTimeout(startupAutoConnectRetryTimerRef.current);
-        startupAutoConnectRetryTimerRef.current = null;
-      }
-      if (finalResponseRecoveryTimerRef.current) {
-        clearTimeout(finalResponseRecoveryTimerRef.current);
-        finalResponseRecoveryTimerRef.current = null;
-      }
-      if (missingResponseRecoveryTimerRef.current) {
-        clearTimeout(missingResponseRecoveryTimerRef.current);
-        missingResponseRecoveryTimerRef.current = null;
-      }
-      missingResponseRecoveryRequestRef.current = null;
-      if (settingsFocusScrollTimerRef.current) {
-        clearTimeout(settingsFocusScrollTimerRef.current);
-        settingsFocusScrollTimerRef.current = null;
-      }
-      if (quickTextTooltipTimerRef.current) {
-        clearTimeout(quickTextTooltipTimerRef.current);
-        quickTextTooltipTimerRef.current = null;
-      }
-      if (quickTextLongPressResetTimerRef.current) {
-        clearTimeout(quickTextLongPressResetTimerRef.current);
-        quickTextLongPressResetTimerRef.current = null;
-      }
-      quickTextLongPressSideRef.current = null;
-      disconnectGateway();
-      if (supportsSpeechRecognitionOnCurrentPlatform()) {
-        ExpoSpeechRecognitionModule.abort();
-      }
-    };
+  const abortSpeechRecognitionIfSupported = useCallback(() => {
+    if (!supportsSpeechRecognitionOnCurrentPlatform()) return;
+    ExpoSpeechRecognitionModule.abort();
   }, []);
+
+  useAppLifecycleRuntime({
+    localStateReady,
+    settingsReady,
+    gatewayUrl,
+    connectionState,
+    startupAutoConnectAttemptedRef,
+    startupAutoConnectAttemptRef,
+    connectGateway,
+    isUnmountingRef,
+    invalidateRefreshEpoch,
+    expectedSpeechStopRef,
+    holdStartTimerRef,
+    historySyncTimerRef,
+    historySyncRequestRef,
+    historyNoticeTimerRef,
+    bottomCompletePulseTimerRef,
+    authTokenMaskTimerRef,
+    outboxRetryTimerRef,
+    startupAutoConnectRetryTimerRef,
+    finalResponseRecoveryTimerRef,
+    missingResponseRecoveryTimerRef,
+    missingResponseRecoveryRequestRef,
+    settingsFocusScrollTimerRef,
+    quickTextTooltipTimerRef,
+    quickTextLongPressResetTimerRef,
+    quickTextLongPressSideRef,
+    disconnectGateway,
+    abortSpeechRecognitionIfSupported,
+  });
 
   const { startRecognition, stopRecognition } = useSpeechRuntime({
     speechLang,
