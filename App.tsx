@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import {
   ActivityIndicator,
-  Animated,
   FlatList,
   Keyboard,
   KeyboardAvoidingView,
@@ -102,6 +101,7 @@ import { useSpeechRuntime } from './src/ios-runtime/useSpeechRuntime';
 import { useAppLifecycleRuntime } from './src/ios-runtime/useAppLifecycleRuntime';
 import { useSettingsUiRuntime } from './src/ios-runtime/useSettingsUiRuntime';
 import { useQuickTextRuntime } from './src/ios-runtime/useQuickTextRuntime';
+import { useKeyboardUiRuntime } from './src/ios-runtime/useKeyboardUiRuntime';
 import {
   useRuntimePersistenceEffects,
   useRuntimeUiEffects,
@@ -551,7 +551,6 @@ function AppContent() {
   } | null>(null);
   const holdStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const holdActivatedRef = useRef(false);
-  const keyboardBarAnim = useRef(new Animated.Value(0)).current;
   const expectedSpeechStopRef = useRef(false);
   const isUnmountingRef = useRef(false);
   const startupAutoConnectAttemptedRef = useRef(false);
@@ -778,24 +777,6 @@ function AppContent() {
     setChatTurns,
     setLocalStateReady,
   });
-
-  useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-
-    const showSub = Keyboard.addListener(showEvent, (event) => {
-      const height = event.endCoordinates?.height ?? 0;
-      setKeyboardState(true, height);
-    });
-    const hideSub = Keyboard.addListener(hideEvent, () => {
-      setKeyboardState(false, 0);
-    });
-
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
-  }, [setKeyboardState]);
 
   const updateChatTurn = useCallback(
     (turnId: string, updater: (turn: ChatTurn) => ChatTurn) => {
@@ -1354,21 +1335,11 @@ function AppContent() {
   const styles = useMemo(() => createStyles(isDarkTheme), [isDarkTheme]);
   const placeholderColor = isDarkTheme ? '#95a8ca' : '#C4C4C0';
 
-  useEffect(() => {
-    if (showKeyboardActionBar) {
-      setIsKeyboardBarMounted(true);
-    }
-    keyboardBarAnim.stopAnimation();
-    Animated.timing(keyboardBarAnim, {
-      toValue: showKeyboardActionBar ? 1 : 0,
-      duration: showKeyboardActionBar ? 140 : 120,
-      useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished && !showKeyboardActionBar) {
-        setIsKeyboardBarMounted(false);
-      }
-    });
-  }, [keyboardBarAnim, showKeyboardActionBar]);
+  const { keyboardBarAnim } = useKeyboardUiRuntime({
+    showKeyboardActionBar,
+    setKeyboardState,
+    setIsKeyboardBarMounted,
+  });
 
   return (
     <SafeAreaView style={styles.container}>
