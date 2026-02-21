@@ -3,6 +3,7 @@ import type { ChatEventPayload } from '../openclaw';
 import type { ChatTurn } from '../types';
 import { resolveCompletedAssistantText, shouldAttemptFinalRecovery } from '../ui/runtime-logic';
 import { mergeAssistantStreamText, normalizeChatEventState, toTextContent, triggerHaptic } from '../utils';
+import { resolveUnboundGatewayEventDecision } from './gateway-event-bridge-logic';
 
 type UseGatewayEventBridgeInput = {
   activeSessionKeyRef: MutableRefObject<string>;
@@ -71,36 +72,39 @@ export function useGatewayEventBridge(input: UseGatewayEventBridgeInput) {
       }
 
       if (!turnId) {
-        if (finalEventText || state === 'complete' || state === 'error' || state === 'aborted') {
-          if (state === 'complete' || state === 'error' || state === 'aborted') {
-            input.setIsSending(false);
-            input.activeRunIdRef.current = null;
-            input.setActiveRunId(null);
-            if (
-              state === 'complete' &&
-              input.isOnboardingWaitingForResponse &&
-              !input.isIncompleteAssistantContent(finalEventText)
-            ) {
-              input.setIsOnboardingWaitingForResponse(false);
-              input.setIsOnboardingCompleted(true);
-            }
-            if (
-              (state === 'error' || state === 'aborted') &&
-              input.isOnboardingWaitingForResponse
-            ) {
-              input.setIsOnboardingWaitingForResponse(false);
-            }
-            if (state === 'complete' && shouldAttemptFinalRecovery(finalEventText)) {
-              input.scheduleFinalResponseRecovery(eventSessionKey);
-              const latestTurns = input.sessionTurnsRef.current.get(eventSessionKey) ?? [];
-              const latestTurn = latestTurns[latestTurns.length - 1];
-              if (latestTurn?.id) {
-                input.scheduleMissingResponseRecovery(eventSessionKey, latestTurn.id);
-              }
+        const decision = resolveUnboundGatewayEventDecision(state, finalEventText);
+        if (!decision.shouldSyncHistory) {
+          return;
+        }
+
+        if (decision.shouldEndSending) {
+          input.setIsSending(false);
+          input.activeRunIdRef.current = null;
+          input.setActiveRunId(null);
+          if (
+            state === 'complete' &&
+            input.isOnboardingWaitingForResponse &&
+            !input.isIncompleteAssistantContent(finalEventText)
+          ) {
+            input.setIsOnboardingWaitingForResponse(false);
+            input.setIsOnboardingCompleted(true);
+          }
+          if (
+            (state === 'error' || state === 'aborted') &&
+            input.isOnboardingWaitingForResponse
+          ) {
+            input.setIsOnboardingWaitingForResponse(false);
+          }
+          if (state === 'complete' && shouldAttemptFinalRecovery(finalEventText)) {
+            input.scheduleFinalResponseRecovery(eventSessionKey);
+            const latestTurns = input.sessionTurnsRef.current.get(eventSessionKey) ?? [];
+            const latestTurn = latestTurns[latestTurns.length - 1];
+            if (latestTurn?.id) {
+              input.scheduleMissingResponseRecovery(eventSessionKey, latestTurn.id);
             }
           }
-          input.scheduleSessionHistorySync(eventSessionKey);
         }
+        input.scheduleSessionHistorySync(eventSessionKey);
         return;
       }
 
