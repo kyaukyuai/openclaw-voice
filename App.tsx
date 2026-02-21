@@ -33,7 +33,6 @@ import {
   computeAutoConnectRetryPlan,
   mergeHistoryTurnsWithPendingLocal,
   normalizeMessageForDedupe,
-  resolveCompletedAssistantText,
   resolveSendDispatch,
   shouldAttemptFinalRecovery,
   shouldStartStartupAutoConnect,
@@ -113,7 +112,6 @@ import {
 // Import extracted helpers
 import {
   triggerHaptic,
-  toTextContent,
   textFromUnknown,
   dedupeLines,
   errorMessage,
@@ -128,7 +126,6 @@ import {
   extractTimestampFromUnknown,
   normalizeChatEventState,
   getTextOverlapSize,
-  mergeAssistantStreamText,
   isMacDesktopRuntime,
   supportsSpeechRecognitionOnCurrentPlatform,
 } from './src/utils';
@@ -137,6 +134,7 @@ import { useHistoryRuntime } from './src/ios-runtime/useHistoryRuntime';
 import { useComposerRuntime } from './src/ios-runtime/useComposerRuntime';
 import { useHomeUiHandlers } from './src/ios-runtime/useHomeUiHandlers';
 import { useHomeUiState } from './src/ios-runtime/useHomeUiState';
+import { useGatewayEventBridge } from './src/ios-runtime/useGatewayEventBridge';
 import { scheduleHistoryScrollToEnd } from './src/ui/history-layout';
 import ConnectionHeader from './src/ui/ios/ConnectionHeader';
 import SettingsScreenModal from './src/ui/ios/SettingsScreenModal';
@@ -1599,178 +1597,35 @@ function AppContent() {
     [clearMissingResponseRecoveryState, connectionState, isSending, processOutboxQueue],
   );
 
-  const handleChatEvent = (payload: ChatEventPayload) => {
-    const activeSessionKey = activeSessionKeyRef.current;
-    const hasMatchingSession = payload.sessionKey === activeSessionKey;
-    const eventSessionKey = (payload.sessionKey ?? '').trim() || activeSessionKey;
-    const streamText = toTextContent(payload.message, { trim: false, dedupe: false });
-    const finalEventText = extractFinalChatEventText(payload);
-    const state = normalizeChatEventState(payload.state);
-    setGatewayEventState(state);
-    let turnId = runIdToTurnIdRef.current.get(payload.runId);
-    const canBindPendingTurn =
-      Boolean(pendingTurnIdRef.current) &&
-      (hasMatchingSession || payload.runId === activeRunIdRef.current);
-
-    if (!hasMatchingSession && !turnId && !canBindPendingTurn) {
-      return;
-    }
-
-    if (!turnId && pendingTurnIdRef.current && canBindPendingTurn) {
-      turnId = pendingTurnIdRef.current;
-      pendingTurnIdRef.current = null;
-      runIdToTurnIdRef.current.set(payload.runId, turnId);
-      updateChatTurn(turnId, (turn) => ({
-        ...turn,
-        runId: payload.runId,
-      }));
-    }
-
-    if (!turnId) {
-      if (finalEventText || state === 'complete' || state === 'error' || state === 'aborted') {
-        if (
-          state === 'complete' ||
-          state === 'error' ||
-          state === 'aborted'
-        ) {
-          setIsSending(false);
-          activeRunIdRef.current = null;
-          setActiveRunId(null);
-          if (
-            state === 'complete' &&
-            isOnboardingWaitingForResponse &&
-            !isIncompleteAssistantContent(finalEventText)
-          ) {
-            setIsOnboardingWaitingForResponse(false);
-            setIsOnboardingCompleted(true);
-          }
-          if (
-            (state === 'error' || state === 'aborted') &&
-            isOnboardingWaitingForResponse
-          ) {
-            setIsOnboardingWaitingForResponse(false);
-          }
-          if (state === 'complete' && shouldAttemptFinalRecovery(finalEventText)) {
-            scheduleFinalResponseRecovery(eventSessionKey);
-            const latestTurns = sessionTurnsRef.current.get(eventSessionKey) ?? [];
-            const latestTurn = latestTurns[latestTurns.length - 1];
-            if (latestTurn?.id) {
-              scheduleMissingResponseRecovery(eventSessionKey, latestTurn.id);
-            }
-          }
-        }
-        scheduleSessionHistorySync(eventSessionKey);
-      }
-      return;
-    }
-
-    if (state === 'delta' || state === 'streaming') {
-      activeRunIdRef.current = payload.runId;
-      setActiveRunId(payload.runId);
-      setIsSending(true);
-      updateChatTurn(turnId, (turn) => ({
-        ...turn,
-        runId: payload.runId,
-        state,
-        assistantText: mergeAssistantStreamText(turn.assistantText, streamText),
-      }));
-      return;
-    }
-
-    if (state === 'complete') {
-      setIsSending(false);
-      activeRunIdRef.current = null;
-      setActiveRunId(null);
-      runIdToTurnIdRef.current.delete(payload.runId);
-      clearFinalResponseRecoveryTimer();
-      let finalAssistantText = '';
-      updateChatTurn(turnId, (turn) => {
-        finalAssistantText = resolveCompletedAssistantText({
-          finalText: finalEventText,
-          streamedText: turn.assistantText,
-          stopReason: payload.stopReason,
-        });
-        return {
-          ...turn,
-          runId: payload.runId,
-          state: 'complete',
-          assistantText: finalAssistantText,
-        };
-      });
-      if (
-        isOnboardingWaitingForResponse &&
-        !isIncompleteAssistantContent(finalAssistantText)
-      ) {
-        setIsOnboardingWaitingForResponse(false);
-        setIsOnboardingCompleted(true);
-      }
-      if (shouldAttemptFinalRecovery(finalEventText, finalAssistantText || undefined)) {
-        scheduleFinalResponseRecovery(eventSessionKey);
-        scheduleMissingResponseRecovery(eventSessionKey, turnId);
-      } else {
-        clearMissingResponseRecoveryState(eventSessionKey);
-      }
-      scheduleSessionHistorySync(eventSessionKey);
-      void refreshSessions();
-      return;
-    }
-
-    if (state === 'error') {
-      clearFinalResponseRecoveryTimer();
-      const message = payload.errorMessage ?? 'An error occurred on the Gateway.';
-      void triggerHaptic('send-error');
-      setGatewayError(`Gateway error: ${message}`);
-      setIsSending(false);
-      activeRunIdRef.current = null;
-      setActiveRunId(null);
-      runIdToTurnIdRef.current.delete(payload.runId);
-      updateChatTurn(turnId, (turn) => ({
-        ...turn,
-        runId: payload.runId,
-        state: 'error',
-        assistantText: finalEventText || message,
-      }));
-      if (isOnboardingWaitingForResponse) {
-        setIsOnboardingWaitingForResponse(false);
-      }
-      clearMissingResponseRecoveryState(eventSessionKey);
-      scheduleSessionHistorySync(eventSessionKey);
-      void refreshSessions();
-      return;
-    }
-
-    if (state === 'aborted') {
-      clearFinalResponseRecoveryTimer();
-      void triggerHaptic('send-error');
-      setGatewayError('The Gateway response was aborted.');
-      setIsSending(false);
-      activeRunIdRef.current = null;
-      setActiveRunId(null);
-      runIdToTurnIdRef.current.delete(payload.runId);
-      updateChatTurn(turnId, (turn) => ({
-        ...turn,
-        runId: payload.runId,
-        state: 'aborted',
-        assistantText: turn.assistantText || 'Response was aborted.',
-      }));
-      if (isOnboardingWaitingForResponse) {
-        setIsOnboardingWaitingForResponse(false);
-      }
-      clearMissingResponseRecoveryState(eventSessionKey);
-      scheduleSessionHistorySync(eventSessionKey);
-      void refreshSessions();
-      return;
-    }
-
-    if (streamText) {
-      updateChatTurn(turnId, (turn) => ({
-        ...turn,
-        runId: payload.runId,
-        state,
-        assistantText: mergeAssistantStreamText(turn.assistantText, streamText),
-      }));
-    }
-  };
+  const { handleChatEvent } = useGatewayEventBridge({
+    activeSessionKeyRef,
+    activeRunIdRef,
+    pendingTurnIdRef,
+    runIdToTurnIdRef,
+    sessionTurnsRef,
+    updateChatTurn,
+    setGatewayEventState,
+    setIsSending,
+    setActiveRunId,
+    isOnboardingWaitingForResponse,
+    isIncompleteAssistantContent,
+    setIsOnboardingWaitingForResponse,
+    setIsOnboardingCompleted,
+    scheduleFinalResponseRecovery: (sessionKey, attempt) => {
+      scheduleFinalResponseRecovery(sessionKey, attempt);
+    },
+    scheduleMissingResponseRecovery: (sessionKey, turnId, options) => {
+      scheduleMissingResponseRecovery(sessionKey, turnId, options);
+    },
+    scheduleSessionHistorySync: (sessionKey, options) => {
+      scheduleSessionHistorySync(sessionKey, options);
+    },
+    clearFinalResponseRecoveryTimer,
+    clearMissingResponseRecoveryState,
+    refreshSessions,
+    setGatewayError,
+    extractFinalChatEventText,
+  });
 
   const connectGateway = async (options?: { auto?: boolean; autoAttempt?: number }) => {
     const isAutoConnect = options?.auto === true;
