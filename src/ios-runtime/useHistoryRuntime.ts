@@ -1,4 +1,11 @@
 import { useCallback, useRef } from 'react';
+import {
+  beginHistoryRefreshRequest,
+  clearHistoryRefreshInFlightIfCurrent,
+  invalidateHistoryRefreshState,
+  isCurrentHistoryRefreshRequest,
+  raceHistoryRefreshWithTimeout,
+} from './history-runtime-logic';
 
 type RunHistoryRefreshInput = {
   sessionKey: string;
@@ -15,30 +22,38 @@ export function useHistoryRuntime() {
   const refreshRequestIdRef = useRef(0);
 
   const invalidateRefreshEpoch = useCallback(() => {
-    refreshEpochRef.current += 1;
-    refreshRequestIdRef.current += 1;
-    inFlightRef.current = null;
+    invalidateHistoryRefreshState({
+      inFlightRef,
+      refreshEpochRef,
+      refreshRequestIdRef,
+    });
   }, []);
 
   const runHistoryRefresh = useCallback(async (input: RunHistoryRefreshInput) => {
-    if (inFlightRef.current) {
-      return inFlightRef.current;
+    const begin = beginHistoryRefreshRequest({
+      inFlightRef,
+      refreshEpochRef,
+      refreshRequestIdRef,
+    });
+    if (begin.reused) {
+      return begin.promise;
     }
-
-    const epoch = refreshEpochRef.current;
-    const requestId = refreshRequestIdRef.current + 1;
-    refreshRequestIdRef.current = requestId;
+    const { epoch, requestId } = begin;
 
     const runPromise = (async () => {
       input.onStart?.();
       try {
-        const timeoutPromise = new Promise<boolean>((resolve) => {
-          setTimeout(() => resolve(false), Math.max(1, input.timeoutMs));
-        });
-        const ok = await Promise.race([input.run(), timeoutPromise]);
+        const ok = await raceHistoryRefreshWithTimeout(input.run, input.timeoutMs);
         if (
-          refreshEpochRef.current !== epoch ||
-          refreshRequestIdRef.current !== requestId
+          !isCurrentHistoryRefreshRequest(
+            {
+              inFlightRef,
+              refreshEpochRef,
+              refreshRequestIdRef,
+            },
+            epoch,
+            requestId,
+          )
         ) {
           return false;
         }
@@ -46,20 +61,30 @@ export function useHistoryRuntime() {
         return ok;
       } catch (error) {
         if (
-          refreshEpochRef.current === epoch &&
-          refreshRequestIdRef.current === requestId
+          isCurrentHistoryRefreshRequest(
+            {
+              inFlightRef,
+              refreshEpochRef,
+              refreshRequestIdRef,
+            },
+            epoch,
+            requestId,
+          )
         ) {
           input.onError?.(error);
           input.onFinish?.(false);
         }
         return false;
       } finally {
-        if (
-          refreshEpochRef.current === epoch &&
-          refreshRequestIdRef.current === requestId
-        ) {
-          inFlightRef.current = null;
-        }
+        clearHistoryRefreshInFlightIfCurrent(
+          {
+            inFlightRef,
+            refreshEpochRef,
+            refreshRequestIdRef,
+          },
+          epoch,
+          requestId,
+        );
       }
     })();
 
