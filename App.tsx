@@ -8,8 +8,6 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   LogBox,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
   findNodeHandle,
   Platform,
   SafeAreaView,
@@ -31,7 +29,6 @@ import {
   type Storage as OpenClawStorage,
 } from './src/openclaw';
 import {
-  buildHistoryRefreshNotice,
   computeHistorySyncRetryPlan,
   computeAutoConnectRetryPlan,
   mergeHistoryTurnsWithPendingLocal,
@@ -143,6 +140,7 @@ import {
 import { useGatewayRuntime } from './src/ios-runtime/useGatewayRuntime';
 import { useHistoryRuntime } from './src/ios-runtime/useHistoryRuntime';
 import { useComposerRuntime } from './src/ios-runtime/useComposerRuntime';
+import { useHomeUiHandlers } from './src/ios-runtime/useHomeUiHandlers';
 import { scheduleHistoryScrollToEnd } from './src/ui/history-layout';
 import ConnectionHeader from './src/ui/ios/ConnectionHeader';
 import SettingsScreenModal from './src/ui/ios/SettingsScreenModal';
@@ -2108,45 +2106,6 @@ function AppContent() {
     }, QUICK_TEXT_TOOLTIP_HIDE_MS);
   }, [clearQuickTextTooltipTimer]);
 
-  const handleQuickTextLongPress = useCallback(
-    (side: QuickTextButtonSide, rawText: string) => {
-      if (!rawText.trim()) return;
-      quickTextLongPressSideRef.current = side;
-      clearQuickTextLongPressResetTimer();
-      setQuickTextTooltipSide(side);
-      void triggerHaptic('button-press');
-      scheduleQuickTextTooltipHide();
-    },
-    [clearQuickTextLongPressResetTimer, scheduleQuickTextTooltipHide],
-  );
-
-  const handleQuickTextPress = useCallback(
-    (side: QuickTextButtonSide, rawText: string) => {
-      if (quickTextLongPressSideRef.current === side) {
-        quickTextLongPressSideRef.current = null;
-        return;
-      }
-      hideQuickTextTooltip();
-      insertQuickText(rawText);
-    },
-    [hideQuickTextTooltip, insertQuickText],
-  );
-
-  const handleQuickTextPressOut = useCallback(
-    (side: QuickTextButtonSide) => {
-      if (quickTextLongPressSideRef.current !== side) {
-        hideQuickTextTooltip();
-        return;
-      }
-      clearQuickTextLongPressResetTimer();
-      quickTextLongPressResetTimerRef.current = setTimeout(() => {
-        quickTextLongPressResetTimerRef.current = null;
-        quickTextLongPressSideRef.current = null;
-      }, 260);
-    },
-    [clearQuickTextLongPressResetTimer, hideQuickTextTooltip],
-  );
-
   const ensureSettingsFieldVisible = useCallback((field: QuickTextFocusField) => {
     if (settingsFocusScrollTimerRef.current) {
       clearTimeout(settingsFocusScrollTimerRef.current);
@@ -2729,261 +2688,109 @@ function AppContent() {
       : topBannerKind === 'history'
         ? 'refresh-outline'
         : 'mic-off-outline';
+  const handleButtonPressHaptic = useCallback(() => {
+    void triggerHaptic('button-press');
+  }, []);
 
-  const handleReconnectFromError = () => {
-    if (!canReconnectFromError) return;
-    Keyboard.dismiss();
-    setFocusedField(null);
-    void connectGateway();
-  };
-
-  const handleRetryFromError = () => {
-    if (!canRetryFromError) return;
-    Keyboard.dismiss();
-    setFocusedField(null);
-    void sendToGateway(latestRetryText);
-  };
-
-  const handleRetryMissingResponse = () => {
-    const notice = activeMissingResponseNotice;
-    if (!notice || isMissingResponseRecoveryInFlight) return;
-    if (!isGatewayConnected) {
-      setGatewayError('Reconnect to retry fetching final response.');
-      return;
-    }
-    Keyboard.dismiss();
-    setFocusedField(null);
-    scheduleMissingResponseRecovery(notice.sessionKey, notice.turnId, {
-      attempt: 1,
-      delayMs: 0,
-    });
-  };
-
-  const handleDismissTopBanner = () => {
-    if (topBannerKind === 'gateway') {
-      setGatewayError(null);
-      return;
-    }
-    if (topBannerKind === 'recovery') {
-      setMissingResponseNotice(null);
-      return;
-    }
-    if (topBannerKind === 'history') {
-      setHistoryRefreshNotice(null);
-      return;
-    }
-    if (topBannerKind === 'speech') {
-      setSpeechError(null);
-    }
-  };
-
-  const handleCompleteOnboarding = () => {
-    Keyboard.dismiss();
-    setFocusedField(null);
-    setIsOnboardingWaitingForResponse(false);
-    setIsOnboardingCompleted(true);
-  };
-
-  const handleOnboardingConnectTest = () => {
-    if (!canRunOnboardingConnectTest) return;
-    Keyboard.dismiss();
-    setFocusedField(null);
-    void connectGateway();
-  };
-
-  const handleOnboardingSendSample = () => {
-    if (!canRunOnboardingSampleSend) return;
-    Keyboard.dismiss();
-    setFocusedField(null);
-    setIsOnboardingWaitingForResponse(true);
-    void sendToGateway(ONBOARDING_SAMPLE_MESSAGE);
-  };
-
-  const handleToggleSessionPanel = useCallback(() => {
-    if (!isGatewayConnected) return;
-    Keyboard.dismiss();
-    setFocusedField(null);
-    setIsSettingsPanelOpen(false);
-    forceMaskAuthToken();
-    const next = !isSessionPanelOpen;
-    setIsSessionPanelOpen(next);
-    if (next) {
-      void refreshSessions();
-    } else {
-      setIsSessionRenameOpen(false);
-      setSessionRenameTargetKey(null);
-      setSessionRenameDraft('');
-    }
-  }, [
-    forceMaskAuthToken,
+  const {
+    handleQuickTextLongPress,
+    handleQuickTextPress,
+    handleQuickTextPressOut,
+    handleReconnectFromError,
+    handleRetryFromError,
+    handleRetryMissingResponse,
+    handleDismissTopBanner,
+    handleCompleteOnboarding,
+    handleOnboardingConnectTest,
+    handleOnboardingSendSample,
+    handleToggleSessionPanel,
+    handleToggleSettingsPanel,
+    handleCloseSettingsPanel,
+    handleCloseSessionPanel,
+    handleDoneKeyboardAction,
+    handleClearKeyboardAction,
+    handleSendKeyboardAction,
+    handleSendDraftAction,
+    handleTranscriptChange,
+    handleTranscriptFocus,
+    handleTranscriptBlur,
+    handleRefreshHistory,
+    handleScrollHistoryToBottom,
+    handleHoldToTalkPressIn,
+    handleHoldToTalkPressOut,
+    handleHistoryScroll,
+    handleHistoryAutoScroll,
+    handleHistoryLayoutAutoScroll,
+    handleBottomDockHeightChange,
+    handleBottomDockActionPressHaptic,
+  } = useHomeUiHandlers({
+    clearQuickTextLongPressResetTimer,
+    scheduleQuickTextTooltipHide,
+    hideQuickTextTooltip,
+    insertQuickText,
+    setQuickTextTooltipSide,
+    quickTextLongPressSideRef,
+    quickTextLongPressResetTimerRef,
+    onButtonPressHaptic: handleButtonPressHaptic,
+    canReconnectFromError,
+    canRetryFromError,
+    latestRetryText,
+    connectGateway,
+    sendToGateway,
+    setFocusedField,
+    activeMissingResponseNotice,
+    isMissingResponseRecoveryInFlight,
     isGatewayConnected,
+    setGatewayError,
+    scheduleMissingResponseRecovery,
+    topBannerKind,
+    setMissingResponseNotice,
+    setHistoryRefreshNotice,
+    setSpeechError,
+    setIsOnboardingWaitingForResponse,
+    setIsOnboardingCompleted,
+    canRunOnboardingConnectTest,
+    canRunOnboardingSampleSend,
+    onboardingSampleMessage: ONBOARDING_SAMPLE_MESSAGE,
+    forceMaskAuthToken,
     isSessionPanelOpen,
     refreshSessions,
-  ]);
-
-  const handleToggleSettingsPanel = useCallback(() => {
-    if (!canToggleSettingsPanel) return;
-    Keyboard.dismiss();
-    setFocusedField(null);
-    setIsSessionPanelOpen(false);
-    setIsSettingsPanelOpen((current) => {
-      const next = !current;
-      if (!next) {
-        forceMaskAuthToken();
-      }
-      return next;
-    });
-  }, [canToggleSettingsPanel, forceMaskAuthToken]);
-
-  const handleCloseSettingsPanel = useCallback(() => {
-    if (!canDismissSettingsScreen) return;
-    forceMaskAuthToken();
-    setIsSettingsPanelOpen(false);
-    setFocusedField(null);
-    Keyboard.dismiss();
-  }, [canDismissSettingsScreen, forceMaskAuthToken]);
-
-  const handleCloseSessionPanel = useCallback(() => {
-    setIsSessionPanelOpen(false);
-    setIsSessionRenameOpen(false);
-    setSessionRenameTargetKey(null);
-    setSessionRenameDraft('');
-    Keyboard.dismiss();
-  }, []);
-
-  const handleDoneKeyboardAction = useCallback(() => {
-    Keyboard.dismiss();
-    setFocusedField(null);
-  }, []);
-
-  const handleClearKeyboardAction = useCallback(() => {
-    if (!canClearFromKeyboardBar) return;
-    clearTranscriptDraft();
-  }, [canClearFromKeyboardBar, clearTranscriptDraft]);
-
-  const handleSendKeyboardAction = useCallback(() => {
-    if (!canSendFromKeyboardBar) return;
-    const text = transcript.trim() || interimTranscript.trim();
-    if (!text) return;
-    Keyboard.dismiss();
-    setFocusedField(null);
-    void sendToGateway(text);
-  }, [canSendFromKeyboardBar, interimTranscript, sendToGateway, transcript]);
-
-  const handleSendDraftAction = useCallback(() => {
-    const text = transcript.trim() || interimTranscript.trim();
-    if (!text) return;
-    Keyboard.dismiss();
-    setFocusedField(null);
-    void sendToGateway(text);
-  }, [interimTranscript, sendToGateway, transcript]);
-
-  const handleTranscriptChange = useCallback((value: string) => {
-    setTranscript(value);
-    setInterimTranscript('');
-  }, []);
-
-  const handleTranscriptFocus = useCallback(() => {
-    setFocusedField('transcript');
-  }, []);
-
-  const handleTranscriptBlur = useCallback(() => {
-    setFocusedField((current) => (current === 'transcript' ? null : current));
-  }, []);
-
-  const handleRefreshHistory = useCallback(() => {
-    if (!isGatewayConnected || isSessionHistoryLoading) return;
-    Keyboard.dismiss();
-    setFocusedField(null);
-    clearHistoryNoticeTimer();
-    setHistoryRefreshNotice(null);
-    const sessionKey = activeSessionKeyRef.current;
-    void (async () => {
-      const synced = await loadSessionHistory(sessionKey, { silentError: true });
-      void refreshSessions();
-      if (synced) {
-        const now = Date.now();
-        setHistoryLastSyncedAt(now);
-        const notice = buildHistoryRefreshNotice(true, formatClockLabel(now));
-        showHistoryRefreshNotice(notice.kind, notice.message);
-        return;
-      }
-      const notice = buildHistoryRefreshNotice(false);
-      showHistoryRefreshNotice(notice.kind, notice.message);
-    })();
-  }, [
-    clearHistoryNoticeTimer,
-    isGatewayConnected,
+    setIsSettingsPanelOpen,
+    setIsSessionPanelOpen,
+    setIsSessionRenameOpen,
+    setSessionRenameTargetKey,
+    setSessionRenameDraft,
+    canToggleSettingsPanel,
+    canDismissSettingsScreen,
+    canClearFromKeyboardBar,
+    clearTranscriptDraft,
+    canSendFromKeyboardBar,
+    transcript,
+    interimTranscript,
+    setTranscript,
+    setInterimTranscript,
     isSessionHistoryLoading,
+    clearHistoryNoticeTimer,
+    activeSessionKeyRef,
     loadSessionHistory,
-    refreshSessions,
+    setHistoryLastSyncedAt,
     showHistoryRefreshNotice,
-  ]);
-
-  const handleScrollHistoryToBottom = useCallback(() => {
-    scrollHistoryToBottom(true);
-    void triggerHaptic('button-press');
-  }, [scrollHistoryToBottom, triggerHaptic]);
-
-  const handleHoldToTalkPressIn = () => {
-    if (!speechRecognitionSupported || isRecognizing || isSending) return;
-    void triggerHaptic('button-press');
-    Keyboard.dismiss();
-    setFocusedField(null);
-    holdActivatedRef.current = false;
-    if (holdStartTimerRef.current) {
-      clearTimeout(holdStartTimerRef.current);
-    }
-    holdStartTimerRef.current = setTimeout(() => {
-      holdStartTimerRef.current = null;
-      holdActivatedRef.current = true;
-      void startRecognition();
-    }, 120);
-  };
-
-  const handleHoldToTalkPressOut = () => {
-    if (holdStartTimerRef.current) {
-      clearTimeout(holdStartTimerRef.current);
-      holdStartTimerRef.current = null;
-    }
-    if (!holdActivatedRef.current) return;
-    holdActivatedRef.current = false;
-    if (!isRecognizing) return;
-    stopRecognition();
-  };
-
-  const handleHistoryScroll = useCallback(
-    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-      const distanceFromBottom =
-        contentSize.height - (contentOffset.y + layoutMeasurement.height);
-      const isNearBottom = distanceFromBottom < HISTORY_BOTTOM_THRESHOLD_PX;
-      historyAutoScrollRef.current = isNearBottom;
-      setShowScrollToBottomButton(chatTurns.length > 0 && !isNearBottom);
-    },
-    [chatTurns.length],
-  );
-  const handleHistoryAutoScroll = useCallback(() => {
-    if (historyAutoScrollRef.current) {
-      scrollHistoryToBottom(false);
-    }
-  }, [scrollHistoryToBottom]);
-  const handleHistoryLayoutAutoScroll = useCallback(() => {
-    if (historyAutoScrollRef.current) {
-      scrollHistoryToBottom(false);
-    }
-  }, [scrollHistoryToBottom]);
-  const handleBottomDockHeightChange = useCallback(
-    (nextHeight: number) => {
-      if (composerHeight !== nextHeight) {
-        setComposerHeight(nextHeight);
-      }
-    },
-    [composerHeight],
-  );
-  const handleBottomDockActionPressHaptic = useCallback(() => {
-    void triggerHaptic('button-press');
-  }, []);
+    formatClockLabel,
+    scrollHistoryToBottom,
+    historyAutoScrollRef,
+    setShowScrollToBottomButton,
+    chatTurnsLength: chatTurns.length,
+    historyBottomThresholdPx: HISTORY_BOTTOM_THRESHOLD_PX,
+    speechRecognitionSupported,
+    isRecognizing,
+    isSending,
+    holdActivatedRef,
+    holdStartTimerRef,
+    startRecognition,
+    stopRecognition,
+    composerHeight,
+    setComposerHeight,
+  });
 
   const styles = useMemo(() => createStyles(isDarkTheme), [isDarkTheme]);
   const placeholderColor = isDarkTheme ? '#95a8ca' : '#C4C4C0';
