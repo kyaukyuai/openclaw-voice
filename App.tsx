@@ -28,7 +28,6 @@ import {
   type Storage as OpenClawStorage,
 } from './src/openclaw';
 import {
-  shouldAttemptFinalRecovery,
   shouldStartStartupAutoConnect,
   isIncompleteAssistantContent,
 } from './src/ui/runtime-logic';
@@ -76,7 +75,6 @@ import {
   QUICK_TEXT_TOOLTIP_HIDE_MS,
   HISTORY_NOTICE_HIDE_MS,
   AUTH_TOKEN_AUTO_MASK_MS,
-  BOTTOM_STATUS_COMPLETE_HOLD_MS,
   getKvStore,
   MAX_TEXT_SCALE,
   MAX_TEXT_SCALE_TIGHT,
@@ -109,6 +107,10 @@ import { useSessionRuntime } from './src/ios-runtime/useSessionRuntime';
 import { useGatewayConnectionFlow } from './src/ios-runtime/useGatewayConnectionFlow';
 import { useOutboxRuntime } from './src/ios-runtime/useOutboxRuntime';
 import { useSessionHistoryRuntime } from './src/ios-runtime/useSessionHistoryRuntime';
+import {
+  useRuntimePersistenceEffects,
+  useRuntimeUiEffects,
+} from './src/ios-runtime/useAppRuntimeEffects';
 import { scheduleHistoryScrollToEnd } from './src/ui/history-layout';
 import ConnectionHeader from './src/ui/ios/ConnectionHeader';
 import SettingsScreenModal from './src/ui/ios/SettingsScreenModal';
@@ -627,12 +629,6 @@ function AppContent() {
     });
   }, [clearAuthTokenMaskTimer]);
 
-  useEffect(() => {
-    if (!shouldShowSettingsScreen) {
-      forceMaskAuthToken();
-    }
-  }, [forceMaskAuthToken, shouldShowSettingsScreen]);
-
   const clearOutboxRetryTimer = useCallback(() => {
     if (outboxRetryTimerRef.current) {
       clearTimeout(outboxRetryTimerRef.current);
@@ -693,29 +689,6 @@ function AppContent() {
     [clearMissingResponseRecoveryTimer],
   );
 
-  useEffect(() => {
-    const notice = missingResponseNotice;
-    if (!notice || notice.sessionKey !== activeSessionKey) return;
-    const targetTurn = chatTurns.find((turn) => turn.id === notice.turnId);
-    if (!targetTurn) {
-      if (chatTurns.length > 0) {
-        clearMissingResponseRecoveryState(notice.sessionKey);
-      }
-      return;
-    }
-    const stillIncomplete =
-      isTurnWaitingState(targetTurn.state) ||
-      shouldAttemptFinalRecovery(targetTurn.assistantText, targetTurn.assistantText);
-    if (!stillIncomplete) {
-      clearMissingResponseRecoveryState(notice.sessionKey);
-    }
-  }, [
-    activeSessionKey,
-    chatTurns,
-    clearMissingResponseRecoveryState,
-    missingResponseNotice,
-  ]);
-
   const runGatewayHealthCheck = useCallback(
     async (options?: { silent?: boolean; timeoutMs?: number }): Promise<boolean> => {
       if (connectionStateRef.current !== 'connected') {
@@ -730,106 +703,6 @@ function AppContent() {
     [gatewayCheckHealth],
   );
 
-  useEffect(() => {
-    transcriptRef.current = transcript;
-  }, [transcript]);
-
-  useEffect(() => {
-    interimTranscriptRef.current = interimTranscript;
-  }, [interimTranscript]);
-
-  useEffect(() => {
-    activeSessionKeyRef.current = activeSessionKey;
-  }, [activeSessionKey]);
-
-  useEffect(() => {
-    historyAutoScrollRef.current = true;
-    setShowScrollToBottomButton(false);
-  }, [activeSessionKey]);
-
-  useEffect(() => {
-    gatewayUrlRef.current = gatewayUrl;
-  }, [gatewayUrl]);
-
-  useEffect(() => {
-    if (gatewayContextConnectDiagnostic) {
-      setGatewayConnectDiagnostic(gatewayContextConnectDiagnostic);
-    }
-  }, [gatewayContextConnectDiagnostic]);
-
-  useEffect(() => {
-    connectionStateRef.current = connectionState;
-  }, [connectionState]);
-
-  useEffect(() => {
-    outboxQueueRef.current = outboxQueue;
-  }, [outboxQueue]);
-
-  useEffect(() => {
-    if (connectionState !== 'connected') {
-      setSessions([]);
-      return;
-    }
-    const fetched = Array.isArray(gatewaySessions)
-      ? gatewaySessions.filter(
-          (session): session is SessionEntry =>
-            typeof session?.key === 'string' && session.key.trim().length > 0,
-        )
-      : [];
-    const activeKey = activeSessionKeyRef.current;
-    const merged = [...fetched];
-    if (!merged.some((session) => session.key === activeKey)) {
-      merged.unshift({ key: activeKey, displayName: activeKey });
-    }
-    merged.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
-    setSessions(merged);
-  }, [connectionState, gatewaySessions]);
-
-  useEffect(() => {
-    if (!gatewaySessionsError) return;
-    setSessionsError((previous) => previous ?? `Sessions unavailable: ${gatewaySessionsError}`);
-  }, [gatewaySessionsError]);
-
-  useEffect(() => {
-    gatewayEventStateRef.current = gatewayEventState;
-  }, [gatewayEventState]);
-
-  useEffect(() => {
-    const shouldHoldComplete =
-      connectionState === 'connected' &&
-      !isSending &&
-      gatewayEventState === 'complete';
-
-    if (!shouldHoldComplete) {
-      setIsBottomCompletePulse(false);
-      clearBottomCompletePulseTimer();
-      return;
-    }
-
-    setIsBottomCompletePulse(true);
-    clearBottomCompletePulseTimer();
-    bottomCompletePulseTimerRef.current = setTimeout(() => {
-      bottomCompletePulseTimerRef.current = null;
-      setIsBottomCompletePulse(false);
-      if (gatewayEventStateRef.current === 'complete') {
-        setGatewayEventState('ready');
-      }
-    }, BOTTOM_STATUS_COMPLETE_HOLD_MS);
-
-    return () => {
-      clearBottomCompletePulseTimer();
-    };
-  }, [
-    clearBottomCompletePulseTimer,
-    connectionState,
-    gatewayEventState,
-    isSending,
-  ]);
-
-  useEffect(() => {
-    sessionTurnsRef.current.set(activeSessionKey, chatTurns);
-  }, [activeSessionKey, chatTurns]);
-
   const scrollHistoryToBottom = useCallback((animated = true) => {
     scheduleHistoryScrollToEnd(() => {
       historyScrollRef.current?.scrollToEnd({ animated });
@@ -838,158 +711,74 @@ function AppContent() {
     });
   }, []);
 
-  useEffect(() => {
-    if (chatTurns.length === 0 || !historyAutoScrollRef.current) return;
-    scrollHistoryToBottom(true);
-  }, [chatTurns.length, scrollHistoryToBottom]);
+  useRuntimeUiEffects({
+    shouldShowSettingsScreen,
+    forceMaskAuthToken,
+    missingResponseNotice,
+    activeSessionKey,
+    chatTurns,
+    clearMissingResponseRecoveryState,
+    isTurnWaitingState,
+    transcript,
+    transcriptRef,
+    interimTranscript,
+    interimTranscriptRef,
+    activeSessionKeyRef,
+    historyAutoScrollRef,
+    setShowScrollToBottomButton,
+    gatewayUrl,
+    gatewayUrlRef,
+    gatewayContextConnectDiagnostic,
+    setGatewayConnectDiagnostic,
+    connectionState,
+    connectionStateRef,
+    outboxQueue,
+    outboxQueueRef,
+    gatewaySessions,
+    setSessions,
+    gatewaySessionsError,
+    setSessionsError,
+    gatewayEventState,
+    gatewayEventStateRef,
+    isSending,
+    setIsBottomCompletePulse,
+    clearBottomCompletePulseTimer,
+    bottomCompletePulseTimerRef,
+    setGatewayEventState,
+    sessionTurnsRef,
+    scrollHistoryToBottom,
+    isOnboardingCompleted,
+    isOnboardingWaitingForResponse,
+    setIsOnboardingCompleted,
+    setIsOnboardingWaitingForResponse,
+    isGatewayConnected,
+    setIsSessionPanelOpen,
+  });
 
-  useEffect(() => {
-    if (chatTurns.length > 0) return;
-    historyAutoScrollRef.current = true;
-    setShowScrollToBottomButton(false);
-  }, [chatTurns.length]);
-
-  useEffect(() => {
-    if (isOnboardingCompleted || !isOnboardingWaitingForResponse) return;
-    const hasFirstResponse = chatTurns.some(
-      (turn) =>
-        turn.state === 'complete' &&
-        !isIncompleteAssistantContent(turn.assistantText),
-    );
-    if (!hasFirstResponse) return;
-    setIsOnboardingCompleted(true);
-    setIsOnboardingWaitingForResponse(false);
-  }, [chatTurns, isOnboardingCompleted, isOnboardingWaitingForResponse]);
-
-  // Load non-settings state (session, outbox, identity)
-  // Settings (gatewayUrl, authToken, speechLang, quickText*, onboarding) are managed by SettingsContext
-  useEffect(() => {
-    let alive = true;
-
-    const loadLocalState = async () => {
-      try {
-        const [
-          savedIdentity,
-          savedSessionKey,
-          savedSessionPrefs,
-          savedOutboxQueue,
-        ] = await Promise.all([
-          kvStore.getItemAsync(OPENCLAW_IDENTITY_STORAGE_KEY),
-          kvStore.getItemAsync(STORAGE_KEYS.sessionKey),
-          kvStore.getItemAsync(STORAGE_KEYS.sessionPrefs),
-          kvStore.getItemAsync(STORAGE_KEYS.outboxQueue),
-        ]);
-        if (!alive) return;
-
-        if (savedSessionKey?.trim()) {
-          setActiveSessionKey(savedSessionKey.trim());
-        }
-        setSessionPreferences(parseSessionPreferences(savedSessionPrefs));
-        const restoredOutbox = parseOutboxQueue(savedOutboxQueue);
-        if (restoredOutbox.length > 0) {
-          setOutboxQueue(restoredOutbox);
-          setGatewayEventState('queued');
-
-          const turnsBySession = new Map<string, ChatTurn[]>();
-          restoredOutbox.forEach((item) => {
-            const turns = turnsBySession.get(item.sessionKey) ?? [];
-            turns.push({
-              id: item.turnId,
-              userText: item.message,
-              assistantText: item.lastError
-                ? `Retrying automatically... (${item.lastError})`
-                : 'Waiting for connection...',
-              state: 'queued',
-              createdAt: item.createdAt,
-            });
-            turnsBySession.set(item.sessionKey, turns);
-          });
-
-          turnsBySession.forEach((turns, sessionKey) => {
-            const ordered = [...turns].sort((a, b) => a.createdAt - b.createdAt);
-            sessionTurnsRef.current.set(sessionKey, ordered);
-          });
-
-          const restoredActiveSessionKey =
-            (savedSessionKey?.trim() || activeSessionKeyRef.current).trim() ||
-            DEFAULT_SESSION_KEY;
-          const restoredActiveTurns = turnsBySession.get(restoredActiveSessionKey);
-          if (restoredActiveTurns?.length) {
-            setChatTurns([...restoredActiveTurns].sort((a, b) => a.createdAt - b.createdAt));
-          }
-        }
-        if (savedIdentity) {
-          openClawIdentityMemory.set(
-            OPENCLAW_IDENTITY_STORAGE_KEY,
-            savedIdentity,
-          );
-        }
-      } catch {
-        // Ignore errors
-      } finally {
-        if (alive) {
-          setLocalStateReady(true);
-        }
-      }
-    };
-
-    void loadLocalState();
-
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!settingsReady) return;
-    const sessionKey = activeSessionKey.trim();
-    persistRuntimeSetting(async () => {
-      if (sessionKey) {
-        await kvStore.setItemAsync(STORAGE_KEYS.sessionKey, sessionKey);
-      } else {
-        await kvStore.deleteItemAsync(STORAGE_KEYS.sessionKey);
-      }
-    });
-  }, [activeSessionKey, persistRuntimeSetting, settingsReady]);
-
-  useEffect(() => {
-    if (!settingsReady) return;
-    persistRuntimeSetting(async () => {
-      const entries = Object.entries(sessionPreferences);
-      if (entries.length === 0) {
-        await kvStore.deleteItemAsync(STORAGE_KEYS.sessionPrefs);
-        return;
-      }
-      await kvStore.setItemAsync(
-        STORAGE_KEYS.sessionPrefs,
-        JSON.stringify(sessionPreferences),
-      );
-    });
-  }, [persistRuntimeSetting, sessionPreferences, settingsReady]);
-
-  useEffect(() => {
-    if (!settingsReady) return;
-    void (async () => {
-      try {
-        if (outboxQueue.length === 0) {
-          await kvStore.deleteItemAsync(STORAGE_KEYS.outboxQueue);
-          return;
-        }
-        await kvStore.setItemAsync(
-          STORAGE_KEYS.outboxQueue,
-          JSON.stringify(outboxQueue),
-        );
-      } catch {
-        // ignore outbox persistence errors
-      }
-    })();
-  }, [outboxQueue, settingsReady]);
-
-  useEffect(() => {
-    if (!isGatewayConnected) {
-      setIsSessionPanelOpen(false);
-    }
-  }, [isGatewayConnected]);
+  useRuntimePersistenceEffects({
+    settingsReady,
+    persistRuntimeSetting,
+    activeSessionKey,
+    sessionPreferences,
+    outboxQueue,
+    kvStore,
+    sessionKeyStorageKey: STORAGE_KEYS.sessionKey,
+    sessionPrefsStorageKey: STORAGE_KEYS.sessionPrefs,
+    outboxQueueStorageKey: STORAGE_KEYS.outboxQueue,
+    identityStorageKey: OPENCLAW_IDENTITY_STORAGE_KEY,
+    openClawIdentityMemory,
+    parseSessionPreferences,
+    parseOutboxQueue,
+    defaultSessionKey: DEFAULT_SESSION_KEY,
+    activeSessionKeyRef,
+    sessionTurnsRef,
+    setActiveSessionKey,
+    setSessionPreferences,
+    setOutboxQueue,
+    setGatewayEventState,
+    setChatTurns,
+    setLocalStateReady,
+  });
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
