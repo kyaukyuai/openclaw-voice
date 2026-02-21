@@ -12,7 +12,6 @@ import {
 import { buildHistoryRefreshNotice } from '../ui/runtime-logic';
 import type {
   FocusField,
-  QuickTextButtonSide,
   HistoryRefreshNotice,
   MissingResponseRecoveryNotice,
 } from '../types';
@@ -23,13 +22,6 @@ type ScheduleMissingResponseRecoveryOptions = {
 };
 
 type UseHomeUiHandlersInput = {
-  clearQuickTextLongPressResetTimer: () => void;
-  scheduleQuickTextTooltipHide: () => void;
-  hideQuickTextTooltip: () => void;
-  insertQuickText: (rawText: string) => void;
-  setQuickTextTooltipSide: Dispatch<SetStateAction<QuickTextButtonSide | null>>;
-  quickTextLongPressSideRef: MutableRefObject<QuickTextButtonSide | null>;
-  quickTextLongPressResetTimerRef: MutableRefObject<ReturnType<typeof setTimeout> | null>;
   onButtonPressHaptic: () => void;
 
   canReconnectFromError: boolean;
@@ -114,45 +106,6 @@ type UseHomeUiHandlersInput = {
 };
 
 export function useHomeUiHandlers(input: UseHomeUiHandlersInput) {
-  const handleQuickTextLongPress = useCallback(
-    (side: QuickTextButtonSide, rawText: string) => {
-      if (!rawText.trim()) return;
-      input.quickTextLongPressSideRef.current = side;
-      input.clearQuickTextLongPressResetTimer();
-      input.setQuickTextTooltipSide(side);
-      input.onButtonPressHaptic();
-      input.scheduleQuickTextTooltipHide();
-    },
-    [input],
-  );
-
-  const handleQuickTextPress = useCallback(
-    (side: QuickTextButtonSide, rawText: string) => {
-      if (input.quickTextLongPressSideRef.current === side) {
-        input.quickTextLongPressSideRef.current = null;
-        return;
-      }
-      input.hideQuickTextTooltip();
-      input.insertQuickText(rawText);
-    },
-    [input],
-  );
-
-  const handleQuickTextPressOut = useCallback(
-    (side: QuickTextButtonSide) => {
-      if (input.quickTextLongPressSideRef.current !== side) {
-        input.hideQuickTextTooltip();
-        return;
-      }
-      input.clearQuickTextLongPressResetTimer();
-      input.quickTextLongPressResetTimerRef.current = setTimeout(() => {
-        input.quickTextLongPressResetTimerRef.current = null;
-        input.quickTextLongPressSideRef.current = null;
-      }, 260);
-    },
-    [input],
-  );
-
   const handleReconnectFromError = useCallback(() => {
     if (!input.canReconnectFromError) return;
     Keyboard.dismiss();
@@ -406,9 +359,6 @@ export function useHomeUiHandlers(input: UseHomeUiHandlersInput) {
   }, [input]);
 
   return {
-    handleQuickTextLongPress,
-    handleQuickTextPress,
-    handleQuickTextPressOut,
     handleReconnectFromError,
     handleRetryFromError,
     handleRetryMissingResponse,

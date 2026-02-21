@@ -101,6 +101,7 @@ import { useSessionHistoryRuntime } from './src/ios-runtime/useSessionHistoryRun
 import { useSpeechRuntime } from './src/ios-runtime/useSpeechRuntime';
 import { useAppLifecycleRuntime } from './src/ios-runtime/useAppLifecycleRuntime';
 import { useSettingsUiRuntime } from './src/ios-runtime/useSettingsUiRuntime';
+import { useQuickTextRuntime } from './src/ios-runtime/useQuickTextRuntime';
 import {
   useRuntimePersistenceEffects,
   useRuntimeUiEffects,
@@ -1105,20 +1106,21 @@ function AppContent() {
     void triggerHaptic('button-press');
   }, []);
 
-  const insertQuickText = useCallback(
-    (rawText: string) => {
-      const nextText = rawText.trim();
-      if (!nextText || isRecognizing) return;
-      setTranscript((previous) => {
-        const current = previous.trimEnd();
-        if (!current) return nextText;
-        return `${current}\n${nextText}`;
-      });
-      setInterimTranscript('');
-      void triggerHaptic('button-press');
-    },
-    [isRecognizing],
-  );
+  const {
+    handleQuickTextLongPress,
+    handleQuickTextPress,
+    handleQuickTextPressOut,
+  } = useQuickTextRuntime({
+    isRecognizing,
+    setTranscript,
+    setInterimTranscript,
+    setQuickTextTooltipSide,
+    clearQuickTextLongPressResetTimer,
+    scheduleQuickTextTooltipHide,
+    hideQuickTextTooltip,
+    quickTextLongPressSideRef,
+    quickTextLongPressResetTimerRef,
+  });
 
   const {
     scheduleSessionHistorySync,
@@ -1260,9 +1262,6 @@ function AppContent() {
   }, []);
 
   const {
-    handleQuickTextLongPress,
-    handleQuickTextPress,
-    handleQuickTextPressOut,
     handleReconnectFromError,
     handleRetryFromError,
     handleRetryMissingResponse,
@@ -1291,13 +1290,6 @@ function AppContent() {
     handleBottomDockHeightChange,
     handleBottomDockActionPressHaptic,
   } = useHomeUiHandlers({
-    clearQuickTextLongPressResetTimer,
-    scheduleQuickTextTooltipHide,
-    hideQuickTextTooltip,
-    insertQuickText,
-    setQuickTextTooltipSide,
-    quickTextLongPressSideRef,
-    quickTextLongPressResetTimerRef,
     onButtonPressHaptic: handleButtonPressHaptic,
     canReconnectFromError,
     canRetryFromError,
