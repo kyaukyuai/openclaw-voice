@@ -1,24 +1,20 @@
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import Markdown, { MarkdownIt } from 'react-native-markdown-display';
 import {
   ActivityIndicator,
   Animated,
   FlatList,
   Keyboard,
   KeyboardAvoidingView,
-  Linking,
   LogBox,
   NativeScrollEvent,
   NativeSyntheticEvent,
   findNodeHandle,
   Platform,
-  Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from 'react-native';
@@ -156,6 +152,8 @@ import SettingsScreenModal from './src/ui/ios/SettingsScreenModal';
 import SessionsScreenModal from './src/ui/ios/SessionsScreenModal';
 import SettingsPanelContent from './src/ui/ios/SettingsPanelContent';
 import SessionsPanelContent from './src/ui/ios/SessionsPanelContent';
+import HistoryTimelineCard from './src/ui/ios/HistoryTimelineCard';
+import TranscriptComposerCard from './src/ui/ios/TranscriptComposerCard';
 
 // Import contexts
 import {
@@ -2883,6 +2881,19 @@ function AppContent() {
     void sendToGateway(text);
   }, [interimTranscript, sendToGateway, transcript]);
 
+  const handleTranscriptChange = useCallback((value: string) => {
+    setTranscript(value);
+    setInterimTranscript('');
+  }, []);
+
+  const handleTranscriptFocus = useCallback(() => {
+    setFocusedField('transcript');
+  }, []);
+
+  const handleTranscriptBlur = useCallback(() => {
+    setFocusedField((current) => (current === 'transcript' ? null : current));
+  }, []);
+
   const handleRefreshHistory = useCallback(() => {
     if (!isGatewayConnected || isSessionHistoryLoading) return;
     Keyboard.dismiss();
@@ -2957,265 +2968,7 @@ function AppContent() {
   );
 
   const styles = useMemo(() => createStyles(isDarkTheme), [isDarkTheme]);
-  const markdownParser = useMemo(() => new MarkdownIt({ linkify: true }), []);
   const placeholderColor = isDarkTheme ? '#95a8ca' : '#C4C4C0';
-  const markdownStyles = useMemo(
-    () => ({
-      body: {
-        color: isDarkTheme ? '#f8fbff' : '#1A1A1A',
-        fontSize: 14,
-        lineHeight: 20,
-        marginTop: 0,
-        marginBottom: 0,
-      },
-      text: {
-        color: isDarkTheme ? '#f8fbff' : '#1A1A1A',
-        fontSize: 14,
-        lineHeight: 20,
-      },
-      paragraph: {
-        color: isDarkTheme ? '#f8fbff' : '#1A1A1A',
-        marginTop: 0,
-        marginBottom: 0,
-      },
-      heading1: {
-        color: isDarkTheme ? '#ffffff' : '#111827',
-        fontSize: 24,
-        lineHeight: 30,
-        fontWeight: '800' as const,
-        marginTop: 8,
-        marginBottom: 8,
-      },
-      heading2: {
-        color: isDarkTheme ? '#f5f8ff' : '#111827',
-        fontSize: 20,
-        lineHeight: 26,
-        fontWeight: '700' as const,
-        marginTop: 8,
-        marginBottom: 6,
-      },
-      heading3: {
-        color: isDarkTheme ? '#ecf2ff' : '#1f2937',
-        fontSize: 17,
-        lineHeight: 23,
-        fontWeight: '700' as const,
-        marginTop: 6,
-        marginBottom: 4,
-      },
-      heading4: {
-        color: isDarkTheme ? '#e6efff' : '#1f2937',
-        fontSize: 16,
-        lineHeight: 22,
-        fontWeight: '700' as const,
-        marginTop: 4,
-        marginBottom: 2,
-      },
-      strong: {
-        color: isDarkTheme ? '#ffffff' : '#111827',
-        fontWeight: '700' as const,
-      },
-      em: {
-        color: isDarkTheme ? '#e6f0ff' : '#374151',
-        fontStyle: 'italic' as const,
-      },
-      link: {
-        color: '#2563EB',
-        textDecorationLine: 'underline' as const,
-      },
-      code_inline: {
-        color: isDarkTheme ? '#e6f0ff' : '#111827',
-        backgroundColor: isDarkTheme ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
-        borderRadius: 4,
-        paddingHorizontal: 4,
-        paddingVertical: 2,
-      },
-      code_block: {
-        color: isDarkTheme ? '#e6f0ff' : '#111827',
-        backgroundColor: isDarkTheme ? '#0f1c3f' : '#f3f4f6',
-        borderRadius: 8,
-        padding: 10,
-        marginTop: 6,
-        marginBottom: 6,
-      },
-      fence: {
-        marginTop: 6,
-        marginBottom: 6,
-      },
-      blockquote: {
-        borderLeftWidth: 2,
-        borderLeftColor: isDarkTheme ? 'rgba(255,255,255,0.24)' : 'rgba(0,0,0,0.18)',
-        paddingLeft: 8,
-        marginTop: 4,
-        marginBottom: 4,
-      },
-      bullet_list: {
-        marginTop: 4,
-        marginBottom: 4,
-      },
-      ordered_list: {
-        marginTop: 4,
-        marginBottom: 4,
-      },
-      list_item: {
-        marginTop: 0,
-        marginBottom: 0,
-      },
-      hr: {
-        backgroundColor: isDarkTheme ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)',
-        height: 1,
-        marginTop: 8,
-        marginBottom: 8,
-      },
-    }),
-    [isDarkTheme],
-  );
-  const markdownErrorStyles = useMemo(
-    () => ({
-      ...markdownStyles,
-      body: {
-        ...(markdownStyles.body ?? {}),
-        color: isDarkTheme ? '#ffb0b0' : '#DC2626',
-      },
-      text: {
-        ...(markdownStyles.text ?? {}),
-        color: isDarkTheme ? '#ffb0b0' : '#DC2626',
-      },
-      paragraph: {
-        ...(markdownStyles.paragraph ?? {}),
-        color: isDarkTheme ? '#ffb0b0' : '#DC2626',
-      },
-      heading1: {
-        ...(markdownStyles.heading1 ?? {}),
-        color: isDarkTheme ? '#ffb0b0' : '#DC2626',
-      },
-      heading2: {
-        ...(markdownStyles.heading2 ?? {}),
-        color: isDarkTheme ? '#ffb0b0' : '#DC2626',
-      },
-      heading3: {
-        ...(markdownStyles.heading3 ?? {}),
-        color: isDarkTheme ? '#ffb0b0' : '#DC2626',
-      },
-      heading4: {
-        ...(markdownStyles.heading4 ?? {}),
-        color: isDarkTheme ? '#ffb0b0' : '#DC2626',
-      },
-      link: {
-        ...(markdownStyles.link ?? {}),
-        color: isDarkTheme ? '#ffb0b0' : '#DC2626',
-      },
-      code_inline: {
-        ...(markdownStyles.code_inline ?? {}),
-        color: isDarkTheme ? '#ffb0b0' : '#DC2626',
-      },
-      code_block: {
-        ...(markdownStyles.code_block ?? {}),
-        color: isDarkTheme ? '#ffb0b0' : '#DC2626',
-      },
-    }),
-    [isDarkTheme, markdownStyles],
-  );
-  const renderHistoryItem = useCallback(
-    ({ item }: { item: HistoryListItem }) => {
-      if (item.kind === 'date') {
-        if (!showHistoryDateDivider) return null;
-        return (
-          <View style={styles.historyDateRow}>
-            <View style={styles.historyDateLine} />
-            <Text
-              style={styles.historyDateText}
-              maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-            >
-              {item.label}
-            </Text>
-            <View style={styles.historyDateLine} />
-          </View>
-        );
-      }
-
-      const turn = item.turn;
-      const waiting = isTurnWaitingState(turn.state);
-      const error = isTurnErrorState(turn.state);
-      const assistantText = turn.assistantText || (waiting ? 'Responding...' : 'No response');
-      const turnTime = new Date(turn.createdAt).toLocaleTimeString('ja-JP', {
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-
-      return (
-        <View
-          style={[
-            styles.historyTurnGroup,
-            item.isLast && styles.historyTurnGroupLast,
-          ]}
-        >
-          <View style={styles.historyUserRow}>
-            <View style={styles.turnUserBubble}>
-              <Text
-                style={styles.turnUser}
-                maxFontSizeMultiplier={MAX_TEXT_SCALE}
-              >
-                {turn.userText}
-              </Text>
-            </View>
-          </View>
-          <View style={styles.historyAssistantRow}>
-            <View style={styles.assistantAvatar}>
-              <Ionicons
-                name="flash"
-                size={11}
-                color={isDarkTheme ? '#ffffff' : '#1d4ed8'}
-              />
-            </View>
-            <View
-              style={[
-                styles.turnAssistantBubble,
-                error && styles.turnAssistantBubbleError,
-              ]}
-            >
-              <Markdown
-                markdownit={markdownParser}
-                style={error ? markdownErrorStyles : markdownStyles}
-                onLinkPress={(url) => {
-                  void Linking.openURL(url).catch(() => {});
-                  return false;
-                }}
-              >
-                {assistantText}
-              </Markdown>
-            </View>
-          </View>
-          <View style={styles.historyMetaRow}>
-            <View
-              style={[
-                styles.historyMetaDot,
-                waiting
-                  ? styles.historyMetaDotWaiting
-                  : error
-                    ? styles.historyMetaDotError
-                    : styles.historyMetaDotOk,
-              ]}
-            />
-            <Text
-              style={styles.historyMetaText}
-              maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-            >
-              {turnTime}
-            </Text>
-          </View>
-        </View>
-      );
-    },
-    [
-      isDarkTheme,
-      markdownErrorStyles,
-      markdownParser,
-      markdownStyles,
-      showHistoryDateDivider,
-      styles,
-    ],
-  );
-  const historyItemKeyExtractor = useCallback((item: HistoryListItem) => item.id, []);
 
   useEffect(() => {
     if (showKeyboardActionBar) {
@@ -3394,142 +3147,53 @@ function AppContent() {
           />
         ) : null}
         <View style={styles.main}>
-          {showHistoryCard ? (
-            <View style={[styles.card, styles.historyCard, styles.historyCardFlat]}>
-              {showHistoryRefreshButton ? (
-                <Pressable
-                  style={[
-                    styles.iconButton,
-                    styles.historyRefreshButtonFloating,
-                    (!isGatewayConnected || isSessionHistoryLoading) &&
-                      styles.iconButtonDisabled,
-                  ]}
-                  hitSlop={7}
-                  accessibilityRole="button"
-                  accessibilityLabel="Refresh current session history"
-                  onPress={handleRefreshHistory}
-                  disabled={!isGatewayConnected || isSessionHistoryLoading}
-                >
-                  <Ionicons
-                    name="refresh-outline"
-                    size={15}
-                    color={isDarkTheme ? '#bccae2' : '#707070'}
-                  />
-                </Pressable>
-              ) : null}
-              {showHistoryUpdatedMeta ? (
-                <View style={styles.historyMetaTopRow}>
-                  <Text
-                    style={styles.historyMetaTopText}
-                    maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                    numberOfLines={1}
-                  >
-                    {historyUpdatedLabel}
-                  </Text>
-                </View>
-              ) : null}
-              <FlatList
-                ref={historyScrollRef}
-                data={historyItems}
-                keyExtractor={historyItemKeyExtractor}
-                renderItem={renderHistoryItem}
-                contentContainerStyle={[
-                  styles.chatList,
-                  { paddingBottom: historyListBottomPadding },
-                  showScrollToBottomButton && styles.chatListWithScrollButton,
-                ]}
-                ListEmptyComponent={
-                  <Text
-                    style={styles.placeholder}
-                    maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                  >
-                    {isHomeComposingMode ? 'No messages yet.' : 'Conversation history appears here.'}
-                  </Text>
-                }
-                keyboardShouldPersistTaps="handled"
-                keyboardDismissMode="on-drag"
-                onScroll={handleHistoryScroll}
-                scrollEventThrottle={16}
-                onContentSizeChange={() => {
-                  if (historyAutoScrollRef.current) {
-                    scrollHistoryToBottom(false);
-                  }
-                }}
-                onLayout={() => {
-                  if (historyAutoScrollRef.current) {
-                    scrollHistoryToBottom(false);
-                  }
-                }}
-                removeClippedSubviews={Platform.OS === 'android'}
-                initialNumToRender={12}
-                maxToRenderPerBatch={8}
-                windowSize={7}
-              />
-              {showHistoryScrollButton ? (
-                <Pressable
-                  style={[styles.iconButton, styles.historyScrollToBottomButtonFloating]}
-                  hitSlop={8}
-                  accessibilityRole="button"
-                  accessibilityLabel="Scroll history to the latest message"
-                  onPress={handleScrollHistoryToBottom}
-                >
-                  <Ionicons
-                    name="chevron-down-outline"
-                    size={17}
-                    color={isDarkTheme ? '#bccae2' : '#707070'}
-                  />
-                </Pressable>
-              ) : null}
-            </View>
-          ) : null}
-          <View
-            style={[
-              styles.card,
-              isRecognizing && styles.recordingCard,
-              isTranscriptEditingWithKeyboard && styles.transcriptCardExpanded,
-              shouldUseCompactTranscriptCard && styles.transcriptCardCompact,
-            ]}
-          >
-            <View
-              style={[
-                styles.transcriptEditor,
-                isTranscriptEditingWithKeyboard && styles.transcriptEditorExpanded,
-                shouldUseCompactTranscriptCard && styles.transcriptEditorCompact,
-              ]}
-            >
-              <TextInput
-                style={[
-                  styles.transcriptInput,
-                  focusedField === 'transcript' && styles.inputFocused,
-                  isRecognizing && styles.transcriptInputDisabled,
-                  isTranscriptEditingWithKeyboard && styles.transcriptInputExpanded,
-                  shouldUseCompactTranscriptCard && styles.transcriptInputCompact,
-                ]}
-                maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                value={transcript}
-                onChangeText={(value) => {
-                  setTranscript(value);
-                  setInterimTranscript('');
-                }}
-                placeholder={transcriptPlaceholder}
-                placeholderTextColor={placeholderColor}
-                multiline
-                textAlignVertical="top"
-                editable={!isRecognizing}
-                onFocus={() => setFocusedField('transcript')}
-                onBlur={() =>
-                  setFocusedField((current) =>
-                    current === 'transcript' ? null : current,
-                  )
-                }
-              />
-              {interimTranscript ? (
-                <Text style={styles.interimText} maxFontSizeMultiplier={MAX_TEXT_SCALE}>
-                  Live: {interimTranscript}
-                </Text>
-              ) : null}
-            </View>
-          </View>
+          <HistoryTimelineCard
+            styles={styles}
+            isDarkTheme={isDarkTheme}
+            showHistoryCard={showHistoryCard}
+            showHistoryRefreshButton={showHistoryRefreshButton}
+            isGatewayConnected={isGatewayConnected}
+            isSessionHistoryLoading={isSessionHistoryLoading}
+            onRefreshHistory={handleRefreshHistory}
+            showHistoryUpdatedMeta={showHistoryUpdatedMeta}
+            historyUpdatedLabel={historyUpdatedLabel}
+            historyScrollRef={historyScrollRef}
+            historyItems={historyItems}
+            historyListBottomPadding={historyListBottomPadding}
+            showScrollToBottomButton={showScrollToBottomButton}
+            showHistoryScrollButton={showHistoryScrollButton}
+            isHomeComposingMode={isHomeComposingMode}
+            showHistoryDateDivider={showHistoryDateDivider}
+            onHistoryScroll={handleHistoryScroll}
+            onHistoryAutoScroll={() => {
+              if (historyAutoScrollRef.current) {
+                scrollHistoryToBottom(false);
+              }
+            }}
+            onHistoryLayoutAutoScroll={() => {
+              if (historyAutoScrollRef.current) {
+                scrollHistoryToBottom(false);
+              }
+            }}
+            onScrollToBottom={handleScrollHistoryToBottom}
+            maxTextScale={MAX_TEXT_SCALE}
+            maxTextScaleTight={MAX_TEXT_SCALE_TIGHT}
+          />
+          <TranscriptComposerCard
+            styles={styles}
+            isRecognizing={isRecognizing}
+            isTranscriptEditingWithKeyboard={isTranscriptEditingWithKeyboard}
+            shouldUseCompactTranscriptCard={shouldUseCompactTranscriptCard}
+            focusedField={focusedField}
+            transcript={transcript}
+            transcriptPlaceholder={transcriptPlaceholder}
+            placeholderColor={placeholderColor}
+            interimTranscript={interimTranscript}
+            maxTextScale={MAX_TEXT_SCALE}
+            onTranscriptChange={handleTranscriptChange}
+            onFocusTranscript={handleTranscriptFocus}
+            onBlurTranscript={handleTranscriptBlur}
+          />
         </View>
 
         <View
