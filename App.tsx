@@ -17,7 +17,6 @@ import {
 } from 'react-native';
 import {
   ExpoSpeechRecognitionModule,
-  useSpeechRecognitionEvent,
 } from 'expo-speech-recognition';
 import {
   setStorage,
@@ -88,8 +87,6 @@ import {
   textFromUnknown,
   dedupeLines,
   errorMessage,
-  normalizeSpeechErrorCode,
-  isSpeechAbortLikeError,
   sessionDisplayName,
   extractTimestampFromUnknown,
   normalizeChatEventState,
@@ -107,6 +104,7 @@ import { useSessionRuntime } from './src/ios-runtime/useSessionRuntime';
 import { useGatewayConnectionFlow } from './src/ios-runtime/useGatewayConnectionFlow';
 import { useOutboxRuntime } from './src/ios-runtime/useOutboxRuntime';
 import { useSessionHistoryRuntime } from './src/ios-runtime/useSessionHistoryRuntime';
+import { useSpeechRuntime } from './src/ios-runtime/useSpeechRuntime';
 import {
   useRuntimePersistenceEffects,
   useRuntimeUiEffects,
@@ -798,50 +796,6 @@ function AppContent() {
     };
   }, [setKeyboardState]);
 
-  useSpeechRecognitionEvent('start', () => {
-    expectedSpeechStopRef.current = false;
-    setIsRecognizing(true);
-    setSpeechError(null);
-    void triggerHaptic('record-start');
-  });
-
-  useSpeechRecognitionEvent('end', () => {
-    expectedSpeechStopRef.current = false;
-    setIsRecognizing(false);
-    void triggerHaptic('record-stop');
-  });
-
-  useSpeechRecognitionEvent('result', (event) => {
-    const text = event.results[0]?.transcript?.trim() ?? '';
-    if (!text) return;
-
-    if (event.isFinal) {
-      setTranscript((prev) => (prev ? `${prev}\n${text}` : text));
-      setInterimTranscript('');
-      return;
-    }
-
-    setInterimTranscript(text);
-  });
-
-  useSpeechRecognitionEvent('error', (event) => {
-    const code = normalizeSpeechErrorCode(event.error);
-    const isAbortedLike = isSpeechAbortLikeError(code);
-    const shouldIgnore =
-      isUnmountingRef.current ||
-      isAbortedLike ||
-      (expectedSpeechStopRef.current && code.length > 0);
-
-    expectedSpeechStopRef.current = false;
-    setIsRecognizing(false);
-    if (shouldIgnore) {
-      setSpeechError(null);
-      return;
-    }
-    void triggerHaptic('send-error');
-    setSpeechError(`Speech recognition error: ${errorMessage(event.error)}`);
-  });
-
   const updateChatTurn = useCallback(
     (turnId: string, updater: (turn: ChatTurn) => ChatTurn) => {
       setChatTurns((previous) =>
@@ -1178,46 +1132,16 @@ function AppContent() {
     };
   }, []);
 
-  const startRecognition = async () => {
-    if (!supportsSpeechRecognitionOnCurrentPlatform()) {
-      setSpeechError(
-        isMacDesktopRuntime()
-          ? 'macOSでは音声入力未対応です。'
-          : 'Webでは音声入力未対応です。',
-      );
-      return;
-    }
-    if (isRecognizing) return;
-
-    expectedSpeechStopRef.current = false;
-    setSpeechError(null);
-    setTranscript('');
-    setInterimTranscript('');
-
-    const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-    if (!permission.granted) {
-      setSpeechError('Microphone or speech recognition permission is not granted.');
-      return;
-    }
-
-    if (!ExpoSpeechRecognitionModule.isRecognitionAvailable()) {
-      setSpeechError('Speech recognition is not available on this device.');
-      return;
-    }
-
-    ExpoSpeechRecognitionModule.start({
-      lang: speechLang,
-      interimResults: true,
-      maxAlternatives: 1,
-      continuous: false,
-    });
-  };
-
-  const stopRecognition = () => {
-    if (!supportsSpeechRecognitionOnCurrentPlatform()) return;
-    expectedSpeechStopRef.current = true;
-    ExpoSpeechRecognitionModule.stop();
-  };
+  const { startRecognition, stopRecognition } = useSpeechRuntime({
+    speechLang,
+    isRecognizing,
+    expectedSpeechStopRef,
+    isUnmountingRef,
+    setIsRecognizing,
+    setSpeechError,
+    setTranscript,
+    setInterimTranscript,
+  });
 
   const clearTranscriptDraft = useCallback(() => {
     transcriptRef.current = '';
