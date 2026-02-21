@@ -29,8 +29,6 @@ import {
 } from './src/openclaw';
 import {
   mergeHistoryTurnsWithPendingLocal,
-  normalizeMessageForDedupe,
-  resolveSendDispatch,
   shouldAttemptFinalRecovery,
   shouldStartStartupAutoConnect,
   isIncompleteAssistantContent,
@@ -80,11 +78,6 @@ import {
   HISTORY_NOTICE_HIDE_MS,
   AUTH_TOKEN_AUTO_MASK_MS,
   BOTTOM_STATUS_COMPLETE_HOLD_MS,
-  DUPLICATE_SEND_BLOCK_MS,
-  IDEMPOTENCY_REUSE_WINDOW_MS,
-  SEND_TIMEOUT_MS,
-  OUTBOX_RETRY_BASE_MS,
-  OUTBOX_RETRY_MAX_MS,
   HISTORY_REFRESH_TIMEOUT_MS,
   getKvStore,
   MAX_TEXT_SCALE,
@@ -101,10 +94,7 @@ import {
   errorMessage,
   normalizeSpeechErrorCode,
   isSpeechAbortLikeError,
-  createTurnId,
   createSessionKey,
-  createOutboxItemId,
-  getOutboxRetryDelayMs,
   sessionDisplayName,
   extractTimestampFromUnknown,
   normalizeChatEventState,
@@ -120,6 +110,7 @@ import { useHomeUiState } from './src/ios-runtime/useHomeUiState';
 import { useGatewayEventBridge } from './src/ios-runtime/useGatewayEventBridge';
 import { useSessionRuntime } from './src/ios-runtime/useSessionRuntime';
 import { useGatewayConnectionFlow } from './src/ios-runtime/useGatewayConnectionFlow';
+import { useOutboxRuntime } from './src/ios-runtime/useOutboxRuntime';
 import { scheduleHistoryScrollToEnd } from './src/ui/history-layout';
 import ConnectionHeader from './src/ui/ios/ConnectionHeader';
 import SettingsScreenModal from './src/ui/ios/SettingsScreenModal';
@@ -1314,235 +1305,6 @@ function AppContent() {
     void loadSessionHistory(activeSessionKeyRef.current);
   }, [isGatewayConnected, loadSessionHistory, refreshSessions]);
 
-  const processOutboxQueue = useCallback(async () => {
-    if (outboxProcessingRef.current) return;
-    if (connectionStateRef.current !== 'connected') return;
-    if (isSending) return;
-
-    const client = gatewayGetClient();
-    if (!client) return;
-
-    const head = outboxQueueRef.current[0];
-    if (!head) {
-      clearOutboxRetryTimer();
-      return;
-    }
-
-    const now = Date.now();
-    if (head.nextRetryAt > now) {
-      const waitMs = head.nextRetryAt - now;
-      clearOutboxRetryTimer();
-      outboxRetryTimerRef.current = setTimeout(() => {
-        outboxRetryTimerRef.current = null;
-        void processOutboxQueue();
-      }, waitMs);
-      return;
-    }
-
-    outboxProcessingRef.current = true;
-    clearOutboxRetryTimer();
-
-    const healthy = await runGatewayHealthCheck({ silent: true });
-    if (connectionStateRef.current !== 'connected') {
-      outboxProcessingRef.current = false;
-      return;
-    }
-    if (!healthy) {
-      setOutboxQueue((previous) => {
-        if (previous.length === 0 || previous[0].id !== head.id) return previous;
-        const retryCount = previous[0].retryCount + 1;
-        const nextRetryAt = Date.now() + getOutboxRetryDelayMs(retryCount);
-        return [
-          {
-            ...previous[0],
-            retryCount,
-            nextRetryAt,
-            lastError: 'health check failed',
-          },
-          ...previous.slice(1),
-        ];
-      });
-      setGatewayError('Gateway health check failed. Retrying queued message...');
-      outboxProcessingRef.current = false;
-      return;
-    }
-
-    setGatewayError(null);
-    runGatewayRuntimeAction({ type: 'SEND_REQUEST' });
-    pendingTurnIdRef.current = head.turnId;
-    updateChatTurn(head.turnId, (turn) => ({
-      ...turn,
-      state: 'sending',
-      assistantText:
-        turn.assistantText === 'Waiting for connection...'
-          ? ''
-          : turn.assistantText,
-    }));
-
-    try {
-      const result = await client.chatSend(head.sessionKey, head.message, {
-        timeoutMs: SEND_TIMEOUT_MS,
-        idempotencyKey: head.idempotencyKey,
-      });
-      void triggerHaptic('send-success');
-      activeRunIdRef.current = result.runId;
-      setActiveRunId(result.runId);
-      runIdToTurnIdRef.current.set(result.runId, head.turnId);
-      pendingTurnIdRef.current = null;
-      setOutboxQueue((previous) => previous.filter((item) => item.id !== head.id));
-      updateChatTurn(head.turnId, (turn) => ({
-        ...turn,
-        runId: result.runId,
-        state: 'queued',
-      }));
-      void refreshSessions();
-    } catch (err) {
-      const messageText = errorMessage(err);
-      void triggerHaptic('send-error');
-      pendingTurnIdRef.current = null;
-      runGatewayRuntimeAction({ type: 'SEND_ERROR' });
-      setOutboxQueue((previous) => {
-        const index = previous.findIndex((item) => item.id === head.id);
-        if (index < 0) return previous;
-        const current = previous[index];
-        const retryCount = current.retryCount + 1;
-        const nextRetryAt = Date.now() + getOutboxRetryDelayMs(retryCount);
-        const nextQueue = [...previous];
-        nextQueue[index] = {
-          ...current,
-          retryCount,
-          nextRetryAt,
-          lastError: messageText,
-        };
-        return nextQueue;
-      });
-      setGatewayError(`Send delayed: ${messageText}. Auto retrying...`);
-      updateChatTurn(head.turnId, (turn) => ({
-        ...turn,
-        state: 'queued',
-        assistantText: `Retrying automatically... (${messageText})`,
-      }));
-    } finally {
-      outboxProcessingRef.current = false;
-    }
-  }, [
-    clearOutboxRetryTimer,
-    isSending,
-    refreshSessions,
-    gatewayGetClient,
-    runGatewayHealthCheck,
-    runGatewayRuntimeAction,
-    updateChatTurn,
-  ]);
-
-  useEffect(() => {
-    if (outboxQueue.length === 0) {
-      clearOutboxRetryTimer();
-      return;
-    }
-    if (connectionState !== 'connected') {
-      clearOutboxRetryTimer();
-      return;
-    }
-    if (isSending) return;
-
-    const head = outboxQueue[0];
-    const waitMs = Math.max(0, head.nextRetryAt - Date.now());
-    clearOutboxRetryTimer();
-    if (waitMs > 0) {
-      outboxRetryTimerRef.current = setTimeout(() => {
-        outboxRetryTimerRef.current = null;
-        void processOutboxQueue();
-      }, waitMs);
-      return;
-    }
-
-    void processOutboxQueue();
-  }, [
-    clearOutboxRetryTimer,
-    connectionState,
-    isSending,
-    outboxQueue,
-    processOutboxQueue,
-  ]);
-
-  const sendToGateway = useCallback(
-    async (overrideText?: string) => {
-      if (isSending) return;
-
-      const sessionKey = activeSessionKeyRef.current;
-      clearMissingResponseRecoveryState(sessionKey);
-      const message =
-        (overrideText ?? transcriptRef.current ?? '').trim() ||
-        (interimTranscriptRef.current ?? '').trim();
-      if (!message) {
-        setGatewayError('No text to send. Please record your voice first.');
-        return;
-      }
-      const dispatch = resolveSendDispatch(
-        sendFingerprintRef.current,
-        {
-          sessionKey,
-          message,
-          now: Date.now(),
-        },
-        {
-          duplicateBlockMs: DUPLICATE_SEND_BLOCK_MS,
-          reuseWindowMs: IDEMPOTENCY_REUSE_WINDOW_MS,
-        },
-      );
-      if (dispatch.blocked) {
-        setGatewayError('This message was already sent. Please wait a moment.');
-        return;
-      }
-      const { idempotencyKey } = dispatch;
-      sendFingerprintRef.current = dispatch.nextFingerprint;
-
-      const turnId = createTurnId();
-      const createdAt = Date.now();
-      const outboxItem: OutboxQueueItem = {
-        id: createOutboxItemId(),
-        sessionKey,
-        message,
-        turnId,
-        idempotencyKey,
-        createdAt,
-        retryCount: 0,
-        nextRetryAt: createdAt,
-        lastError: null,
-      };
-
-      setChatTurns((previous) => [
-        ...previous,
-        {
-          id: turnId,
-          userText: message,
-          assistantText:
-            connectionState === 'connected'
-              ? ''
-              : 'Waiting for connection...',
-          state: 'queued',
-          createdAt,
-        },
-      ]);
-      setOutboxQueue((previous) => [...previous, outboxItem]);
-
-      transcriptRef.current = '';
-      interimTranscriptRef.current = '';
-      setTranscript('');
-      setInterimTranscript('');
-
-      if (connectionState === 'connected') {
-        setGatewayError(null);
-        void processOutboxQueue();
-      } else {
-        setGatewayEventState('queued');
-        setGatewayError('Message queued. Connect to send automatically.');
-      }
-    },
-    [clearMissingResponseRecoveryState, connectionState, isSending, processOutboxQueue],
-  );
-
   const { handleChatEvent } = useGatewayEventBridge({
     activeSessionKeyRef,
     activeRunIdRef,
@@ -1574,44 +1336,75 @@ function AppContent() {
   });
 
   const { disconnectGateway, connectGateway } = useGatewayConnectionFlow({
-      gatewayUrl,
-      authToken,
-      settingsReady,
-      gatewayContextConnectDiagnostic,
-      gatewayConnect,
-      gatewayDisconnect,
-      gatewayGetClient,
-      gatewayUrlRef,
-      connectionStateRef,
-      isUnmountingRef,
-      subscriptionsRef,
-      historySyncTimerRef,
-      historySyncRequestRef,
-      outboxProcessingRef,
-      startupAutoConnectAttemptRef,
-      startupAutoConnectRetryTimerRef,
-      activeRunIdRef,
-      pendingTurnIdRef,
-      runIdToTurnIdRef,
-      setActiveRunId,
-      setGatewayError,
-      setGatewayConnectDiagnostic,
-      setSessionsError,
-      setGatewayEventState,
-      setIsSettingsPanelOpen,
-      setIsStartupAutoConnecting,
-      setIsSessionOperationPending,
-      setIsBottomCompletePulse,
-      clearFinalResponseRecoveryTimer,
-      clearMissingResponseRecoveryState,
-      clearStartupAutoConnectRetryTimer,
-      clearBottomCompletePulseTimer,
-      clearOutboxRetryTimer,
-      invalidateRefreshEpoch,
-      forceMaskAuthToken,
-      runGatewayRuntimeAction,
-      handleChatEvent,
-    });
+    gatewayUrl,
+    authToken,
+    settingsReady,
+    gatewayContextConnectDiagnostic,
+    gatewayConnect,
+    gatewayDisconnect,
+    gatewayGetClient,
+    gatewayUrlRef,
+    connectionStateRef,
+    isUnmountingRef,
+    subscriptionsRef,
+    historySyncTimerRef,
+    historySyncRequestRef,
+    outboxProcessingRef,
+    startupAutoConnectAttemptRef,
+    startupAutoConnectRetryTimerRef,
+    activeRunIdRef,
+    pendingTurnIdRef,
+    runIdToTurnIdRef,
+    setActiveRunId,
+    setGatewayError,
+    setGatewayConnectDiagnostic,
+    setSessionsError,
+    setGatewayEventState,
+    setIsSettingsPanelOpen,
+    setIsStartupAutoConnecting,
+    setIsSessionOperationPending,
+    setIsBottomCompletePulse,
+    clearFinalResponseRecoveryTimer,
+    clearMissingResponseRecoveryState,
+    clearStartupAutoConnectRetryTimer,
+    clearBottomCompletePulseTimer,
+    clearOutboxRetryTimer,
+    invalidateRefreshEpoch,
+    forceMaskAuthToken,
+    runGatewayRuntimeAction,
+    handleChatEvent,
+  });
+
+  const { sendToGateway } = useOutboxRuntime({
+    isSending,
+    connectionState,
+    outboxQueue,
+    outboxQueueRef,
+    outboxProcessingRef,
+    outboxRetryTimerRef,
+    connectionStateRef,
+    activeSessionKeyRef,
+    transcriptRef,
+    interimTranscriptRef,
+    sendFingerprintRef,
+    pendingTurnIdRef,
+    activeRunIdRef,
+    runIdToTurnIdRef,
+    gatewayGetClient,
+    runGatewayHealthCheck,
+    runGatewayRuntimeAction,
+    updateChatTurn,
+    refreshSessions,
+    clearOutboxRetryTimer,
+    clearMissingResponseRecoveryState,
+    setGatewayError,
+    setGatewayEventState,
+    setOutboxQueue,
+    setChatTurns,
+    setTranscript,
+    setInterimTranscript,
+    setActiveRunId,
+  });
 
   useEffect(() => {
     if (!localStateReady) {
