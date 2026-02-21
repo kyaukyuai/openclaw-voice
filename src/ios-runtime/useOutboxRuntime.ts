@@ -1,23 +1,20 @@
 import { useCallback, useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import type { ConnectionState, GatewayClient } from '../openclaw';
 import type { ChatTurn, OutboxQueueItem } from '../types';
-import { resolveSendDispatch } from '../ui/runtime-logic';
 import {
-  DUPLICATE_SEND_BLOCK_MS,
-  IDEMPOTENCY_REUSE_WINDOW_MS,
   SEND_TIMEOUT_MS,
   createOutboxItemId,
   createTurnId,
-  getOutboxRetryDelayMs,
 } from '../utils';
 import { errorMessage, triggerHaptic } from '../utils';
-
-type SendFingerprint = {
-  sessionKey: string;
-  message: string;
-  sentAt: number;
-  idempotencyKey: string;
-};
+import {
+  applyOutboxHealthCheckFailure,
+  applyOutboxSendFailure,
+  applyOutboxSendSuccess,
+  createQueuedOutboxPayload,
+  resolveOutboxSendAction,
+  type SendFingerprint,
+} from './outbox-runtime-logic';
 
 type UseOutboxRuntimeInput = {
   isSending: boolean;
@@ -85,20 +82,7 @@ export function useOutboxRuntime(input: UseOutboxRuntimeInput) {
       return;
     }
     if (!healthy) {
-      input.setOutboxQueue((previous) => {
-        if (previous.length === 0 || previous[0].id !== head.id) return previous;
-        const retryCount = previous[0].retryCount + 1;
-        const nextRetryAt = Date.now() + getOutboxRetryDelayMs(retryCount);
-        return [
-          {
-            ...previous[0],
-            retryCount,
-            nextRetryAt,
-            lastError: 'health check failed',
-          },
-          ...previous.slice(1),
-        ];
-      });
+      input.setOutboxQueue((previous) => applyOutboxHealthCheckFailure(previous, head.id));
       input.setGatewayError('Gateway health check failed. Retrying queued message...');
       input.outboxProcessingRef.current = false;
       return;
@@ -124,7 +108,7 @@ export function useOutboxRuntime(input: UseOutboxRuntimeInput) {
       input.setActiveRunId(result.runId);
       input.runIdToTurnIdRef.current.set(result.runId, head.turnId);
       input.pendingTurnIdRef.current = null;
-      input.setOutboxQueue((previous) => previous.filter((item) => item.id !== head.id));
+      input.setOutboxQueue((previous) => applyOutboxSendSuccess(previous, head.id));
       input.updateChatTurn(head.turnId, (turn) => ({
         ...turn,
         runId: result.runId,
@@ -136,21 +120,9 @@ export function useOutboxRuntime(input: UseOutboxRuntimeInput) {
       void triggerHaptic('send-error');
       input.pendingTurnIdRef.current = null;
       input.runGatewayRuntimeAction({ type: 'SEND_ERROR' });
-      input.setOutboxQueue((previous) => {
-        const index = previous.findIndex((item) => item.id === head.id);
-        if (index < 0) return previous;
-        const current = previous[index];
-        const retryCount = current.retryCount + 1;
-        const nextRetryAt = Date.now() + getOutboxRetryDelayMs(retryCount);
-        const nextQueue = [...previous];
-        nextQueue[index] = {
-          ...current,
-          retryCount,
-          nextRetryAt,
-          lastError: messageText,
-        };
-        return nextQueue;
-      });
+      input.setOutboxQueue((previous) =>
+        applyOutboxSendFailure(previous, head.id, messageText),
+      );
       input.setGatewayError(`Send delayed: ${messageText}. Auto retrying...`);
       input.updateChatTurn(head.turnId, (turn) => ({
         ...turn,
@@ -196,61 +168,44 @@ export function useOutboxRuntime(input: UseOutboxRuntimeInput) {
 
   const sendToGateway = useCallback(
     async (overrideText?: string) => {
-      if (input.isSending) return;
-
       const sessionKey = input.activeSessionKeyRef.current;
       input.clearMissingResponseRecoveryState(sessionKey);
-      const message =
-        (overrideText ?? input.transcriptRef.current ?? '').trim() ||
-        (input.interimTranscriptRef.current ?? '').trim();
-      if (!message) {
-        input.setGatewayError('No text to send. Please record your voice first.');
+      const sendAction = resolveOutboxSendAction({
+        isSending: input.isSending,
+        overrideText,
+        transcriptText: input.transcriptRef.current,
+        interimTranscriptText: input.interimTranscriptRef.current,
+        sessionKey,
+        previousFingerprint: input.sendFingerprintRef.current,
+      });
+
+      if (sendAction.type === 'noop') {
+        if (sendAction.errorMessage) {
+          input.setGatewayError(sendAction.errorMessage);
+        }
         return;
       }
-      const dispatch = resolveSendDispatch(
-        input.sendFingerprintRef.current,
-        {
-          sessionKey,
-          message,
-          now: Date.now(),
-        },
-        {
-          duplicateBlockMs: DUPLICATE_SEND_BLOCK_MS,
-          reuseWindowMs: IDEMPOTENCY_REUSE_WINDOW_MS,
-        },
-      );
-      if (dispatch.blocked) {
-        input.setGatewayError('This message was already sent. Please wait a moment.');
+
+      if (sendAction.type === 'blocked-duplicate') {
+        input.sendFingerprintRef.current = sendAction.nextFingerprint;
+        input.setGatewayError(sendAction.errorMessage);
         return;
       }
-      const { idempotencyKey } = dispatch;
-      input.sendFingerprintRef.current = dispatch.nextFingerprint;
 
       const turnId = createTurnId();
       const createdAt = Date.now();
-      const outboxItem: OutboxQueueItem = {
-        id: createOutboxItemId(),
+      input.sendFingerprintRef.current = sendAction.nextFingerprint;
+      const { turn, outboxItem } = createQueuedOutboxPayload({
         sessionKey,
-        message,
+        message: sendAction.message,
+        idempotencyKey: sendAction.idempotencyKey,
         turnId,
-        idempotencyKey,
+        outboxItemId: createOutboxItemId(),
         createdAt,
-        retryCount: 0,
-        nextRetryAt: createdAt,
-        lastError: null,
-      };
+        connectionState: input.connectionState,
+      });
 
-      input.setChatTurns((previous) => [
-        ...previous,
-        {
-          id: turnId,
-          userText: message,
-          assistantText:
-            input.connectionState === 'connected' ? '' : 'Waiting for connection...',
-          state: 'queued',
-          createdAt,
-        },
-      ]);
+      input.setChatTurns((previous) => [...previous, turn]);
       input.setOutboxQueue((previous) => [...previous, outboxItem]);
 
       input.transcriptRef.current = '';
