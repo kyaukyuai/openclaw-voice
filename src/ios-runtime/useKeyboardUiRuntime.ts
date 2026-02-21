@@ -4,6 +4,10 @@ import {
   Keyboard,
   Platform,
 } from 'react-native';
+import {
+  resolveKeyboardBarAnimation,
+  resolveKeyboardEventNames,
+} from './keyboard-ui-runtime-logic';
 
 type UseKeyboardUiRuntimeInput = {
   showKeyboardActionBar: boolean;
@@ -19,8 +23,7 @@ export function useKeyboardUiRuntime({
   const keyboardBarAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const { showEvent, hideEvent } = resolveKeyboardEventNames(Platform.OS);
 
     const showSub = Keyboard.addListener(showEvent, (event) => {
       const height = event.endCoordinates?.height ?? 0;
@@ -41,9 +44,10 @@ export function useKeyboardUiRuntime({
       setIsKeyboardBarMounted(true);
     }
     keyboardBarAnim.stopAnimation();
+    const animation = resolveKeyboardBarAnimation(showKeyboardActionBar);
     Animated.timing(keyboardBarAnim, {
-      toValue: showKeyboardActionBar ? 1 : 0,
-      duration: showKeyboardActionBar ? 140 : 120,
+      toValue: animation.toValue,
+      duration: animation.duration,
       useNativeDriver: true,
     }).start(({ finished }) => {
       if (finished && !showKeyboardActionBar) {

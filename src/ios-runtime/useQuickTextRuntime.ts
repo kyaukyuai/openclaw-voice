@@ -1,6 +1,12 @@
 import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import type { QuickTextButtonSide } from '../types';
 import { triggerHaptic } from '../utils';
+import {
+  appendQuickText,
+  normalizeQuickText,
+  shouldConsumeQuickTextPress,
+  shouldInsertQuickText,
+} from './quick-text-runtime-logic';
 
 type UseQuickTextRuntimeInput = {
   isRecognizing: boolean;
@@ -17,12 +23,10 @@ type UseQuickTextRuntimeInput = {
 export function useQuickTextRuntime(input: UseQuickTextRuntimeInput) {
   const insertQuickText = useCallback(
     (rawText: string) => {
-      const nextText = rawText.trim();
-      if (!nextText || input.isRecognizing) return;
+      const nextText = normalizeQuickText(rawText);
+      if (!shouldInsertQuickText(nextText, input.isRecognizing)) return;
       input.setTranscript((previous) => {
-        const current = previous.trimEnd();
-        if (!current) return nextText;
-        return `${current}\n${nextText}`;
+        return appendQuickText(previous, nextText);
       });
       input.setInterimTranscript('');
       void triggerHaptic('button-press');
@@ -44,7 +48,12 @@ export function useQuickTextRuntime(input: UseQuickTextRuntimeInput) {
 
   const handleQuickTextPress = useCallback(
     (side: QuickTextButtonSide, rawText: string) => {
-      if (input.quickTextLongPressSideRef.current === side) {
+      if (
+        shouldConsumeQuickTextPress({
+          activeLongPressSide: input.quickTextLongPressSideRef.current,
+          pressedSide: side,
+        })
+      ) {
         input.quickTextLongPressSideRef.current = null;
         return;
       }

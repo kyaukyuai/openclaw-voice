@@ -17,6 +17,11 @@ import {
   supportsSpeechRecognitionOnCurrentPlatform,
   triggerHaptic,
 } from '../utils';
+import {
+  appendFinalSpeechTranscript,
+  getSpeechUnsupportedMessage,
+  shouldIgnoreSpeechError,
+} from './speech-runtime-logic';
 
 type UseSpeechRuntimeInput = {
   speechLang: SpeechLang;
@@ -59,7 +64,7 @@ export function useSpeechRuntime(input: UseSpeechRuntimeInput) {
     if (!text) return;
 
     if (event.isFinal) {
-      setTranscript((prev) => (prev ? `${prev}\n${text}` : text));
+      setTranscript((prev) => appendFinalSpeechTranscript(prev, text));
       setInterimTranscript('');
       return;
     }
@@ -70,10 +75,12 @@ export function useSpeechRuntime(input: UseSpeechRuntimeInput) {
   useSpeechRecognitionEvent('error', (event) => {
     const code = normalizeSpeechErrorCode(event.error);
     const isAbortedLike = isSpeechAbortLikeError(code);
-    const shouldIgnore =
-      isUnmountingRef.current ||
-      isAbortedLike ||
-      (expectedSpeechStopRef.current && code.length > 0);
+    const shouldIgnore = shouldIgnoreSpeechError({
+      isUnmounting: isUnmountingRef.current,
+      isAbortedLike,
+      expectedSpeechStop: expectedSpeechStopRef.current,
+      code,
+    });
 
     expectedSpeechStopRef.current = false;
     setIsRecognizing(false);
@@ -87,11 +94,7 @@ export function useSpeechRuntime(input: UseSpeechRuntimeInput) {
 
   const startRecognition = useCallback(async () => {
     if (!supportsSpeechRecognitionOnCurrentPlatform()) {
-      setSpeechError(
-        isMacDesktopRuntime()
-          ? 'macOSでは音声入力未対応です。'
-          : 'Webでは音声入力未対応です。',
-      );
+      setSpeechError(getSpeechUnsupportedMessage(isMacDesktopRuntime()));
       return;
     }
     if (isRecognizing) return;

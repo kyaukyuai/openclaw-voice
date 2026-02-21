@@ -1,6 +1,9 @@
 import { useEffect, type MutableRefObject } from 'react';
 import type { ConnectionState } from '../openclaw';
-import { shouldStartStartupAutoConnect } from '../ui/runtime-logic';
+import {
+  clearLifecycleCleanupState,
+  shouldTriggerLifecycleAutoConnect,
+} from './app-lifecycle-runtime-logic';
 
 type TimerRef = MutableRefObject<ReturnType<typeof setTimeout> | null>;
 
@@ -41,19 +44,11 @@ type UseAppLifecycleRuntimeInput = {
   abortSpeechRecognitionIfSupported: () => void;
 };
 
-function clearTimer(timerRef: TimerRef) {
-  if (!timerRef.current) return;
-  clearTimeout(timerRef.current);
-  timerRef.current = null;
-}
-
 export function useAppLifecycleRuntime(input: UseAppLifecycleRuntimeInput) {
   useEffect(() => {
-    if (!input.localStateReady) {
-      return;
-    }
     if (
-      !shouldStartStartupAutoConnect({
+      !shouldTriggerLifecycleAutoConnect({
+        localStateReady: input.localStateReady,
         settingsReady: input.settingsReady,
         alreadyAttempted: input.startupAutoConnectAttemptedRef.current,
         gatewayUrl: input.gatewayUrl,
@@ -77,26 +72,26 @@ export function useAppLifecycleRuntime(input: UseAppLifecycleRuntimeInput) {
 
   useEffect(() => {
     return () => {
-      input.isUnmountingRef.current = true;
+      clearLifecycleCleanupState({
+        isUnmountingRef: input.isUnmountingRef,
+        expectedSpeechStopRef: input.expectedSpeechStopRef,
+        holdStartTimerRef: input.holdStartTimerRef,
+        historySyncTimerRef: input.historySyncTimerRef,
+        historySyncRequestRef: input.historySyncRequestRef,
+        historyNoticeTimerRef: input.historyNoticeTimerRef,
+        bottomCompletePulseTimerRef: input.bottomCompletePulseTimerRef,
+        authTokenMaskTimerRef: input.authTokenMaskTimerRef,
+        outboxRetryTimerRef: input.outboxRetryTimerRef,
+        startupAutoConnectRetryTimerRef: input.startupAutoConnectRetryTimerRef,
+        finalResponseRecoveryTimerRef: input.finalResponseRecoveryTimerRef,
+        missingResponseRecoveryTimerRef: input.missingResponseRecoveryTimerRef,
+        missingResponseRecoveryRequestRef: input.missingResponseRecoveryRequestRef,
+        settingsFocusScrollTimerRef: input.settingsFocusScrollTimerRef,
+        quickTextTooltipTimerRef: input.quickTextTooltipTimerRef,
+        quickTextLongPressResetTimerRef: input.quickTextLongPressResetTimerRef,
+        quickTextLongPressSideRef: input.quickTextLongPressSideRef,
+      });
       input.invalidateRefreshEpoch();
-      input.expectedSpeechStopRef.current = true;
-
-      clearTimer(input.holdStartTimerRef);
-      clearTimer(input.historySyncTimerRef);
-      input.historySyncRequestRef.current = null;
-      clearTimer(input.historyNoticeTimerRef);
-      clearTimer(input.bottomCompletePulseTimerRef);
-      clearTimer(input.authTokenMaskTimerRef);
-      clearTimer(input.outboxRetryTimerRef);
-      clearTimer(input.startupAutoConnectRetryTimerRef);
-      clearTimer(input.finalResponseRecoveryTimerRef);
-      clearTimer(input.missingResponseRecoveryTimerRef);
-      input.missingResponseRecoveryRequestRef.current = null;
-      clearTimer(input.settingsFocusScrollTimerRef);
-      clearTimer(input.quickTextTooltipTimerRef);
-      clearTimer(input.quickTextLongPressResetTimerRef);
-      input.quickTextLongPressSideRef.current = null;
-
       input.disconnectGateway();
       input.abortSpeechRecognitionIfSupported();
     };

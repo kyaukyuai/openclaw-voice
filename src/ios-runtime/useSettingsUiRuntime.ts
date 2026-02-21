@@ -12,6 +12,10 @@ import {
 } from 'react-native';
 import type { QuickTextButtonSide, QuickTextFocusField } from '../types';
 import { QUICK_TEXT_TOOLTIP_HIDE_MS } from '../utils';
+import {
+  getSettingsFieldVisibleDelayMs,
+  getSettingsKeyboardAdditionalOffset,
+} from './settings-ui-runtime-logic';
 
 type TimerRef = ReturnType<typeof setTimeout> | null;
 
@@ -84,14 +88,14 @@ export function useSettingsUiRuntime(input: UseSettingsUiRuntimeInput) {
       if (responder?.scrollResponderScrollNativeHandleToKeyboard) {
         responder.scrollResponderScrollNativeHandleToKeyboard(
           inputHandle,
-          Platform.OS === 'ios' ? 28 : 16,
+          getSettingsKeyboardAdditionalOffset(Platform.OS),
           true,
         );
         return;
       }
 
       scrollView.scrollToEnd({ animated: true });
-    }, Platform.OS === 'ios' ? 240 : 120);
+    }, getSettingsFieldVisibleDelayMs(Platform.OS));
   }, []);
 
   return {
