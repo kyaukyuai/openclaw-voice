@@ -8,11 +8,8 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   LogBox,
-  findNodeHandle,
   Platform,
   SafeAreaView,
-  ScrollView,
-  TextInput,
   View,
 } from 'react-native';
 import {
@@ -36,7 +33,6 @@ import type {
   FocusField,
   GatewayConnectDiagnostic,
   QuickTextButtonSide,
-  QuickTextFocusField,
   QuickTextIcon,
   SpeechLang,
 } from './src/types';
@@ -70,7 +66,6 @@ import {
   DEFAULT_QUICK_TEXT_RIGHT,
   DEFAULT_QUICK_TEXT_LEFT_ICON,
   DEFAULT_QUICK_TEXT_RIGHT_ICON,
-  QUICK_TEXT_TOOLTIP_HIDE_MS,
   HISTORY_NOTICE_HIDE_MS,
   AUTH_TOKEN_AUTO_MASK_MS,
   getKvStore,
@@ -105,6 +100,7 @@ import { useOutboxRuntime } from './src/ios-runtime/useOutboxRuntime';
 import { useSessionHistoryRuntime } from './src/ios-runtime/useSessionHistoryRuntime';
 import { useSpeechRuntime } from './src/ios-runtime/useSpeechRuntime';
 import { useAppLifecycleRuntime } from './src/ios-runtime/useAppLifecycleRuntime';
+import { useSettingsUiRuntime } from './src/ios-runtime/useSettingsUiRuntime';
 import {
   useRuntimePersistenceEffects,
   useRuntimeUiEffects,
@@ -514,7 +510,6 @@ function AppContent() {
   const transcriptRef = useRef('');
   const interimTranscriptRef = useRef('');
   const historyScrollRef = useRef<FlatList<HistoryListItem> | null>(null);
-  const settingsScrollRef = useRef<ScrollView | null>(null);
   const historyAutoScrollRef = useRef(true);
   const historySyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const historySyncRequestRef = useRef<{
@@ -554,21 +549,26 @@ function AppContent() {
     idempotencyKey: string;
   } | null>(null);
   const holdStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const settingsFocusScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const quickTextTooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const quickTextLongPressResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
-  const quickTextInputRefs = useRef<Record<QuickTextFocusField, TextInput | null>>({
-    'quick-text-left': null,
-    'quick-text-right': null,
-  });
-  const quickTextLongPressSideRef = useRef<QuickTextButtonSide | null>(null);
   const holdActivatedRef = useRef(false);
   const keyboardBarAnim = useRef(new Animated.Value(0)).current;
   const expectedSpeechStopRef = useRef(false);
   const isUnmountingRef = useRef(false);
   const startupAutoConnectAttemptedRef = useRef(false);
+
+  const {
+    settingsScrollRef,
+    settingsFocusScrollTimerRef,
+    quickTextTooltipTimerRef,
+    quickTextLongPressResetTimerRef,
+    quickTextInputRefs,
+    quickTextLongPressSideRef,
+    clearQuickTextLongPressResetTimer,
+    hideQuickTextTooltip,
+    scheduleQuickTextTooltipHide,
+    ensureSettingsFieldVisible,
+  } = useSettingsUiRuntime({
+    setQuickTextTooltipSide,
+  });
 
   const isGatewayConnected = connectionState === 'connected';
   const isGatewayConnecting =
@@ -1119,72 +1119,6 @@ function AppContent() {
     },
     [isRecognizing],
   );
-
-  const clearQuickTextTooltipTimer = useCallback(() => {
-    if (quickTextTooltipTimerRef.current) {
-      clearTimeout(quickTextTooltipTimerRef.current);
-      quickTextTooltipTimerRef.current = null;
-    }
-  }, []);
-
-  const clearQuickTextLongPressResetTimer = useCallback(() => {
-    if (quickTextLongPressResetTimerRef.current) {
-      clearTimeout(quickTextLongPressResetTimerRef.current);
-      quickTextLongPressResetTimerRef.current = null;
-    }
-  }, []);
-
-  const hideQuickTextTooltip = useCallback(() => {
-    clearQuickTextTooltipTimer();
-    setQuickTextTooltipSide(null);
-  }, [clearQuickTextTooltipTimer]);
-
-  const scheduleQuickTextTooltipHide = useCallback(() => {
-    clearQuickTextTooltipTimer();
-    quickTextTooltipTimerRef.current = setTimeout(() => {
-      quickTextTooltipTimerRef.current = null;
-      setQuickTextTooltipSide(null);
-    }, QUICK_TEXT_TOOLTIP_HIDE_MS);
-  }, [clearQuickTextTooltipTimer]);
-
-  const ensureSettingsFieldVisible = useCallback((field: QuickTextFocusField) => {
-    if (settingsFocusScrollTimerRef.current) {
-      clearTimeout(settingsFocusScrollTimerRef.current);
-    }
-    settingsFocusScrollTimerRef.current = setTimeout(() => {
-      settingsFocusScrollTimerRef.current = null;
-      const scrollView = settingsScrollRef.current;
-      const input = quickTextInputRefs.current[field];
-      if (!scrollView || !input) {
-        return;
-      }
-      const inputHandle = findNodeHandle(input);
-      if (!inputHandle) return;
-
-      const responder = (scrollView as unknown as {
-        getScrollResponder?: () => unknown;
-      }).getScrollResponder?.() as
-        | {
-            scrollResponderScrollNativeHandleToKeyboard?: (
-              nodeHandle: number,
-              additionalOffset?: number,
-              preventNegativeScrollOffset?: boolean,
-            ) => void;
-          }
-        | undefined;
-
-      if (responder?.scrollResponderScrollNativeHandleToKeyboard) {
-        responder.scrollResponderScrollNativeHandleToKeyboard(
-          inputHandle,
-          Platform.OS === 'ios' ? 28 : 16,
-          true,
-        );
-        return;
-      }
-
-      scrollView.scrollToEnd({ animated: true });
-    }, Platform.OS === 'ios' ? 240 : 120);
-  }, []);
 
   const {
     scheduleSessionHistorySync,
