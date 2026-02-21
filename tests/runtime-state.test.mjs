@@ -44,11 +44,16 @@ test('gatewayRuntimeReducer forces terminal state on connect/send failures', () 
     connectionState: 'connected',
     gatewayEventState: 'streaming',
     isSending: true,
+    isSessionHistoryLoading: true,
+    isMissingResponseRecoveryInFlight: true,
   };
 
   state = gatewayRuntimeReducer(state, { type: 'CONNECT_FAILED' });
   assert.equal(state.connectionState, 'disconnected');
   assert.equal(state.isSending, false);
+  assert.equal(state.isSessionHistoryLoading, false);
+  assert.equal(state.isMissingResponseRecoveryInFlight, false);
+  assert.equal(state.gatewayEventState, 'idle');
 
   state = gatewayRuntimeReducer(state, { type: 'SEND_ERROR' });
   assert.equal(state.gatewayEventState, 'error');

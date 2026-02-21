@@ -82,6 +82,9 @@ export function gatewayRuntimeReducer(
         ...state,
         connectionState: 'disconnected',
         isSending: false,
+        isSessionHistoryLoading: false,
+        isMissingResponseRecoveryInFlight: false,
+        gatewayEventState: 'idle',
       };
     case 'SEND_REQUEST':
       return {

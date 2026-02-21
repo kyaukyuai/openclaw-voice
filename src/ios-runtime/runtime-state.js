@@ -26,7 +26,14 @@ function gatewayRuntimeReducer(state, action) {
     case 'CONNECT_SUCCESS':
       return { ...state, connectionState: 'connected' };
     case 'CONNECT_FAILED':
-      return { ...state, connectionState: 'disconnected', isSending: false };
+      return {
+        ...state,
+        connectionState: 'disconnected',
+        isSending: false,
+        isSessionHistoryLoading: false,
+        isMissingResponseRecoveryInFlight: false,
+        gatewayEventState: 'idle',
+      };
     case 'SEND_REQUEST':
       return { ...state, isSending: true, gatewayEventState: 'sending' };
     case 'SEND_STREAMING':

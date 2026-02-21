@@ -220,6 +220,26 @@ test('shouldStartStartupAutoConnect checks required startup conditions', () => {
     }),
     false,
   );
+
+  assert.equal(
+    shouldStartStartupAutoConnect({
+      settingsReady: true,
+      alreadyAttempted: false,
+      gatewayUrl: 'wss://example.com',
+      connectionState: 'connecting',
+    }),
+    false,
+  );
+
+  assert.equal(
+    shouldStartStartupAutoConnect({
+      settingsReady: true,
+      alreadyAttempted: false,
+      gatewayUrl: 'wss://example.com',
+      connectionState: 'reconnecting',
+    }),
+    false,
+  );
 });
 
 test('shouldAttemptFinalRecovery and buildHistoryRefreshNotice handle edge cases', () => {

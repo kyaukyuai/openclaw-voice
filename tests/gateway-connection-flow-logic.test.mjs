@@ -99,6 +99,24 @@ test('shouldRunAutoConnectRetry stops retry when unmounted, missing URL, or conn
     shouldRunAutoConnectRetry({
       isUnmounting: false,
       gatewayUrl: 'wss://example.com',
+      connectionState: 'connecting',
+    }),
+    false,
+  );
+
+  assert.equal(
+    shouldRunAutoConnectRetry({
+      isUnmounting: false,
+      gatewayUrl: 'wss://example.com',
+      connectionState: 'reconnecting',
+    }),
+    false,
+  );
+
+  assert.equal(
+    shouldRunAutoConnectRetry({
+      isUnmounting: false,
+      gatewayUrl: 'wss://example.com',
       connectionState: 'disconnected',
     }),
     true,
