@@ -10,6 +10,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -57,6 +58,8 @@ type SettingsContextValue = SettingsState &
   SettingsActions & {
     isReady: boolean;
     isSaving: boolean;
+    pendingSaveCount: number;
+    lastSavedAt: number | null;
     saveError: string | null;
   };
 
@@ -79,7 +82,10 @@ type SettingsProviderProps = {
 export function SettingsProvider({ children }: SettingsProviderProps) {
   const [isReady, setIsReady] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [pendingSaveCount, setPendingSaveCount] = useState(0);
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const hasHydratedRef = useRef(false);
 
   // Settings state
   const [gatewayUrl, setGatewayUrl] = useState(DEFAULT_GATEWAY_URL);
@@ -146,33 +152,24 @@ export function SettingsProvider({ children }: SettingsProviderProps) {
   }, []);
 
   // Save settings
-  const saveSettings = useCallback(async () => {
-    setIsSaving(true);
+  const persistSettingsSnapshot = useCallback(async () => {
     setSaveError(null);
-    try {
-      const store = getKvStore();
-      await Promise.all([
-        store.setItemAsync(STORAGE_KEYS.gatewayUrl, gatewayUrl),
-        authToken
-          ? store.setItemAsync(STORAGE_KEYS.authToken, authToken)
-          : store.deleteItemAsync(STORAGE_KEYS.authToken),
-        store.setItemAsync(STORAGE_KEYS.speechLang, speechLang),
-        store.setItemAsync(STORAGE_KEYS.quickTextLeft, quickTextLeft),
-        store.setItemAsync(STORAGE_KEYS.quickTextRight, quickTextRight),
-        store.setItemAsync(STORAGE_KEYS.quickTextLeftIcon, quickTextLeftIcon),
-        store.setItemAsync(STORAGE_KEYS.quickTextRightIcon, quickTextRightIcon),
-        store.setItemAsync(
-          STORAGE_KEYS.onboardingCompleted,
-          isOnboardingCompleted ? 'true' : 'false',
-        ),
-      ]);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setSaveError(message);
-      throw err;
-    } finally {
-      setIsSaving(false);
-    }
+    const store = getKvStore();
+    await Promise.all([
+      store.setItemAsync(STORAGE_KEYS.gatewayUrl, gatewayUrl),
+      authToken
+        ? store.setItemAsync(STORAGE_KEYS.authToken, authToken)
+        : store.deleteItemAsync(STORAGE_KEYS.authToken),
+      store.setItemAsync(STORAGE_KEYS.speechLang, speechLang),
+      store.setItemAsync(STORAGE_KEYS.quickTextLeft, quickTextLeft),
+      store.setItemAsync(STORAGE_KEYS.quickTextRight, quickTextRight),
+      store.setItemAsync(STORAGE_KEYS.quickTextLeftIcon, quickTextLeftIcon),
+      store.setItemAsync(STORAGE_KEYS.quickTextRightIcon, quickTextRightIcon),
+      store.setItemAsync(
+        STORAGE_KEYS.onboardingCompleted,
+        isOnboardingCompleted ? 'true' : 'false',
+      ),
+    ]);
   }, [
     gatewayUrl,
     authToken,
@@ -182,6 +179,70 @@ export function SettingsProvider({ children }: SettingsProviderProps) {
     quickTextLeftIcon,
     quickTextRightIcon,
     isOnboardingCompleted,
+  ]);
+
+  const saveSettings = useCallback(async () => {
+    setIsSaving(true);
+    setPendingSaveCount(1);
+    try {
+      await persistSettingsSnapshot();
+      setLastSavedAt(Date.now());
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setSaveError(message);
+      throw err;
+    } finally {
+      setPendingSaveCount(0);
+      setIsSaving(false);
+    }
+  }, [persistSettingsSnapshot]);
+
+  useEffect(() => {
+    if (!isReady) return;
+
+    if (!hasHydratedRef.current) {
+      hasHydratedRef.current = true;
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      if (cancelled) return;
+      setPendingSaveCount(1);
+      setIsSaving(true);
+      setSaveError(null);
+      void persistSettingsSnapshot()
+        .then(() => {
+          if (cancelled) return;
+          setLastSavedAt(Date.now());
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          const message = err instanceof Error ? err.message : String(err);
+          setSaveError(message);
+        })
+        .finally(() => {
+          if (cancelled) return;
+          setPendingSaveCount(0);
+          setIsSaving(false);
+        });
+    }, 120);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [
+    authToken,
+    gatewayUrl,
+    isOnboardingCompleted,
+    isReady,
+    persistSettingsSnapshot,
+    quickTextLeft,
+    quickTextLeftIcon,
+    quickTextRight,
+    quickTextRightIcon,
+    speechLang,
   ]);
 
   const value = useMemo<SettingsContextValue>(
@@ -197,6 +258,8 @@ export function SettingsProvider({ children }: SettingsProviderProps) {
       isOnboardingCompleted,
       isReady,
       isSaving,
+      pendingSaveCount,
+      lastSavedAt,
       saveError,
       // Actions
       setGatewayUrl,
@@ -220,6 +283,8 @@ export function SettingsProvider({ children }: SettingsProviderProps) {
       isOnboardingCompleted,
       isReady,
       isSaving,
+      pendingSaveCount,
+      lastSavedAt,
       saveError,
       saveSettings,
     ],

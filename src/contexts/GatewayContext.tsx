@@ -10,12 +10,13 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
-  useState,
   type ReactNode,
 } from 'react';
 import {
   GatewayClient,
+  type GatewayClientOptions,
   type ConnectionState,
   type SessionEntry,
 } from '../openclaw';
@@ -27,6 +28,10 @@ import {
   REQUESTED_GATEWAY_CLIENT_ID,
 } from '../utils';
 import { classifyGatewayConnectFailure, errorMessage } from '../utils';
+import {
+  gatewayContextRuntimeReducer,
+  initialGatewayContextRuntimeState,
+} from './gateway-runtime-state';
 
 // ============================================================================
 // Types
@@ -45,10 +50,16 @@ type GatewayState = {
 };
 
 type GatewayActions = {
-  connect: (url: string, token?: string) => Promise<void>;
+  connect: (url: string, options?: GatewayClientOptions) => Promise<void>;
   disconnect: () => void;
-  checkHealth: () => Promise<void>;
-  refreshSessions: () => Promise<void>;
+  checkHealth: (options?: {
+    silent?: boolean;
+    timeoutMs?: number;
+  }) => Promise<boolean>;
+  refreshSessions: (options?: {
+    limit?: number;
+    includeGlobal?: boolean;
+  }) => Promise<SessionEntry[]>;
   getClient: () => GatewayClient | null;
 };
 
@@ -71,20 +82,22 @@ type GatewayProviderProps = {
 };
 
 export function GatewayProvider({ children }: GatewayProviderProps) {
-  // Connection state
-  const [connectionState, setConnectionState] =
-    useState<ConnectionState>('disconnected');
-  const [error, setError] = useState<string | null>(null);
-  const [eventState, setEventState] = useState('idle');
-  const [healthState, setHealthState] = useState<GatewayHealthState>('unknown');
-  const [healthCheckedAt, setHealthCheckedAt] = useState<number | null>(null);
-  const [connectDiagnostic, setConnectDiagnostic] =
-    useState<GatewayConnectDiagnostic | null>(null);
+  const [runtimeState, dispatchRuntimeState] = useReducer(
+    gatewayContextRuntimeReducer,
+    initialGatewayContextRuntimeState,
+  );
+  const {
+    connectionState,
+    error,
+    healthState,
+    healthCheckedAt,
+    connectDiagnostic,
+    sessions,
+    isSessionsLoading,
+    sessionsError,
+  } = runtimeState;
 
-  // Sessions state
-  const [sessions, setSessions] = useState<SessionEntry[]>([]);
-  const [isSessionsLoading, setIsSessionsLoading] = useState(false);
-  const [sessionsError, setSessionsError] = useState<string | null>(null);
+  const eventState = 'idle';
 
   // Refs
   const clientRef = useRef<GatewayClient | null>(null);
@@ -92,6 +105,7 @@ export function GatewayProvider({ children }: GatewayProviderProps) {
     null,
   );
   const healthCheckInFlightRef = useRef(false);
+  const healthStateRef = useRef<GatewayHealthState>('unknown');
   const connectionStateRef = useRef<ConnectionState>(connectionState);
   const subscriptionsRef = useRef<Array<() => void>>([]);
 
@@ -99,6 +113,10 @@ export function GatewayProvider({ children }: GatewayProviderProps) {
   useEffect(() => {
     connectionStateRef.current = connectionState;
   }, [connectionState]);
+
+  useEffect(() => {
+    healthStateRef.current = healthState;
+  }, [healthState]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -114,26 +132,47 @@ export function GatewayProvider({ children }: GatewayProviderProps) {
   }, []);
 
   // Health check
-  const checkHealth = useCallback(async () => {
-    if (healthCheckInFlightRef.current) return;
-    if (connectionStateRef.current !== 'connected') return;
+  const checkHealth = useCallback(
+    async (options?: { silent?: boolean; timeoutMs?: number }) => {
+      if (healthCheckInFlightRef.current) {
+        return healthStateRef.current !== 'degraded';
+      }
+      if (connectionStateRef.current !== 'connected') {
+        dispatchRuntimeState({ type: 'HEALTH_RESET' });
+        return false;
+      }
 
-    const client = clientRef.current;
-    if (!client) return;
+      const client = clientRef.current;
+      if (!client) return false;
 
-    healthCheckInFlightRef.current = true;
-    setHealthState('checking');
+      healthCheckInFlightRef.current = true;
+      if (!options?.silent) {
+        dispatchRuntimeState({ type: 'HEALTH_CHECK_START' });
+      }
 
-    try {
-      const isHealthy = await client.health(GATEWAY_HEALTH_CHECK_TIMEOUT_MS);
-      setHealthState(isHealthy ? 'ok' : 'degraded');
-      setHealthCheckedAt(Date.now());
-    } catch {
-      setHealthState('degraded');
-    } finally {
-      healthCheckInFlightRef.current = false;
-    }
-  }, []);
+      try {
+        const isHealthy = await client.health(
+          options?.timeoutMs ?? GATEWAY_HEALTH_CHECK_TIMEOUT_MS,
+        );
+        dispatchRuntimeState({
+          type: 'HEALTH_CHECK_RESULT',
+          healthy: isHealthy,
+          checkedAt: Date.now(),
+        });
+        return isHealthy;
+      } catch {
+        dispatchRuntimeState({
+          type: 'HEALTH_CHECK_RESULT',
+          healthy: false,
+          checkedAt: Date.now(),
+        });
+        return false;
+      } finally {
+        healthCheckInFlightRef.current = false;
+      }
+    },
+    [],
+  );
 
   // Start health check interval
   const startHealthCheckInterval = useCallback(() => {
@@ -141,13 +180,13 @@ export function GatewayProvider({ children }: GatewayProviderProps) {
       clearInterval(healthCheckIntervalRef.current);
     }
     healthCheckIntervalRef.current = setInterval(() => {
-      void checkHealth();
+      void checkHealth({ silent: true });
     }, GATEWAY_HEALTH_CHECK_INTERVAL_MS);
   }, [checkHealth]);
 
   // Connect to gateway
   const connect = useCallback(
-    async (url: string, token?: string) => {
+    async (url: string, options?: GatewayClientOptions) => {
       // Disconnect existing client
       if (clientRef.current) {
         subscriptionsRef.current.forEach((unsub) => unsub());
@@ -156,27 +195,31 @@ export function GatewayProvider({ children }: GatewayProviderProps) {
         clientRef.current = null;
       }
 
-      setConnectionState('connecting');
-      setError(null);
-      setConnectDiagnostic(null);
+      dispatchRuntimeState({ type: 'CONNECT_REQUEST' });
 
       try {
         const client = new GatewayClient(url, {
+          autoReconnect: true,
           clientId: REQUESTED_GATEWAY_CLIENT_ID,
           platform: GATEWAY_PLATFORM,
-          ...(token ? { token } : {}),
+          ...(options ?? {}),
         });
 
         clientRef.current = client;
 
         // Subscribe to connection state changes
         const unsubConnection = client.onConnectionStateChange((state) => {
-          setConnectionState(state);
           if (state === 'connected') {
-            setError(null);
-            setHealthState('unknown');
+            dispatchRuntimeState({ type: 'CONNECT_SUCCESS' });
             startHealthCheckInterval();
-          } else if (state === 'disconnected') {
+          } else {
+            dispatchRuntimeState({
+              type: 'CONNECTION_STATE_CHANGED',
+              value: state,
+            });
+          }
+
+          if (state === 'disconnected') {
             if (healthCheckIntervalRef.current) {
               clearInterval(healthCheckIntervalRef.current);
               healthCheckIntervalRef.current = null;
@@ -187,17 +230,19 @@ export function GatewayProvider({ children }: GatewayProviderProps) {
 
         // Connect
         await client.connect();
-        setConnectionState('connected');
+        dispatchRuntimeState({ type: 'CONNECT_SUCCESS' });
       } catch (err) {
         const message = errorMessage(err);
-        setError(message);
-        setConnectionState('disconnected');
 
         const diagnostic = classifyGatewayConnectFailure({
           error: err,
-          hasToken: Boolean(token),
+          hasToken: Boolean(options?.token || options?.password),
         });
-        setConnectDiagnostic(diagnostic);
+        dispatchRuntimeState({
+          type: 'CONNECT_FAILED',
+          message,
+          diagnostic,
+        });
 
         throw err;
       }
@@ -220,33 +265,44 @@ export function GatewayProvider({ children }: GatewayProviderProps) {
       clientRef.current = null;
     }
 
-    setConnectionState('disconnected');
-    setError(null);
-    setHealthState('unknown');
-    setConnectDiagnostic(null);
+    dispatchRuntimeState({ type: 'DISCONNECT' });
   }, []);
 
   // Refresh sessions
-  const refreshSessions = useCallback(async () => {
-    const client = clientRef.current;
-    if (!client || connectionStateRef.current !== 'connected') {
-      setSessionsError('Not connected');
-      return;
-    }
+  const refreshSessions = useCallback(
+    async (options?: { limit?: number; includeGlobal?: boolean }) => {
+      const client = clientRef.current;
+      if (!client || connectionStateRef.current !== 'connected') {
+        dispatchRuntimeState({ type: 'SESSIONS_NOT_CONNECTED' });
+        return [];
+      }
 
-    setIsSessionsLoading(true);
-    setSessionsError(null);
+      dispatchRuntimeState({ type: 'SESSIONS_REFRESH_START' });
 
-    try {
-      const result = await client.sessionsList();
-      setSessions(result.sessions ?? []);
-    } catch (err) {
-      const message = errorMessage(err);
-      setSessionsError(message);
-    } finally {
-      setIsSessionsLoading(false);
-    }
-  }, []);
+      try {
+        const result = await client.sessionsList({
+          ...(typeof options?.limit === 'number' ? { limit: options.limit } : {}),
+          ...(typeof options?.includeGlobal === 'boolean'
+            ? { includeGlobal: options.includeGlobal }
+            : {}),
+        });
+        const nextSessions = result.sessions ?? [];
+        dispatchRuntimeState({
+          type: 'SESSIONS_REFRESH_SUCCESS',
+          sessions: nextSessions,
+        });
+        return nextSessions;
+      } catch (err) {
+        const message = errorMessage(err);
+        dispatchRuntimeState({
+          type: 'SESSIONS_REFRESH_FAILED',
+          message,
+        });
+        throw err;
+      }
+    },
+    [],
+  );
 
   // Get client ref
   const getClient = useCallback(() => clientRef.current, []);

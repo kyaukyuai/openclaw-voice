@@ -121,6 +121,20 @@ test('computeAutoConnectRetryPlan returns retry plan until max attempts', () => 
   );
 });
 
+
+test('computeHistorySyncRetryPlan stops retrying after max attempts to avoid Refreshing lock', () => {
+  const exhausted = computeHistorySyncRetryPlan({
+    attempt: 4,
+    maxAttempts: 3,
+    baseDelayMs: 900,
+  });
+  assert.deepEqual(exhausted, {
+    shouldRetry: false,
+    nextAttempt: 4,
+    delayMs: 0,
+  });
+});
+
 test('computeHistorySyncRetryPlan returns exponential retry delays', () => {
   const first = computeHistorySyncRetryPlan({
     attempt: 1,

@@ -64,6 +64,21 @@ macOS app run path (Apple Silicon, Metro not required):
 npm run ios:mac
 ```
 
+macOS native PoC path (`react-native-macos`, Apple Silicon only):
+
+```bash
+npm run macos:native:doctor
+npm run macos:native:bootstrap
+
+# Terminal A
+npm run macos:native:start
+
+# Terminal B
+npm run macos:native:run
+```
+
+`macos:native:start`/`macos:native:run` use Metro port `8082` by default to avoid conflicts with Expo/iOS Debug (`8081`).
+
 Debug run path (development, Metro required):
 
 ```bash
@@ -156,6 +171,7 @@ EXPO_DEV_SERVER_URL=http://192.168.0.10:8081 npm run ios:dev:device:open
 This project supports macOS app usage on Apple Silicon as:
 
 - iOS app running on Mac (`Designed for iPad/iPhone`)
+- Dedicated native PoC target via `react-native-macos` (`apps/macos-native`)
 - Core flow: Gateway connection, text input/send, history display, quick text actions
 - Current limitation: voice input is disabled on macOS (`macOSでは音声入力未対応です。`)
 
@@ -170,6 +186,38 @@ Build and launch macOS app:
 ```bash
 npm run ios:mac
 ```
+
+### macOS Native PoC (Phase1)
+
+Scope:
+
+- Apple Silicon macOS only
+- Text-first workflow (Gateway connect, send, stream, history)
+- Multi-gateway concurrent connection support (connect A/B gateways in parallel)
+- Focused gateway session view with large history + composer
+- Assistant markdown is rendered in WKWebView for stable heading/list/code formatting
+- Partial copy is supported directly in assistant bubbles (drag to select, then `Cmd+C`)
+- Keyboard shortcuts: `Enter` send, `Shift+Enter` newline, `Cmd+Enter` send (compat), `Cmd+R` refresh focused card, `Esc` close banner or clear
+- Voice input intentionally disabled (mic icon is visual-only)
+
+UI (mock parity):
+
+- Left sidebar (`~220px`) with gateway list, nested session list, and `Settings`
+- Main pane shows the selected gateway/session history and focused composer
+- `Settings`: active gateway profile editing (`Gateway Name/URL/Token/Session Key`)
+- `Quick Text` remains global and can be inserted into the focused gateway composer
+- Theme toggle (`Light` / `Dark`) in sidebar footer
+
+Commands:
+
+```bash
+npm run macos:native:doctor
+npm run macos:native:bootstrap
+npm run macos:native:start
+npm run macos:native:run
+```
+
+Note: native macOS Metro runs on port `8082` by default.
 
 Optional desktop web path (secondary):
 
@@ -275,6 +323,41 @@ cp .env.example .env
 - `EXPO_PUBLIC_GATEWAY_DISPLAY_NAME` (default: `OpenClaw Pocket`)
 - `EXPO_PUBLIC_DEBUG_MODE` (`true` to show dev warnings and runtime debug panel, default: `false`)
 
+## iOS Stability Runtime
+
+Recent iOS stability work introduces:
+
+- `GatewayContext` as the primary connect/disconnect/health/sessions runtime path on iOS
+- Reducer-based runtime state transitions for `connection/sending/sync/recovery`
+- Unified settings persistence in `SettingsContext` (single source of truth)
+- History refresh in-flight guard + 20s timeout fail-close behavior
+- Shared history bottom-scroll scheduler (`requestAnimationFrame` x2) for safer tail visibility
+
+Primary files:
+
+- `/Users/kyaukyuai/src/github.com/kyaukyuai/openclaw-voice/src/ios-runtime/runtime-state.ts`
+- `/Users/kyaukyuai/src/github.com/kyaukyuai/openclaw-voice/src/ios-runtime/useGatewayRuntime.ts`
+- `/Users/kyaukyuai/src/github.com/kyaukyuai/openclaw-voice/src/ios-runtime/useHistoryRuntime.ts`
+- `/Users/kyaukyuai/src/github.com/kyaukyuai/openclaw-voice/src/ui/history-layout.ts`
+
+### iOS Regression Checklist
+
+Run these checks before commit/PR:
+
+```bash
+npm run typecheck
+npm run lint --if-present
+npm test -- --watch=false
+```
+
+Manual iOS device checks:
+
+1. Launch debug app (`npm run ios:dev:device:install`) with Metro running.
+2. Verify connect -> send -> complete transitions do not leave `Sending...` stuck.
+3. Verify session refresh does not leave `Refreshing...` stuck.
+4. Open keyboard and ensure latest history line is fully visible (no bottom clipping).
+5. Switch sessions and ensure draft/quick text behavior still works.
+
 ## Connection Defaults
 
 - `clientId: openclaw-ios`
@@ -290,6 +373,7 @@ Device identity is generated locally and reused when persistent storage is avail
 - `npm run setup` - Install deps, prepare native iOS project, install Pods
 - `npm run doctor:ios` - Validate iOS development environment and connectivity
 - `npm run doctor:macos` - Validate macOS app runtime availability (`Designed for iPad/iPhone`)
+- `npm run macos:native:doctor` - Validate `react-native-macos` local environment
 - `npm run doctor:android` - Validate Android SDK/adb/device environment
 - `npm run doctor:release` - Check release prerequisites (release workflow, docs gate, GitHub secret/permissions when available)
 - `npm run check:release-docs` - Ensure `CHANGELOG.md` and `README.md` stay aligned with package metadata
@@ -306,6 +390,9 @@ Device identity is generated locally and reused when persistent storage is avail
 - `npm run ios:release:device` - Build and run iOS Release app on device (Metro not required)
 - `npm run ios:mac` - Build and launch macOS app (Apple Silicon, Release)
 - `npm run ios:mac:debug` - Build and launch macOS app in Debug (Metro required)
+- `npm run macos:native:bootstrap` - Install deps and Pods for `apps/macos-native`
+- `npm run macos:native:start` - Start Metro for native macOS PoC target on port `8082`
+- `npm run macos:native:run` - Build and run native macOS PoC target (connects to port `8082`)
 - `npm run android` - Build and run Android app
 - `npm run web` - Run web target
 - `npm run web:check` - Export web bundle to validate desktop/web compatibility

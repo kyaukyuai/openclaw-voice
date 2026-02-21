@@ -6,12 +6,10 @@ import {
   ActivityIndicator,
   Animated,
   FlatList,
-  Image,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
   LogBox,
-  Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
   findNodeHandle,
@@ -37,7 +35,6 @@ import {
   type SessionEntry,
   type Storage as OpenClawStorage,
 } from './src/openclaw';
-import DebugInfoPanel from './src/ui/DebugInfoPanel';
 import {
   buildHistoryRefreshNotice,
   computeHistorySyncRetryPlan,
@@ -58,7 +55,6 @@ import type {
   ComponentProps,
   FocusField,
   GatewayConnectDiagnostic,
-  GatewayHealthState,
   HomeDisplayMode,
   QuickTextButtonSide,
   QuickTextFocusField,
@@ -89,8 +85,6 @@ import {
   TIMINGS,
   UI,
   BOTTOM_ACTION_STATUS_LABELS,
-  SPEECH_LANG_OPTIONS,
-  QUICK_TEXT_ICON_OPTIONS,
   QUICK_TEXT_ICON_SET,
   MESSAGES,
   // Legacy exports for backward compatibility
@@ -111,8 +105,6 @@ import {
   SEND_TIMEOUT_MS,
   OUTBOX_RETRY_BASE_MS,
   OUTBOX_RETRY_MAX_MS,
-  GATEWAY_HEALTH_CHECK_TIMEOUT_MS,
-  GATEWAY_HEALTH_CHECK_INTERVAL_MS,
   STARTUP_AUTO_CONNECT_MAX_ATTEMPTS,
   STARTUP_AUTO_CONNECT_RETRY_BASE_MS,
   FINAL_RESPONSE_RECOVERY_BASE_DELAY_MS,
@@ -123,6 +115,7 @@ import {
   HISTORY_SYNC_INITIAL_DELAY_MS,
   HISTORY_SYNC_RETRY_BASE_MS,
   HISTORY_SYNC_MAX_ATTEMPTS,
+  HISTORY_REFRESH_TIMEOUT_MS,
   getKvStore,
   MAX_TEXT_SCALE,
   MAX_TEXT_SCALE_TIGHT,
@@ -152,6 +145,17 @@ import {
   isMacDesktopRuntime,
   supportsSpeechRecognitionOnCurrentPlatform,
 } from './src/utils';
+import { useGatewayRuntime } from './src/ios-runtime/useGatewayRuntime';
+import { useHistoryRuntime } from './src/ios-runtime/useHistoryRuntime';
+import { useComposerRuntime } from './src/ios-runtime/useComposerRuntime';
+import { scheduleHistoryScrollToEnd } from './src/ui/history-layout';
+import ConnectionHeader from './src/ui/ios/ConnectionHeader';
+import TopBanner from './src/ui/ios/TopBanner';
+import BottomDockControls from './src/ui/ios/BottomDockControls';
+import SettingsScreenModal from './src/ui/ios/SettingsScreenModal';
+import SessionsScreenModal from './src/ui/ios/SessionsScreenModal';
+import SettingsPanelContent from './src/ui/ios/SettingsPanelContent';
+import SessionsPanelContent from './src/ui/ios/SessionsPanelContent';
 
 // Import contexts
 import {
@@ -316,6 +320,21 @@ function formatClockLabel(timestamp: number): string {
   });
 }
 
+function extractFinalChatEventText(payload: ChatEventPayload): string {
+  const record = payload as unknown as Record<string, unknown>;
+  return textFromUnknown([
+    payload.message,
+    record.finalMessage,
+    record.finalText,
+    record.outputText,
+    record.text,
+    record.output,
+    record.response,
+    record.result,
+    record.data,
+  ]);
+}
+
 function normalizeQuickTextIcon(
   value: string | null | undefined,
   fallback: QuickTextIcon,
@@ -440,23 +459,56 @@ function AppContent() {
     isOnboardingCompleted,
     setOnboardingCompleted: setIsOnboardingCompleted,
     isReady: settingsReady,
+    isSaving: isSettingsSaving,
+    pendingSaveCount: settingsPendingSaveCount,
+    lastSavedAt: settingsLastSavedAt,
+    saveError: settingsSaveError,
   } = useSettings();
+  const {
+    connect: gatewayConnect,
+    disconnect: gatewayDisconnect,
+    checkHealth: gatewayCheckHealth,
+    refreshSessions: gatewayRefreshSessions,
+    getClient: gatewayGetClient,
+    connectionState: gatewayConnectionState,
+    connectDiagnostic: gatewayContextConnectDiagnostic,
+    sessions: gatewaySessions,
+    isSessionsLoading: gatewaySessionsLoading,
+    sessionsError: gatewaySessionsError,
+  } = useGateway();
 
   const [isAuthTokenMasked, setIsAuthTokenMasked] = useState(true);
   const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
   const [isSessionPanelOpen, setIsSessionPanelOpen] = useState(false);
-  const [connectionState, setConnectionState] =
-    useState<ConnectionState>('disconnected');
+  const {
+    state: gatewayRuntime,
+    runAction: runGatewayRuntimeAction,
+    setConnectionState,
+    setGatewayEventState,
+    setIsSending,
+    setIsSessionHistoryLoading,
+    setIsMissingResponseRecoveryInFlight,
+  } = useGatewayRuntime();
+  const connectionState = gatewayRuntime.connectionState;
+  const gatewayEventState = gatewayRuntime.gatewayEventState;
+  const isSending = gatewayRuntime.isSending;
+  const isSessionHistoryLoading = gatewayRuntime.isSessionHistoryLoading;
+  const isMissingResponseRecoveryInFlight =
+    gatewayRuntime.isMissingResponseRecoveryInFlight;
+  const {
+    composerHeight,
+    setComposerHeight,
+    setKeyboardState,
+    isKeyboardVisible,
+    historyBottomInset,
+  } = useComposerRuntime();
+  const { runHistoryRefresh, invalidateRefreshEpoch } = useHistoryRuntime();
   const [gatewayError, setGatewayError] = useState<string | null>(null);
-  const [gatewayEventState, setGatewayEventState] = useState('idle');
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
-  const [isSending, setIsSending] = useState(false);
   const [chatTurns, setChatTurns] = useState<ChatTurn[]>([]);
   const [activeSessionKey, setActiveSessionKey] = useState(DEFAULT_SESSION_KEY);
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [sessionPreferences, setSessionPreferences] = useState<SessionPreferences>({});
-  const [isSessionsLoading, setIsSessionsLoading] = useState(false);
-  const [isSessionHistoryLoading, setIsSessionHistoryLoading] = useState(false);
   const [isSessionOperationPending, setIsSessionOperationPending] = useState(false);
   const [isSessionRenameOpen, setIsSessionRenameOpen] = useState(false);
   const [sessionRenameTargetKey, setSessionRenameTargetKey] = useState<string | null>(null);
@@ -465,22 +517,13 @@ function AppContent() {
   // isOnboardingCompleted is now managed by SettingsContext
   const [isOnboardingWaitingForResponse, setIsOnboardingWaitingForResponse] =
     useState(false);
-  const [settingsSavePendingCount, setSettingsSavePendingCount] = useState(0);
-  const [settingsSaveError, setSettingsSaveError] = useState<string | null>(null);
-  const [settingsSavedAt, setSettingsSavedAt] = useState<number | null>(null);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [historyLastSyncedAt, setHistoryLastSyncedAt] = useState<number | null>(null);
   const [historyRefreshNotice, setHistoryRefreshNotice] =
     useState<HistoryRefreshNotice | null>(null);
   const [missingResponseNotice, setMissingResponseNotice] =
     useState<MissingResponseRecoveryNotice | null>(null);
-  const [isMissingResponseRecoveryInFlight, setIsMissingResponseRecoveryInFlight] =
-    useState(false);
   const [showScrollToBottomButton, setShowScrollToBottomButton] = useState(false);
-  const [gatewayHealthState, setGatewayHealthState] =
-    useState<GatewayHealthState>('unknown');
-  const [gatewayHealthCheckedAt, setGatewayHealthCheckedAt] =
-    useState<number | null>(null);
   const [gatewayConnectDiagnostic, setGatewayConnectDiagnostic] =
     useState<GatewayConnectDiagnostic | null>(null);
   const [outboxQueue, setOutboxQueue] = useState<OutboxQueueItem[]>([]);
@@ -489,7 +532,6 @@ function AppContent() {
   const [quickTextTooltipSide, setQuickTextTooltipSide] =
     useState<QuickTextButtonSide | null>(null);
   const [focusedField, setFocusedField] = useState<FocusField>(null);
-  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [isKeyboardBarMounted, setIsKeyboardBarMounted] = useState(false);
   const [isBottomCompletePulse, setIsBottomCompletePulse] = useState(false);
 
@@ -530,11 +572,9 @@ function AppContent() {
   );
   const authTokenMaskTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const outboxRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const healthCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const healthCheckInFlightRef = useRef(false);
   const outboxProcessingRef = useRef(false);
   const outboxQueueRef = useRef<OutboxQueueItem[]>([]);
-  const gatewayHealthStateRef = useRef<GatewayHealthState>('unknown');
+  const gatewayEventStateRef = useRef(gatewayEventState);
   const gatewayUrlRef = useRef(gatewayUrl);
   const connectionStateRef = useRef<ConnectionState>(connectionState);
   const startupAutoConnectRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -575,21 +615,13 @@ function AppContent() {
   const shouldShowSettingsScreen = shouldForceSettingsScreen || isSettingsPanelOpen;
   const canToggleSettingsPanel = isGatewayConnected || isMacRuntime;
   const canDismissSettingsScreen = isGatewayConnected || isMacRuntime;
+  const isSessionsLoading = gatewaySessionsLoading;
   // isDarkTheme is now provided by useTheme()
 
-  const persistSetting = useCallback((task: () => Promise<void>) => {
-    setSettingsSavePendingCount((current) => current + 1);
-    setSettingsSaveError(null);
-    void task()
-      .then(() => {
-        setSettingsSavedAt(Date.now());
-      })
-      .catch(() => {
-        setSettingsSaveError('Local save failed');
-      })
-      .finally(() => {
-        setSettingsSavePendingCount((current) => Math.max(0, current - 1));
-      });
+  const persistRuntimeSetting = useCallback((task: () => Promise<void>) => {
+    void task().catch(() => {
+      // ignore runtime persistence errors
+    });
   }, []);
 
   const clearHistoryNoticeTimer = useCallback(() => {
@@ -642,13 +674,6 @@ function AppContent() {
     if (outboxRetryTimerRef.current) {
       clearTimeout(outboxRetryTimerRef.current);
       outboxRetryTimerRef.current = null;
-    }
-  }, []);
-
-  const clearHealthCheckInterval = useCallback(() => {
-    if (healthCheckIntervalRef.current) {
-      clearInterval(healthCheckIntervalRef.current);
-      healthCheckIntervalRef.current = null;
     }
   }, []);
 
@@ -730,38 +755,16 @@ function AppContent() {
 
   const runGatewayHealthCheck = useCallback(
     async (options?: { silent?: boolean; timeoutMs?: number }): Promise<boolean> => {
-      const client = clientRef.current;
-      if (!client || connectionStateRef.current !== 'connected') {
-        setGatewayHealthState('unknown');
+      if (connectionStateRef.current !== 'connected') {
         return false;
-      }
-      if (healthCheckInFlightRef.current) {
-        return gatewayHealthStateRef.current !== 'degraded';
-      }
-
-      healthCheckInFlightRef.current = true;
-      if (!options?.silent) {
-        setGatewayHealthState('checking');
       }
       try {
-        const ok = await client.health(
-          options?.timeoutMs ?? GATEWAY_HEALTH_CHECK_TIMEOUT_MS,
-        );
-        if (connectionStateRef.current !== 'connected') return false;
-        setGatewayHealthState(ok ? 'ok' : 'degraded');
-        setGatewayHealthCheckedAt(Date.now());
-        return ok;
+        return await gatewayCheckHealth(options);
       } catch {
-        if (connectionStateRef.current === 'connected') {
-          setGatewayHealthState('degraded');
-          setGatewayHealthCheckedAt(Date.now());
-        }
         return false;
-      } finally {
-        healthCheckInFlightRef.current = false;
       }
     },
-    [],
+    [gatewayCheckHealth],
   );
 
   useEffect(() => {
@@ -786,6 +789,20 @@ function AppContent() {
   }, [gatewayUrl]);
 
   useEffect(() => {
+    setConnectionState(gatewayConnectionState);
+  }, [gatewayConnectionState, setConnectionState]);
+
+  useEffect(() => {
+    clientRef.current = gatewayGetClient();
+  }, [gatewayConnectionState, gatewayGetClient]);
+
+  useEffect(() => {
+    if (gatewayContextConnectDiagnostic) {
+      setGatewayConnectDiagnostic(gatewayContextConnectDiagnostic);
+    }
+  }, [gatewayContextConnectDiagnostic]);
+
+  useEffect(() => {
     connectionStateRef.current = connectionState;
   }, [connectionState]);
 
@@ -794,8 +811,33 @@ function AppContent() {
   }, [outboxQueue]);
 
   useEffect(() => {
-    gatewayHealthStateRef.current = gatewayHealthState;
-  }, [gatewayHealthState]);
+    if (connectionState !== 'connected') {
+      setSessions([]);
+      return;
+    }
+    const fetched = Array.isArray(gatewaySessions)
+      ? gatewaySessions.filter(
+          (session): session is SessionEntry =>
+            typeof session?.key === 'string' && session.key.trim().length > 0,
+        )
+      : [];
+    const activeKey = activeSessionKeyRef.current;
+    const merged = [...fetched];
+    if (!merged.some((session) => session.key === activeKey)) {
+      merged.unshift({ key: activeKey, displayName: activeKey });
+    }
+    merged.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+    setSessions(merged);
+  }, [connectionState, gatewaySessions]);
+
+  useEffect(() => {
+    if (!gatewaySessionsError) return;
+    setSessionsError((previous) => previous ?? `Sessions unavailable: ${gatewaySessionsError}`);
+  }, [gatewaySessionsError]);
+
+  useEffect(() => {
+    gatewayEventStateRef.current = gatewayEventState;
+  }, [gatewayEventState]);
 
   useEffect(() => {
     const shouldHoldComplete =
@@ -814,9 +856,9 @@ function AppContent() {
     bottomCompletePulseTimerRef.current = setTimeout(() => {
       bottomCompletePulseTimerRef.current = null;
       setIsBottomCompletePulse(false);
-      setGatewayEventState((previous) =>
-        previous === 'complete' ? 'ready' : previous,
-      );
+      if (gatewayEventStateRef.current === 'complete') {
+        setGatewayEventState('ready');
+      }
     }, BOTTOM_STATUS_COMPLETE_HOLD_MS);
 
     return () => {
@@ -833,13 +875,18 @@ function AppContent() {
     sessionTurnsRef.current.set(activeSessionKey, chatTurns);
   }, [activeSessionKey, chatTurns]);
 
+  const scrollHistoryToBottom = useCallback((animated = true) => {
+    scheduleHistoryScrollToEnd(() => {
+      historyScrollRef.current?.scrollToEnd({ animated });
+      setShowScrollToBottomButton(false);
+      historyAutoScrollRef.current = true;
+    });
+  }, []);
+
   useEffect(() => {
     if (chatTurns.length === 0 || !historyAutoScrollRef.current) return;
-    const timer = setTimeout(() => {
-      historyScrollRef.current?.scrollToEnd({ animated: true });
-    }, 30);
-    return () => clearTimeout(timer);
-  }, [chatTurns.length]);
+    scrollHistoryToBottom(true);
+  }, [chatTurns.length, scrollHistoryToBottom]);
 
   useEffect(() => {
     if (chatTurns.length > 0) return;
@@ -940,95 +987,19 @@ function AppContent() {
 
   useEffect(() => {
     if (!settingsReady) return;
-    const value = gatewayUrl.trim();
-    persistSetting(async () => {
-      if (value) {
-        await kvStore.setItemAsync(STORAGE_KEYS.gatewayUrl, value);
-      } else {
-        await kvStore.deleteItemAsync(STORAGE_KEYS.gatewayUrl);
-      }
-    });
-  }, [gatewayUrl, persistSetting, settingsReady]);
-
-  useEffect(() => {
-    if (!settingsReady) return;
-    const value = authToken.trim();
-    persistSetting(async () => {
-      if (value) {
-        await kvStore.setItemAsync(STORAGE_KEYS.authToken, value);
-      } else {
-        await kvStore.deleteItemAsync(STORAGE_KEYS.authToken);
-      }
-    });
-  }, [authToken, persistSetting, settingsReady]);
-
-  useEffect(() => {
-    if (!settingsReady) return;
-    persistSetting(async () => {
-      await kvStore.setItemAsync(STORAGE_KEYS.theme, theme);
-    });
-  }, [persistSetting, settingsReady, theme]);
-
-  useEffect(() => {
-    if (!settingsReady) return;
-    persistSetting(async () => {
-      await kvStore.setItemAsync(STORAGE_KEYS.speechLang, speechLang);
-    });
-  }, [persistSetting, settingsReady, speechLang]);
-
-  useEffect(() => {
-    if (!settingsReady) return;
-    const value = quickTextLeft.trim();
-    persistSetting(async () => {
-      if (value) {
-        await kvStore.setItemAsync(STORAGE_KEYS.quickTextLeft, value);
-      } else {
-        await kvStore.deleteItemAsync(STORAGE_KEYS.quickTextLeft);
-      }
-    });
-  }, [persistSetting, quickTextLeft, settingsReady]);
-
-  useEffect(() => {
-    if (!settingsReady) return;
-    const value = quickTextRight.trim();
-    persistSetting(async () => {
-      if (value) {
-        await kvStore.setItemAsync(STORAGE_KEYS.quickTextRight, value);
-      } else {
-        await kvStore.deleteItemAsync(STORAGE_KEYS.quickTextRight);
-      }
-    });
-  }, [persistSetting, quickTextRight, settingsReady]);
-
-  useEffect(() => {
-    if (!settingsReady) return;
-    persistSetting(async () => {
-      await kvStore.setItemAsync(STORAGE_KEYS.quickTextLeftIcon, quickTextLeftIcon);
-    });
-  }, [persistSetting, quickTextLeftIcon, settingsReady]);
-
-  useEffect(() => {
-    if (!settingsReady) return;
-    persistSetting(async () => {
-      await kvStore.setItemAsync(STORAGE_KEYS.quickTextRightIcon, quickTextRightIcon);
-    });
-  }, [persistSetting, quickTextRightIcon, settingsReady]);
-
-  useEffect(() => {
-    if (!settingsReady) return;
     const sessionKey = activeSessionKey.trim();
-    persistSetting(async () => {
+    persistRuntimeSetting(async () => {
       if (sessionKey) {
         await kvStore.setItemAsync(STORAGE_KEYS.sessionKey, sessionKey);
       } else {
         await kvStore.deleteItemAsync(STORAGE_KEYS.sessionKey);
       }
     });
-  }, [activeSessionKey, persistSetting, settingsReady]);
+  }, [activeSessionKey, persistRuntimeSetting, settingsReady]);
 
   useEffect(() => {
     if (!settingsReady) return;
-    persistSetting(async () => {
+    persistRuntimeSetting(async () => {
       const entries = Object.entries(sessionPreferences);
       if (entries.length === 0) {
         await kvStore.deleteItemAsync(STORAGE_KEYS.sessionPrefs);
@@ -1039,7 +1010,7 @@ function AppContent() {
         JSON.stringify(sessionPreferences),
       );
     });
-  }, [persistSetting, sessionPreferences, settingsReady]);
+  }, [persistRuntimeSetting, sessionPreferences, settingsReady]);
 
   useEffect(() => {
     if (!settingsReady) return;
@@ -1060,13 +1031,6 @@ function AppContent() {
   }, [outboxQueue, settingsReady]);
 
   useEffect(() => {
-    if (!settingsReady || !isOnboardingCompleted) return;
-    persistSetting(async () => {
-      await kvStore.setItemAsync(STORAGE_KEYS.onboardingCompleted, '1');
-    });
-  }, [isOnboardingCompleted, persistSetting, settingsReady]);
-
-  useEffect(() => {
     if (!isGatewayConnected) {
       setIsSessionPanelOpen(false);
     }
@@ -1076,18 +1040,19 @@ function AppContent() {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
 
-    const showSub = Keyboard.addListener(showEvent, () => {
-      setIsKeyboardVisible(true);
+    const showSub = Keyboard.addListener(showEvent, (event) => {
+      const height = event.endCoordinates?.height ?? 0;
+      setKeyboardState(true, height);
     });
     const hideSub = Keyboard.addListener(hideEvent, () => {
-      setIsKeyboardVisible(false);
+      setKeyboardState(false, 0);
     });
 
     return () => {
       showSub.remove();
       hideSub.remove();
     };
-  }, []);
+  }, [setKeyboardState]);
 
   useSpeechRecognitionEvent('start', () => {
     expectedSpeechStopRef.current = false;
@@ -1145,36 +1110,27 @@ function AppContent() {
   };
 
   const disconnectGateway = () => {
+    invalidateRefreshEpoch();
     clearSubscriptions();
     clearFinalResponseRecoveryTimer();
     clearMissingResponseRecoveryState();
     clearStartupAutoConnectRetryTimer();
     clearBottomCompletePulseTimer();
     clearOutboxRetryTimer();
-    clearHealthCheckInterval();
     if (historySyncTimerRef.current) {
       clearTimeout(historySyncTimerRef.current);
       historySyncTimerRef.current = null;
     }
     historySyncRequestRef.current = null;
     outboxProcessingRef.current = false;
-    healthCheckInFlightRef.current = false;
-    if (clientRef.current) {
-      clientRef.current.disconnect();
-      clientRef.current = null;
-    }
+    gatewayDisconnect();
+    clientRef.current = null;
     activeRunIdRef.current = null;
     setActiveRunId(null);
     pendingTurnIdRef.current = null;
     runIdToTurnIdRef.current.clear();
-    setIsSending(false);
-    setIsSessionsLoading(false);
-    setIsSessionHistoryLoading(false);
     setIsSessionOperationPending(false);
-    setConnectionState('disconnected');
-    setGatewayEventState('idle');
-    setGatewayHealthState('unknown');
-    setGatewayHealthCheckedAt(null);
+    runGatewayRuntimeAction({ type: 'RESET_RUNTIME' });
     setGatewayConnectDiagnostic(null);
     setIsBottomCompletePulse(false);
   };
@@ -1196,36 +1152,19 @@ function AppContent() {
   }, []);
 
   const refreshSessions = useCallback(async () => {
-    const client = clientRef.current;
-    if (!client || connectionState !== 'connected') {
+    if (connectionState !== 'connected') {
       setSessions([]);
       setSessionsError(null);
       return;
     }
 
-    setIsSessionsLoading(true);
     setSessionsError(null);
     try {
-      const response = await client.sessionsList({ limit: 40, includeGlobal: true });
-      const fetched = Array.isArray(response.sessions)
-        ? response.sessions.filter(
-            (session): session is SessionEntry =>
-              typeof session?.key === 'string' && session.key.trim().length > 0,
-          )
-        : [];
-      const activeKey = activeSessionKeyRef.current;
-      const merged = [...fetched];
-      if (!merged.some((session) => session.key === activeKey)) {
-        merged.unshift({ key: activeKey, displayName: activeKey });
-      }
-      merged.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
-      setSessions(merged);
+      await gatewayRefreshSessions({ limit: 40, includeGlobal: true });
     } catch (err) {
       setSessionsError(`Sessions unavailable: ${errorMessage(err)}`);
-    } finally {
-      setIsSessionsLoading(false);
     }
-  }, [connectionState]);
+  }, [connectionState, gatewayRefreshSessions]);
 
   const loadSessionHistory = useCallback(
     async (
@@ -1240,39 +1179,55 @@ function AppContent() {
         return false;
       }
 
-      setIsSessionHistoryLoading(true);
-      try {
-        const response = await client.chatHistory(sessionKey, { limit: 80 });
-        const turns = buildTurnsFromHistory(response.messages, sessionKey);
-        const localTurns = sessionTurnsRef.current.get(sessionKey) ?? [];
-        const queuedTurnIds = new Set(
-          outboxQueueRef.current
-            .filter((item) => item.sessionKey === sessionKey)
-            .map((item) => item.turnId),
-        );
-        const mergedTurns = mergeHistoryTurnsWithPendingLocal(
-          turns,
-          localTurns,
-          queuedTurnIds,
-        );
-        applySessionTurns(sessionKey, mergedTurns);
-        if (activeSessionKeyRef.current === sessionKey) {
-          setHistoryLastSyncedAt(Date.now());
-        }
-        return true;
-      } catch (err) {
-        if (!options?.silentError) {
-          setGatewayError(`Failed to load session history: ${errorMessage(err)}`);
-        }
+      const synced = await runHistoryRefresh({
+        sessionKey,
+        timeoutMs: HISTORY_REFRESH_TIMEOUT_MS,
+        onStart: () => {
+          runGatewayRuntimeAction({ type: 'SYNC_REQUEST' });
+        },
+        onError: (err) => {
+          if (!options?.silentError) {
+            setGatewayError(`Failed to load session history: ${errorMessage(err)}`);
+          }
+        },
+        onFinish: (ok) => {
+          runGatewayRuntimeAction({
+            type: ok ? 'SYNC_SUCCESS' : 'SYNC_ERROR',
+          });
+        },
+        run: async () => {
+          const response = await client.chatHistory(sessionKey, { limit: 80 });
+          const turns = buildTurnsFromHistory(response.messages, sessionKey);
+          const localTurns = sessionTurnsRef.current.get(sessionKey) ?? [];
+          const queuedTurnIds = new Set(
+            outboxQueueRef.current
+              .filter((item) => item.sessionKey === sessionKey)
+              .map((item) => item.turnId),
+          );
+          const mergedTurns = mergeHistoryTurnsWithPendingLocal(
+            turns,
+            localTurns,
+            queuedTurnIds,
+          );
+          applySessionTurns(sessionKey, mergedTurns);
+          if (activeSessionKeyRef.current === sessionKey) {
+            setHistoryLastSyncedAt(Date.now());
+          }
+          return true;
+        },
+      });
+
+      if (!synced) {
         applySessionTurns(sessionKey, sessionTurnsRef.current.get(sessionKey) ?? []);
-        return false;
-      } finally {
-        if (activeSessionKeyRef.current === sessionKey) {
-          setIsSessionHistoryLoading(false);
+        if (!options?.silentError && connectionStateRef.current === 'connected') {
+          setGatewayError((previous) =>
+            previous || 'Refresh failed: request timed out. Please retry.',
+          );
         }
       }
+      return synced;
     },
-    [applySessionTurns, connectionState],
+    [applySessionTurns, connectionState, runGatewayRuntimeAction, runHistoryRefresh],
   );
 
   const switchSession = useCallback(
@@ -1300,10 +1255,17 @@ function AppContent() {
       setActiveSessionKey(nextKey);
       activeSessionKeyRef.current = nextKey;
 
+      invalidateRefreshEpoch();
       await loadSessionHistory(nextKey);
       void refreshSessions();
     },
-    [isSending, isSessionOperationPending, loadSessionHistory, refreshSessions],
+    [
+      invalidateRefreshEpoch,
+      isSending,
+      isSessionOperationPending,
+      loadSessionHistory,
+      refreshSessions,
+    ],
   );
 
   const createAndSwitchSession = useCallback(async () => {
@@ -1420,26 +1382,6 @@ function AppContent() {
     void loadSessionHistory(activeSessionKeyRef.current);
   }, [isGatewayConnected, loadSessionHistory, refreshSessions]);
 
-  useEffect(() => {
-    if (connectionState !== 'connected') {
-      clearHealthCheckInterval();
-      healthCheckInFlightRef.current = false;
-      setGatewayHealthState('unknown');
-      setGatewayHealthCheckedAt(null);
-      return;
-    }
-
-    void runGatewayHealthCheck({ silent: true });
-    clearHealthCheckInterval();
-    healthCheckIntervalRef.current = setInterval(() => {
-      void runGatewayHealthCheck({ silent: true });
-    }, GATEWAY_HEALTH_CHECK_INTERVAL_MS);
-
-    return () => {
-      clearHealthCheckInterval();
-    };
-  }, [clearHealthCheckInterval, connectionState, runGatewayHealthCheck]);
-
   const processOutboxQueue = useCallback(async () => {
     if (outboxProcessingRef.current) return;
     if (connectionStateRef.current !== 'connected') return;
@@ -1494,8 +1436,7 @@ function AppContent() {
     }
 
     setGatewayError(null);
-    setGatewayEventState('sending');
-    setIsSending(true);
+    runGatewayRuntimeAction({ type: 'SEND_REQUEST' });
     pendingTurnIdRef.current = head.turnId;
     updateChatTurn(head.turnId, (turn) => ({
       ...turn,
@@ -1527,7 +1468,7 @@ function AppContent() {
       const messageText = errorMessage(err);
       void triggerHaptic('send-error');
       pendingTurnIdRef.current = null;
-      setIsSending(false);
+      runGatewayRuntimeAction({ type: 'SEND_ERROR' });
       setOutboxQueue((previous) => {
         const index = previous.findIndex((item) => item.id === head.id);
         if (index < 0) return previous;
@@ -1557,6 +1498,7 @@ function AppContent() {
     isSending,
     refreshSessions,
     runGatewayHealthCheck,
+    runGatewayRuntimeAction,
     updateChatTurn,
   ]);
 
@@ -1672,7 +1614,8 @@ function AppContent() {
     const activeSessionKey = activeSessionKeyRef.current;
     const hasMatchingSession = payload.sessionKey === activeSessionKey;
     const eventSessionKey = (payload.sessionKey ?? '').trim() || activeSessionKey;
-    const text = toTextContent(payload.message, { trim: false, dedupe: false });
+    const streamText = toTextContent(payload.message, { trim: false, dedupe: false });
+    const finalEventText = extractFinalChatEventText(payload);
     const state = normalizeChatEventState(payload.state);
     setGatewayEventState(state);
     let turnId = runIdToTurnIdRef.current.get(payload.runId);
@@ -1695,12 +1638,7 @@ function AppContent() {
     }
 
     if (!turnId) {
-      if (
-        text ||
-        state === 'complete' ||
-        state === 'error' ||
-        state === 'aborted'
-      ) {
+      if (finalEventText || state === 'complete' || state === 'error' || state === 'aborted') {
         if (
           state === 'complete' ||
           state === 'error' ||
@@ -1712,7 +1650,7 @@ function AppContent() {
           if (
             state === 'complete' &&
             isOnboardingWaitingForResponse &&
-            !isIncompleteAssistantContent(text)
+            !isIncompleteAssistantContent(finalEventText)
           ) {
             setIsOnboardingWaitingForResponse(false);
             setIsOnboardingCompleted(true);
@@ -1723,7 +1661,7 @@ function AppContent() {
           ) {
             setIsOnboardingWaitingForResponse(false);
           }
-          if (state === 'complete' && shouldAttemptFinalRecovery(text)) {
+          if (state === 'complete' && shouldAttemptFinalRecovery(finalEventText)) {
             scheduleFinalResponseRecovery(eventSessionKey);
             const latestTurns = sessionTurnsRef.current.get(eventSessionKey) ?? [];
             const latestTurn = latestTurns[latestTurns.length - 1];
@@ -1745,7 +1683,7 @@ function AppContent() {
         ...turn,
         runId: payload.runId,
         state,
-        assistantText: mergeAssistantStreamText(turn.assistantText, text),
+        assistantText: mergeAssistantStreamText(turn.assistantText, streamText),
       }));
       return;
     }
@@ -1759,7 +1697,7 @@ function AppContent() {
       let finalAssistantText = '';
       updateChatTurn(turnId, (turn) => {
         finalAssistantText = resolveCompletedAssistantText({
-          finalText: text,
+          finalText: finalEventText,
           streamedText: turn.assistantText,
           stopReason: payload.stopReason,
         });
@@ -1777,7 +1715,7 @@ function AppContent() {
         setIsOnboardingWaitingForResponse(false);
         setIsOnboardingCompleted(true);
       }
-      if (shouldAttemptFinalRecovery(text, finalAssistantText || undefined)) {
+      if (shouldAttemptFinalRecovery(finalEventText, finalAssistantText || undefined)) {
         scheduleFinalResponseRecovery(eventSessionKey);
         scheduleMissingResponseRecovery(eventSessionKey, turnId);
       } else {
@@ -1801,7 +1739,7 @@ function AppContent() {
         ...turn,
         runId: payload.runId,
         state: 'error',
-        assistantText: text || message,
+        assistantText: finalEventText || message,
       }));
       if (isOnboardingWaitingForResponse) {
         setIsOnboardingWaitingForResponse(false);
@@ -1835,12 +1773,12 @@ function AppContent() {
       return;
     }
 
-    if (text) {
+    if (streamText) {
       updateChatTurn(turnId, (turn) => ({
         ...turn,
         runId: payload.runId,
         state,
-        assistantText: mergeAssistantStreamText(turn.assistantText, text),
+        assistantText: mergeAssistantStreamText(turn.assistantText, streamText),
       }));
     }
   };
@@ -1904,13 +1842,13 @@ function AppContent() {
     }
 
     const connectOnce = async (clientId: string) => {
+      invalidateRefreshEpoch();
       disconnectGateway();
       setGatewayError(null);
       setGatewayConnectDiagnostic(null);
       setSessionsError(null);
-      setConnectionState('connecting');
-
-      const client = new GatewayClient(trimmedGatewayUrl, {
+      runGatewayRuntimeAction({ type: 'CONNECT_REQUEST' });
+      await gatewayConnect(trimmedGatewayUrl, {
         token: authToken.trim() || undefined,
         autoReconnect: true,
         platform: GATEWAY_PLATFORM,
@@ -1919,6 +1857,11 @@ function AppContent() {
         scopes: ['operator.read', 'operator.write'],
         caps: ['talk'],
       });
+
+      const client = gatewayGetClient();
+      if (!client) {
+        throw new Error('Connection established but Gateway client is unavailable.');
+      }
 
       const pairingListener = () => {
         setGatewayError(
@@ -1932,32 +1875,19 @@ function AppContent() {
         setGatewayEventState('pairing-required');
       };
 
-      const onConnectionStateChange = client.onConnectionStateChange((state) => {
-        setConnectionState(state);
-      });
       const onChatEvent = client.onChatEvent(handleChatEvent);
       client.on('pairing.required', pairingListener);
 
       subscriptionsRef.current = [
-        onConnectionStateChange,
         onChatEvent,
         () => client.off('pairing.required', pairingListener),
       ];
-
       clientRef.current = client;
-
-      await Promise.race([
-        client.connect(),
-        new Promise<never>((_, reject) => {
-          setTimeout(() => {
-            reject(new Error('Connection timeout: check URL / certificate / token.'));
-          }, 15000);
-        }),
-      ]);
     };
 
     try {
       await connectOnce(REQUESTED_GATEWAY_CLIENT_ID);
+      runGatewayRuntimeAction({ type: 'CONNECT_SUCCESS' });
       setGatewayError(null);
       setGatewayConnectDiagnostic(null);
       setGatewayEventState('ready');
@@ -1968,12 +1898,15 @@ function AppContent() {
         startupAutoConnectAttemptRef.current = 0;
       }
     } catch (err) {
+      runGatewayRuntimeAction({ type: 'CONNECT_FAILED' });
       disconnectGateway();
       const errorText = errorMessage(err);
-      const diagnostic = classifyGatewayConnectFailure({
-        error: err,
-        hasToken,
-      });
+      const diagnostic =
+        gatewayContextConnectDiagnostic ??
+        classifyGatewayConnectFailure({
+          error: err,
+          hasToken,
+        });
       setGatewayConnectDiagnostic(diagnostic);
       if (isAutoConnect) {
         const retryPlan = computeAutoConnectRetryPlan({
@@ -2027,6 +1960,7 @@ function AppContent() {
   useEffect(() => {
     return () => {
       isUnmountingRef.current = true;
+      invalidateRefreshEpoch();
       expectedSpeechStopRef.current = true;
       if (holdStartTimerRef.current) {
         clearTimeout(holdStartTimerRef.current);
@@ -2052,10 +1986,6 @@ function AppContent() {
       if (outboxRetryTimerRef.current) {
         clearTimeout(outboxRetryTimerRef.current);
         outboxRetryTimerRef.current = null;
-      }
-      if (healthCheckIntervalRef.current) {
-        clearInterval(healthCheckIntervalRef.current);
-        healthCheckIntervalRef.current = null;
       }
       if (startupAutoConnectRetryTimerRef.current) {
         clearTimeout(startupAutoConnectRetryTimerRef.current);
@@ -2602,15 +2532,15 @@ function AppContent() {
         : null;
   const settingsStatusText = !settingsReady
     ? 'Loading settings...'
-    : settingsSavePendingCount > 0
+    : isSettingsSaving || settingsPendingSaveCount > 0
       ? 'Syncing...'
-      : settingsSaveError
-        ? settingsSaveError
-        : settingsSavedAt
-          ? `Saved ${formatClockLabel(settingsSavedAt)}`
-          : 'Saved';
+    : settingsSaveError
+      ? settingsSaveError
+      : settingsLastSavedAt
+        ? `Saved ${formatClockLabel(settingsLastSavedAt)}`
+        : 'Saved';
   const isSettingsStatusError = Boolean(settingsSaveError);
-  const isSettingsStatusPending = settingsSavePendingCount > 0;
+  const isSettingsStatusPending = isSettingsSaving || settingsPendingSaveCount > 0;
   const sectionIconColor = isDarkTheme ? '#9eb1d2' : '#70706A';
   const actionIconColor = isDarkTheme ? '#b8c9e6' : '#5C5C5C';
   const currentBadgeIconColor = isDarkTheme ? '#9ec0ff' : '#1D4ED8';
@@ -2668,6 +2598,10 @@ function AppContent() {
     showHistoryCard &&
     showHistorySecondaryUi &&
     Boolean(historyUpdatedLabel);
+  const historyListBottomPadding = Math.max(
+    12,
+    historyBottomInset + (showScrollToBottomButton ? 28 : 0),
+  );
   const hasRetryingState =
     Boolean(activeMissingResponseNotice) ||
     (outboxPendingCount > 0 && connectionState === 'connected');
@@ -2723,6 +2657,8 @@ function AppContent() {
                         ? 'Hold to record'
                         : speechUnsupportedMessage;
   const showBottomStatus = !isKeyboardBarMounted && !isHomeComposingMode;
+  const bottomActionStatusLabel = BOTTOM_ACTION_STATUS_LABELS[bottomActionStatus];
+  const connectionStatusLabel = CONNECTION_LABELS[connectionState];
   const showHistoryDateDivider = showHistorySecondaryUi;
   const showHistoryScrollButton =
     showScrollToBottomButton &&
@@ -2868,6 +2804,85 @@ function AppContent() {
     void sendToGateway(ONBOARDING_SAMPLE_MESSAGE);
   };
 
+  const handleToggleSessionPanel = useCallback(() => {
+    if (!isGatewayConnected) return;
+    Keyboard.dismiss();
+    setFocusedField(null);
+    setIsSettingsPanelOpen(false);
+    forceMaskAuthToken();
+    const next = !isSessionPanelOpen;
+    setIsSessionPanelOpen(next);
+    if (next) {
+      void refreshSessions();
+    } else {
+      setIsSessionRenameOpen(false);
+      setSessionRenameTargetKey(null);
+      setSessionRenameDraft('');
+    }
+  }, [
+    forceMaskAuthToken,
+    isGatewayConnected,
+    isSessionPanelOpen,
+    refreshSessions,
+  ]);
+
+  const handleToggleSettingsPanel = useCallback(() => {
+    if (!canToggleSettingsPanel) return;
+    Keyboard.dismiss();
+    setFocusedField(null);
+    setIsSessionPanelOpen(false);
+    setIsSettingsPanelOpen((current) => {
+      const next = !current;
+      if (!next) {
+        forceMaskAuthToken();
+      }
+      return next;
+    });
+  }, [canToggleSettingsPanel, forceMaskAuthToken]);
+
+  const handleCloseSettingsPanel = useCallback(() => {
+    if (!canDismissSettingsScreen) return;
+    forceMaskAuthToken();
+    setIsSettingsPanelOpen(false);
+    setFocusedField(null);
+    Keyboard.dismiss();
+  }, [canDismissSettingsScreen, forceMaskAuthToken]);
+
+  const handleCloseSessionPanel = useCallback(() => {
+    setIsSessionPanelOpen(false);
+    setIsSessionRenameOpen(false);
+    setSessionRenameTargetKey(null);
+    setSessionRenameDraft('');
+    Keyboard.dismiss();
+  }, []);
+
+  const handleDoneKeyboardAction = useCallback(() => {
+    Keyboard.dismiss();
+    setFocusedField(null);
+  }, []);
+
+  const handleClearKeyboardAction = useCallback(() => {
+    if (!canClearFromKeyboardBar) return;
+    clearTranscriptDraft();
+  }, [canClearFromKeyboardBar, clearTranscriptDraft]);
+
+  const handleSendKeyboardAction = useCallback(() => {
+    if (!canSendFromKeyboardBar) return;
+    const text = transcript.trim() || interimTranscript.trim();
+    if (!text) return;
+    Keyboard.dismiss();
+    setFocusedField(null);
+    void sendToGateway(text);
+  }, [canSendFromKeyboardBar, interimTranscript, sendToGateway, transcript]);
+
+  const handleSendDraftAction = useCallback(() => {
+    const text = transcript.trim() || interimTranscript.trim();
+    if (!text) return;
+    Keyboard.dismiss();
+    setFocusedField(null);
+    void sendToGateway(text);
+  }, [interimTranscript, sendToGateway, transcript]);
+
   const handleRefreshHistory = useCallback(() => {
     if (!isGatewayConnected || isSessionHistoryLoading) return;
     Keyboard.dismiss();
@@ -2898,11 +2913,9 @@ function AppContent() {
   ]);
 
   const handleScrollHistoryToBottom = useCallback(() => {
-    historyAutoScrollRef.current = true;
-    setShowScrollToBottomButton(false);
-    historyScrollRef.current?.scrollToEnd({ animated: true });
+    scrollHistoryToBottom(true);
     void triggerHaptic('button-press');
-  }, [triggerHaptic]);
+  }, [scrollHistoryToBottom, triggerHaptic]);
 
   const handleHoldToTalkPressIn = () => {
     if (!speechRecognitionSupported || isRecognizing || isSending) return;
@@ -3227,1351 +3240,158 @@ function AppContent() {
         style={styles.keyboardWrap}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={styles.headerRow}>
-          <View style={styles.headerLeft}>
-            <View style={styles.logoBadge}>
-              <Image
-                source={require('./assets/logo-badge.png')}
-                style={styles.logoBadgeImage}
-              />
-            </View>
-            <Text style={styles.headerTitle} maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}>
-              OpenClaw Pocket
-            </Text>
-          </View>
-          <View style={styles.headerRight}>
-            <View
-              style={[
-                styles.statusChip,
-                isGatewayConnected
-                  ? styles.statusChipConnected
-                  : isGatewayConnecting
-                    ? styles.statusChipConnecting
-                    : styles.statusChipDisconnected,
-              ]}
-            >
-              <View
-                style={[
-                  styles.statusDot,
-                  isGatewayConnected
-                    ? styles.statusDotConnected
-                    : isGatewayConnecting
-                      ? styles.statusDotConnecting
-                      : styles.statusDotDisconnected,
-                ]}
-              />
-              <Text
-                style={[
-                  styles.statusChipText,
-                  isGatewayConnected
-                    ? styles.statusChipTextConnected
-                    : isGatewayConnecting
-                      ? styles.statusChipTextConnecting
-                      : styles.statusChipTextDisconnected,
-                ]}
-                maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-              >
-                {CONNECTION_LABELS[connectionState]}
-              </Text>
-            </View>
-            <Pressable
-              style={[
-                styles.iconButton,
-                isSessionPanelOpen && styles.iconButtonActive,
-                !isGatewayConnected && styles.iconButtonDisabled,
-              ]}
-              hitSlop={7}
-              accessibilityRole="button"
-              accessibilityLabel={
-                isSessionPanelOpen ? 'Hide sessions screen' : 'Show sessions screen'
-              }
-              onPress={() => {
-                if (!isGatewayConnected) return;
-                Keyboard.dismiss();
-                setFocusedField(null);
-                setIsSettingsPanelOpen(false);
-                forceMaskAuthToken();
-                const next = !isSessionPanelOpen;
-                setIsSessionPanelOpen(next);
-                if (next) {
-                  void refreshSessions();
-                } else {
-                  setIsSessionRenameOpen(false);
-                  setSessionRenameTargetKey(null);
-                  setSessionRenameDraft('');
-                }
-              }}
-              disabled={!isGatewayConnected}
-            >
-              <Ionicons
-                name="albums-outline"
-                size={18}
-                color={isDarkTheme ? '#bccae2' : '#707070'}
-              />
-            </Pressable>
-            <Pressable
-              style={[
-                styles.iconButton,
-                isSettingsPanelOpen && styles.iconButtonActive,
-                !canToggleSettingsPanel && styles.iconButtonDisabled,
-              ]}
-              hitSlop={7}
-              accessibilityRole="button"
-              accessibilityLabel={
-                isSettingsPanelOpen
-                  ? 'Hide settings screen'
-                  : 'Show settings screen'
-              }
-              onPress={() => {
-                if (!canToggleSettingsPanel) return;
-                Keyboard.dismiss();
-                setFocusedField(null);
-                setIsSessionPanelOpen(false);
-                setIsSettingsPanelOpen((current) => {
-                  const next = !current;
-                  if (!next) {
-                    forceMaskAuthToken();
-                  }
-                  return next;
-                });
-              }}
-              disabled={!canToggleSettingsPanel}
-            >
-              <Ionicons
-                name="settings-outline"
-                size={18}
-                color={isDarkTheme ? '#bccae2' : '#707070'}
-              />
-            </Pressable>
-          </View>
-        </View>
+        <ConnectionHeader
+          styles={styles}
+          isDarkTheme={isDarkTheme}
+          connectionLabel={connectionStatusLabel}
+          isGatewayConnected={isGatewayConnected}
+          isGatewayConnecting={isGatewayConnecting}
+          isSessionPanelOpen={isSessionPanelOpen}
+          isSettingsPanelOpen={isSettingsPanelOpen}
+          canToggleSettingsPanel={canToggleSettingsPanel}
+          onToggleSessionPanel={handleToggleSessionPanel}
+          onToggleSettingsPanel={handleToggleSettingsPanel}
+          maxTextScaleTight={MAX_TEXT_SCALE_TIGHT}
+        />
 
-        <Modal
+        <SettingsScreenModal
           visible={shouldShowSettingsScreen}
-          animationType="slide"
-          presentationStyle="fullScreen"
-          onRequestClose={() => {
-            if (!canDismissSettingsScreen) return;
-            forceMaskAuthToken();
-            setIsSettingsPanelOpen(false);
-            setFocusedField(null);
-            Keyboard.dismiss();
-          }}
+          styles={styles}
+          isDarkTheme={isDarkTheme}
+          canDismissSettingsScreen={canDismissSettingsScreen}
+          isSettingsStatusPending={isSettingsStatusPending}
+          isSettingsStatusError={isSettingsStatusError}
+          settingsStatusText={settingsStatusText}
+          isKeyboardVisible={isKeyboardVisible}
+          settingsScrollRef={settingsScrollRef}
+          onClose={handleCloseSettingsPanel}
+          maxTextScaleTight={MAX_TEXT_SCALE_TIGHT}
         >
-          <SafeAreaView style={styles.settingsScreenContainer}>
-            <View style={styles.settingsScreenHeader}>
-              <Text
-                style={styles.settingsScreenTitle}
-                maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-              >
-                Settings
-              </Text>
-              <View style={styles.settingsScreenHeaderRight}>
-                <View
-                  style={[
-                    styles.settingsStatusChip,
-                    isSettingsStatusPending && styles.settingsStatusChipPending,
-                    isSettingsStatusError && styles.settingsStatusChipError,
-                  ]}
-                >
-                  <Ionicons
-                    name={
-                      isSettingsStatusError
-                        ? 'alert-circle-outline'
-                        : isSettingsStatusPending
-                          ? 'sync-outline'
-                          : 'checkmark-circle-outline'
-                    }
-                    size={12}
-                    color={
-                      isSettingsStatusError
-                        ? isDarkTheme
-                          ? '#ffb0b0'
-                          : '#DC2626'
-                        : isDarkTheme
-                          ? '#9ec0ff'
-                          : '#1D4ED8'
-                    }
-                  />
-                  <Text
-                    style={[
-                      styles.settingsStatusChipText,
-                      isSettingsStatusError && styles.settingsStatusChipTextError,
-                    ]}
-                    maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                    numberOfLines={1}
-                  >
-                    {settingsStatusText}
-                  </Text>
-                </View>
-              <Pressable
-                style={[
-                  styles.iconButton,
-                  !canDismissSettingsScreen && styles.iconButtonDisabled,
-                ]}
-                hitSlop={7}
-                accessibilityRole="button"
-                accessibilityLabel="Close settings screen"
-                onPress={() => {
-                  if (!canDismissSettingsScreen) return;
-                  forceMaskAuthToken();
-                  setIsSettingsPanelOpen(false);
-                  setFocusedField(null);
-                  Keyboard.dismiss();
-                }}
-                disabled={!canDismissSettingsScreen}
-              >
-                <Ionicons
-                  name="close"
-                  size={18}
-                  color={isDarkTheme ? '#bccae2' : '#707070'}
-                />
-              </Pressable>
-              </View>
-            </View>
-            <KeyboardAvoidingView
-              style={styles.settingsScreenKeyboardWrap}
-              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            >
-              <ScrollView
-                ref={settingsScrollRef}
-                style={styles.settingsScreenScroll}
-                contentContainerStyle={[
-                  styles.settingsScreenScrollContent,
-                  isKeyboardVisible && styles.settingsScreenScrollContentKeyboardOpen,
-                ]}
-                keyboardShouldPersistTaps="handled"
-                keyboardDismissMode="on-drag"
-              >
-                <View style={styles.gatewayPanel}>
-                  {showOnboardingGuide && !isQuickTextSettingsEditMode ? (
-                    <View style={[styles.settingsSection, styles.onboardingSection]}>
-                      <View style={styles.sectionTitleRow}>
-                        <Ionicons
-                          name="sparkles-outline"
-                          size={14}
-                          color={sectionIconColor}
-                        />
-                        <Text
-                          style={styles.settingsSectionTitle}
-                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                        >
-                          Getting Started
-                        </Text>
-                      </View>
-                      <Text
-                        style={styles.onboardingDescription}
-                        maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                      >
-                        Complete setup in three steps: configure Gateway, test connection,
-                        then send one sample message.
-                      </Text>
-                      <View style={styles.onboardingStepList}>
-                        <View style={styles.onboardingStepRow}>
-                          <Ionicons
-                            name={
-                              isOnboardingGatewayConfigured
-                                ? 'checkmark-circle'
-                                : 'ellipse-outline'
-                            }
-                            size={14}
-                            color={
-                              isOnboardingGatewayConfigured
-                                ? currentBadgeIconColor
-                                : optionIconColor
-                            }
-                          />
-                          <Text
-                            style={[
-                              styles.onboardingStepText,
-                              isOnboardingGatewayConfigured &&
-                                styles.onboardingStepTextDone,
-                            ]}
-                            maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                          >
-                            1. Enter Gateway URL and optional token.
-                          </Text>
-                        </View>
-                        <View style={styles.onboardingStepRow}>
-                          <Ionicons
-                            name={
-                              isOnboardingConnectDone
-                                ? 'checkmark-circle'
-                                : 'ellipse-outline'
-                            }
-                            size={14}
-                            color={
-                              isOnboardingConnectDone
-                                ? currentBadgeIconColor
-                                : optionIconColor
-                            }
-                          />
-                          <Text
-                            style={[
-                              styles.onboardingStepText,
-                              isOnboardingConnectDone &&
-                                styles.onboardingStepTextDone,
-                            ]}
-                            maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                          >
-                            2. Tap Test Connection and confirm status is Connected.
-                          </Text>
-                        </View>
-                        <View style={styles.onboardingStepRow}>
-                          <Ionicons
-                            name={
-                              isOnboardingResponseDone
-                                ? 'checkmark-circle'
-                                : isOnboardingWaitingForResponse
-                                  ? 'time-outline'
-                                  : 'ellipse-outline'
-                            }
-                            size={14}
-                            color={
-                              isOnboardingResponseDone
-                                ? currentBadgeIconColor
-                                : isOnboardingWaitingForResponse
-                                  ? currentBadgeIconColor
-                                  : optionIconColor
-                            }
-                          />
-                          <Text
-                            style={[
-                              styles.onboardingStepText,
-                              isOnboardingResponseDone && styles.onboardingStepTextDone,
-                            ]}
-                            maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                          >
-                            {isOnboardingWaitingForResponse
-                              ? '3. Waiting for first response from Gateway...'
-                              : '3. Send one sample message to verify chat round-trip.'}
-                          </Text>
-                        </View>
-                      </View>
-                      <View style={styles.onboardingActionRow}>
-                        <Pressable
-                          style={[
-                            styles.smallButton,
-                            styles.connectButton,
-                            !canRunOnboardingConnectTest && styles.smallButtonDisabled,
-                          ]}
-                          accessibilityRole="button"
-                          accessibilityLabel="Test gateway connection"
-                          onPress={handleOnboardingConnectTest}
-                          disabled={!canRunOnboardingConnectTest}
-                        >
-                          <Text
-                            style={styles.smallButtonText}
-                            maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                          >
-                            {isGatewayConnecting ? 'Connecting...' : 'Test Connection'}
-                          </Text>
-                        </Pressable>
-                        <Pressable
-                          style={[
-                            styles.smallButton,
-                            styles.onboardingSecondaryButton,
-                            !canRunOnboardingSampleSend &&
-                              styles.onboardingSecondaryButtonDisabled,
-                          ]}
-                          accessibilityRole="button"
-                          accessibilityLabel={
-                            isOnboardingWaitingForResponse
-                              ? 'Waiting for first onboarding response'
-                              : 'Send onboarding sample message'
-                          }
-                          onPress={handleOnboardingSendSample}
-                          disabled={!canRunOnboardingSampleSend}
-                        >
-                          <Text
-                            style={styles.onboardingSecondaryButtonText}
-                            maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                          >
-                            {onboardingSampleButtonLabel}
-                          </Text>
-                        </Pressable>
-                      </View>
-                      <Pressable
-                        style={styles.onboardingSkipButton}
-                        accessibilityRole="button"
-                        accessibilityLabel="Skip onboarding"
-                        onPress={handleCompleteOnboarding}
-                      >
-                        <Text
-                          style={styles.onboardingSkipButtonText}
-                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                        >
-                          Skip for now
-                        </Text>
-                      </Pressable>
-                    </View>
-                  ) : null}
-
-                  {!isQuickTextSettingsEditMode ? (
-                    <View style={styles.settingsSection}>
-                    <View style={styles.sectionTitleRow}>
-                      <Ionicons name="link-outline" size={14} color={sectionIconColor} />
-                      <Text
-                        style={styles.settingsSectionTitle}
-                        maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                      >
-                        Gateway
-                      </Text>
-                    </View>
-                    <Text style={styles.label} maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}>
-                      Gateway URL
-                    </Text>
-                    <TextInput
-                      style={[
-                        styles.input,
-                        focusedField === 'gateway-url' && styles.inputFocused,
-                      ]}
-                      maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                      value={gatewayUrl}
-                      onChangeText={setGatewayUrl}
-                      placeholder="wss://your-openclaw-gateway.example.com"
-                      placeholderTextColor={placeholderColor}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      returnKeyType="done"
-                      blurOnSubmit
-                      onSubmitEditing={() => Keyboard.dismiss()}
-                      onFocus={() => setFocusedField('gateway-url')}
-                      onBlur={() =>
-                        setFocusedField((current) =>
-                          current === 'gateway-url' ? null : current,
-                        )
-                      }
-                    />
-
-                    <Text
-                      style={[styles.label, styles.labelSpacing]}
-                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                    >
-                      Token (optional)
-                    </Text>
-                    <View
-                      style={[
-                        styles.tokenInputRow,
-                        styles.input,
-                        focusedField === 'auth-token' && styles.inputFocused,
-                      ]}
-                    >
-                      <TextInput
-                        style={styles.tokenInputField}
-                        maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                        value={authToken}
-                        onChangeText={setAuthToken}
-                        placeholder="gateway token or password"
-                        placeholderTextColor={placeholderColor}
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                        autoComplete="off"
-                        textContentType={isAuthTokenMasked ? 'password' : 'none'}
-                        secureTextEntry={isAuthTokenMasked}
-                        returnKeyType="done"
-                        blurOnSubmit
-                        onSubmitEditing={() => Keyboard.dismiss()}
-                        onFocus={() => setFocusedField('auth-token')}
-                        onBlur={() =>
-                          setFocusedField((current) =>
-                            current === 'auth-token' ? null : current,
-                          )
-                        }
-                      />
-                      <Pressable
-                        style={styles.tokenVisibilityButton}
-                        accessibilityRole="button"
-                        accessibilityLabel={
-                          isAuthTokenMasked ? 'Show token' : 'Hide token'
-                        }
-                        accessibilityHint={
-                          isAuthTokenMasked
-                            ? 'Temporarily reveals token.'
-                            : 'Hide token value.'
-                        }
-                        onPress={toggleAuthTokenVisibility}
-                      >
-                        <Ionicons
-                          name={isAuthTokenMasked ? 'eye-outline' : 'eye-off-outline'}
-                          size={16}
-                          color={optionIconColor}
-                        />
-                      </Pressable>
-                    </View>
-                    <View style={styles.connectionRow}>
-                      <Pressable
-                        style={[
-                          styles.smallButton,
-                          styles.connectButton,
-                          (isGatewayConnecting || !settingsReady) &&
-                            styles.smallButtonDisabled,
-                        ]}
-                        onPress={() => {
-                          Keyboard.dismiss();
-                          setFocusedField(null);
-                          void connectGateway();
-                        }}
-                        disabled={isGatewayConnecting || !settingsReady}
-                      >
-                        <Text
-                          style={styles.smallButtonText}
-                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                        >
-                          {!settingsReady
-                            ? 'Initializing...'
-                            : isGatewayConnecting
-                              ? 'Connecting...'
-                              : 'Connect'}
-                        </Text>
-                      </Pressable>
-                    </View>
-                    {isStartupAutoConnecting ? (
-                      <View style={styles.autoConnectLoadingRow}>
-                        <ActivityIndicator
-                          size="small"
-                          color={isDarkTheme ? '#9ec0ff' : '#2563EB'}
-                        />
-                        <Text
-                          style={styles.autoConnectLoadingText}
-                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                        >
-                          Connecting to saved Gateway...
-                        </Text>
-                      </View>
-                    ) : null}
-                    {showGatewayDiagnostic ? (
-                      <View style={styles.gatewayDiagnosticBox}>
-                        <Ionicons
-                          name={gatewayDiagnosticIconName}
-                          size={14}
-                          color={sectionIconColor}
-                        />
-                        <View style={styles.gatewayDiagnosticTextWrap}>
-                          <Text
-                            style={styles.gatewayDiagnosticSummary}
-                            maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                          >
-                            {gatewayConnectDiagnostic?.summary}
-                          </Text>
-                          <Text
-                            style={styles.gatewayDiagnosticHint}
-                            maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                          >
-                            {gatewayConnectDiagnostic?.guidance}
-                          </Text>
-                        </View>
-                      </View>
-                    ) : null}
-                    </View>
-                  ) : null}
-
-                  {!isQuickTextSettingsEditMode ? (
-                    <View style={[styles.settingsSection, styles.settingsSectionSpaced]}>
-                    <View style={styles.sectionTitleRow}>
-                      <Ionicons
-                        name="color-palette-outline"
-                        size={14}
-                        color={sectionIconColor}
-                      />
-                      <Text
-                        style={styles.settingsSectionTitle}
-                        maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                      >
-                        Theme
-                      </Text>
-                    </View>
-                    <View style={styles.settingsOptionRow}>
-                      <Pressable
-                        style={[
-                          styles.settingsOptionButton,
-                          theme === 'light' && styles.settingsOptionButtonSelected,
-                        ]}
-                        accessibilityRole="button"
-                        accessibilityLabel="Set theme to light"
-                        onPress={() => {
-                          setTheme('light');
-                        }}
-                      >
-                        <Ionicons
-                          name="sunny-outline"
-                          size={14}
-                          color={theme === 'light' ? currentBadgeIconColor : optionIconColor}
-                        />
-                        <Text
-                          style={[
-                            styles.settingsOptionLabel,
-                            theme === 'light' && styles.settingsOptionLabelSelected,
-                          ]}
-                          maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                        >
-                          Light
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        style={[
-                          styles.settingsOptionButton,
-                          theme === 'dark' && styles.settingsOptionButtonSelected,
-                        ]}
-                        accessibilityRole="button"
-                        accessibilityLabel="Set theme to dark"
-                        onPress={() => {
-                          setTheme('dark');
-                        }}
-                      >
-                        <Ionicons
-                          name="moon-outline"
-                          size={14}
-                          color={theme === 'dark' ? currentBadgeIconColor : optionIconColor}
-                        />
-                        <Text
-                          style={[
-                            styles.settingsOptionLabel,
-                            theme === 'dark' && styles.settingsOptionLabelSelected,
-                          ]}
-                          maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                        >
-                          Dark
-                        </Text>
-                      </Pressable>
-                    </View>
-
-                    </View>
-                  ) : null}
-
-                  {!isQuickTextSettingsEditMode ? (
-                    <View style={[styles.settingsSection, styles.settingsSectionSpaced]}>
-                    <View style={styles.sectionTitleRow}>
-                      <Ionicons name="mic-outline" size={14} color={sectionIconColor} />
-                      <Text
-                        style={styles.settingsSectionTitle}
-                        maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                      >
-                        Language
-                      </Text>
-                    </View>
-                    <View style={styles.languagePickerRow}>
-                      {SPEECH_LANG_OPTIONS.map((option) => {
-                        const selected = speechLang === option.value;
-                        return (
-                          <Pressable
-                            key={option.value}
-                            style={[
-                              styles.languageOptionButton,
-                              selected && styles.languageOptionButtonSelected,
-                            ]}
-                            accessibilityRole="button"
-                            accessibilityLabel={`Set speech language to ${option.label} (${option.value})`}
-                            onPress={() => {
-                              Keyboard.dismiss();
-                              setFocusedField(null);
-                              setSpeechLang(option.value);
-                            }}
-                          >
-                            <Text
-                              style={[
-                                styles.languageOptionLabel,
-                                selected && styles.languageOptionLabelSelected,
-                              ]}
-                              maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                            >
-                              {option.label}
-                            </Text>
-                            <Text
-                              style={[
-                                styles.languageOptionCode,
-                                selected && styles.languageOptionCodeSelected,
-                              ]}
-                              maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                            >
-                              {option.value}
-                            </Text>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                    </View>
-                  ) : null}
-
-                  <View
-                    style={[
-                      styles.settingsSection,
-                      !isQuickTextSettingsEditMode && styles.settingsSectionSpaced,
-                      isQuickTextSettingsEditMode && styles.settingsSectionFocused,
-                    ]}
-                  >
-                    <View style={styles.quickTextSectionHeaderRow}>
-                      <View style={styles.sectionTitleRow}>
-                        <Ionicons
-                          name="chatbubble-ellipses-outline"
-                          size={14}
-                          color={sectionIconColor}
-                        />
-                        <Text
-                          style={styles.settingsSectionTitle}
-                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                        >
-                          Quick Text
-                        </Text>
-                      </View>
-                      {isQuickTextSettingsEditMode ? (
-                        <Pressable
-                          style={styles.quickTextDoneButton}
-                          accessibilityRole="button"
-                          accessibilityLabel="Done editing quick text"
-                          onPress={() => {
-                            Keyboard.dismiss();
-                            setFocusedField(null);
-                          }}
-                        >
-                          <Ionicons
-                            name="checkmark-outline"
-                            size={12}
-                            color={actionIconColor}
-                          />
-                          <Text
-                            style={styles.quickTextDoneButtonText}
-                            maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                          >
-                            Done
-                          </Text>
-                        </Pressable>
-                      ) : null}
-                    </View>
-                    <View style={styles.quickTextConfigRow}>
-                      <View style={styles.quickTextConfigItem}>
-                        <Text style={styles.label} maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}>
-                          Left
-                        </Text>
-                        <TextInput
-                          ref={(node) => {
-                            quickTextInputRefs.current['quick-text-left'] = node;
-                          }}
-                          style={[
-                            styles.input,
-                            styles.quickTextConfigInput,
-                            focusedField === 'quick-text-left' && styles.inputFocused,
-                          ]}
-                          maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                          value={quickTextLeft}
-                          onChangeText={setQuickTextLeft}
-                          placeholder="e.g. ありがとう"
-                          placeholderTextColor={placeholderColor}
-                          autoCapitalize="none"
-                          autoCorrect={false}
-                          maxLength={120}
-                          multiline
-                          textAlignVertical="top"
-                          returnKeyType="done"
-                          blurOnSubmit
-                          onSubmitEditing={() => Keyboard.dismiss()}
-                          onFocus={() => {
-                            setFocusedField('quick-text-left');
-                            ensureSettingsFieldVisible('quick-text-left');
-                          }}
-                          onBlur={() =>
-                            setFocusedField((current) =>
-                              current === 'quick-text-left' ? null : current,
-                            )
-                          }
-                        />
-                        <Text
-                          style={[styles.label, styles.quickTextIconLabel]}
-                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                        >
-                          Icon
-                        </Text>
-                        <View style={styles.quickTextIconPickerRow}>
-                          {QUICK_TEXT_ICON_OPTIONS.map((option) => {
-                            const selected = quickTextLeftIcon === option.value;
-                            return (
-                              <Pressable
-                                key={`left-${option.value}`}
-                                style={[
-                                  styles.quickTextIconOptionButton,
-                                  selected && styles.quickTextIconOptionButtonSelected,
-                                ]}
-                                accessibilityRole="button"
-                                accessibilityLabel={`Set left quick text icon to ${option.label}`}
-                                onPress={() => {
-                                  Keyboard.dismiss();
-                                  setFocusedField(null);
-                                  setQuickTextLeftIcon(option.value);
-                                }}
-                              >
-                                <Ionicons
-                                  name={option.value}
-                                  size={16}
-                                  color={selected ? currentBadgeIconColor : optionIconColor}
-                                />
-                              </Pressable>
-                            );
-                          })}
-                        </View>
-                      </View>
-                      <View style={styles.quickTextConfigItem}>
-                        <Text style={styles.label} maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}>
-                          Right
-                        </Text>
-                        <TextInput
-                          ref={(node) => {
-                            quickTextInputRefs.current['quick-text-right'] = node;
-                          }}
-                          style={[
-                            styles.input,
-                            styles.quickTextConfigInput,
-                            focusedField === 'quick-text-right' && styles.inputFocused,
-                          ]}
-                          maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                          value={quickTextRight}
-                          onChangeText={setQuickTextRight}
-                          placeholder="e.g. お願いします"
-                          placeholderTextColor={placeholderColor}
-                          autoCapitalize="none"
-                          autoCorrect={false}
-                          maxLength={120}
-                          multiline
-                          textAlignVertical="top"
-                          returnKeyType="done"
-                          blurOnSubmit
-                          onSubmitEditing={() => Keyboard.dismiss()}
-                          onFocus={() => {
-                            setFocusedField('quick-text-right');
-                            ensureSettingsFieldVisible('quick-text-right');
-                          }}
-                          onBlur={() =>
-                            setFocusedField((current) =>
-                              current === 'quick-text-right' ? null : current,
-                            )
-                          }
-                        />
-                        <Text
-                          style={[styles.label, styles.quickTextIconLabel]}
-                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                        >
-                          Icon
-                        </Text>
-                        <View style={styles.quickTextIconPickerRow}>
-                          {QUICK_TEXT_ICON_OPTIONS.map((option) => {
-                            const selected = quickTextRightIcon === option.value;
-                            return (
-                              <Pressable
-                                key={`right-${option.value}`}
-                                style={[
-                                  styles.quickTextIconOptionButton,
-                                  selected && styles.quickTextIconOptionButtonSelected,
-                                ]}
-                                accessibilityRole="button"
-                                accessibilityLabel={`Set right quick text icon to ${option.label}`}
-                                onPress={() => {
-                                  Keyboard.dismiss();
-                                  setFocusedField(null);
-                                  setQuickTextRightIcon(option.value);
-                                }}
-                              >
-                                <Ionicons
-                                  name={option.value}
-                                  size={16}
-                                  color={selected ? currentBadgeIconColor : optionIconColor}
-                                />
-                              </Pressable>
-                            );
-                          })}
-                        </View>
-                      </View>
-                    </View>
-                  </View>
-                  {ENABLE_DEBUG_WARNINGS && !isQuickTextSettingsEditMode ? (
-                    <DebugInfoPanel
-                      isDarkTheme={isDarkTheme}
-                      connectionState={connectionState}
-                      gatewayEventState={gatewayEventState}
-                      activeSessionKey={activeSessionKey}
-                      activeRunId={activeRunId}
-                      historyLastSyncedAt={historyLastSyncedAt}
-                      isStartupAutoConnecting={isStartupAutoConnecting}
-                      startupAutoConnectAttempt={startupAutoConnectAttemptRef.current}
-                    />
-                  ) : null}
-                </View>
-              </ScrollView>
-          </KeyboardAvoidingView>
-        </SafeAreaView>
-      </Modal>
-      <Modal
+          <SettingsPanelContent
+            styles={styles}
+            maxTextScale={MAX_TEXT_SCALE}
+            maxTextScaleTight={MAX_TEXT_SCALE_TIGHT}
+            showOnboardingGuide={showOnboardingGuide}
+            isQuickTextSettingsEditMode={isQuickTextSettingsEditMode}
+            sectionIconColor={sectionIconColor}
+            currentBadgeIconColor={currentBadgeIconColor}
+            optionIconColor={optionIconColor}
+            actionIconColor={actionIconColor}
+            isOnboardingGatewayConfigured={isOnboardingGatewayConfigured}
+            isOnboardingConnectDone={isOnboardingConnectDone}
+            isOnboardingResponseDone={isOnboardingResponseDone}
+            isOnboardingWaitingForResponse={isOnboardingWaitingForResponse}
+            canRunOnboardingConnectTest={canRunOnboardingConnectTest}
+            canRunOnboardingSampleSend={canRunOnboardingSampleSend}
+            isGatewayConnecting={isGatewayConnecting}
+            onboardingSampleButtonLabel={onboardingSampleButtonLabel}
+            onOnboardingConnectTest={handleOnboardingConnectTest}
+            onOnboardingSendSample={handleOnboardingSendSample}
+            onCompleteOnboarding={handleCompleteOnboarding}
+            focusedField={focusedField}
+            setFocusedField={setFocusedField}
+            gatewayUrl={gatewayUrl}
+            setGatewayUrl={setGatewayUrl}
+            authToken={authToken}
+            setAuthToken={setAuthToken}
+            placeholderColor={placeholderColor}
+            isAuthTokenMasked={isAuthTokenMasked}
+            toggleAuthTokenVisibility={toggleAuthTokenVisibility}
+            settingsReady={settingsReady}
+            connectGateway={connectGateway}
+            isStartupAutoConnecting={isStartupAutoConnecting}
+            isDarkTheme={isDarkTheme}
+            showGatewayDiagnostic={showGatewayDiagnostic}
+            gatewayDiagnosticIconName={gatewayDiagnosticIconName}
+            gatewayConnectDiagnostic={gatewayConnectDiagnostic}
+            theme={theme}
+            setTheme={setTheme}
+            speechLang={speechLang}
+            setSpeechLang={setSpeechLang}
+            quickTextInputRefs={quickTextInputRefs}
+            quickTextLeft={quickTextLeft}
+            setQuickTextLeft={setQuickTextLeft}
+            quickTextRight={quickTextRight}
+            setQuickTextRight={setQuickTextRight}
+            quickTextLeftIcon={quickTextLeftIcon}
+            setQuickTextLeftIcon={setQuickTextLeftIcon}
+            quickTextRightIcon={quickTextRightIcon}
+            setQuickTextRightIcon={setQuickTextRightIcon}
+            ensureSettingsFieldVisible={ensureSettingsFieldVisible}
+            enableDebugWarnings={ENABLE_DEBUG_WARNINGS}
+            connectionState={connectionState}
+            gatewayEventState={gatewayEventState}
+            activeSessionKey={activeSessionKey}
+            activeRunId={activeRunId}
+            historyLastSyncedAt={historyLastSyncedAt}
+            startupAutoConnectAttempt={startupAutoConnectAttemptRef.current}
+          />
+        </SettingsScreenModal>
+      <SessionsScreenModal
         visible={isGatewayConnected && isSessionPanelOpen}
-        animationType="slide"
-        presentationStyle="fullScreen"
-        onRequestClose={() => {
-          setIsSessionPanelOpen(false);
-          setIsSessionRenameOpen(false);
-          setSessionRenameTargetKey(null);
-          setSessionRenameDraft('');
-          Keyboard.dismiss();
-        }}
+        styles={styles}
+        isDarkTheme={isDarkTheme}
+        isSessionsLoading={isSessionsLoading}
+        hasSessionsError={Boolean(sessionsError)}
+        sessionPanelStatusText={sessionPanelStatusText}
+        onClose={handleCloseSessionPanel}
+        maxTextScaleTight={MAX_TEXT_SCALE_TIGHT}
       >
-        <SafeAreaView style={styles.settingsScreenContainer}>
-          <View style={styles.settingsScreenHeader}>
-            <Text
-              style={styles.settingsScreenTitle}
-              maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-            >
-              Sessions
-            </Text>
-            <View style={styles.settingsScreenHeaderRight}>
-              <View
-                style={[
-                  styles.settingsStatusChip,
-                  isSessionsLoading && styles.settingsStatusChipPending,
-                  Boolean(sessionsError) && styles.settingsStatusChipError,
-                ]}
-              >
-                <Ionicons
-                  name={
-                    sessionsError
-                      ? 'alert-circle-outline'
-                      : isSessionsLoading
-                        ? 'sync-outline'
-                        : 'albums-outline'
-                  }
-                  size={12}
-                  color={
-                    sessionsError
-                      ? isDarkTheme
-                        ? '#ffb0b0'
-                        : '#DC2626'
-                      : isDarkTheme
-                        ? '#9ec0ff'
-                        : '#1D4ED8'
-                  }
-                />
-                <Text
-                  style={[
-                    styles.settingsStatusChipText,
-                    Boolean(sessionsError) && styles.settingsStatusChipTextError,
-                  ]}
-                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                  numberOfLines={1}
-                >
-                  {sessionPanelStatusText}
-                </Text>
-              </View>
-              <Pressable
-                style={styles.iconButton}
-                hitSlop={7}
-                accessibilityRole="button"
-                accessibilityLabel="Close sessions screen"
-                onPress={() => {
-                  setIsSessionPanelOpen(false);
-                  setIsSessionRenameOpen(false);
-                  setSessionRenameTargetKey(null);
-                  setSessionRenameDraft('');
-                  Keyboard.dismiss();
-                }}
-              >
-                <Ionicons
-                  name="close"
-                  size={18}
-                  color={isDarkTheme ? '#bccae2' : '#707070'}
-                />
-              </Pressable>
-            </View>
-          </View>
-          <KeyboardAvoidingView
-            style={styles.settingsScreenKeyboardWrap}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          >
-            <ScrollView
-              style={styles.settingsScreenScroll}
-              contentContainerStyle={styles.settingsScreenScrollContent}
-              keyboardShouldPersistTaps="handled"
-              keyboardDismissMode="on-drag"
-            >
-              <View style={styles.gatewayPanel}>
-                <View style={styles.settingsSection}>
-                  <View style={styles.sectionTitleRow}>
-                    <Ionicons name="albums-outline" size={14} color={sectionIconColor} />
-                    <Text
-                      style={styles.settingsSectionTitle}
-                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                    >
-                      Sessions
-                    </Text>
-                  </View>
-                  <View style={styles.sessionActionRow}>
-                    <Pressable
-                      style={[
-                        styles.sessionActionButton,
-                        styles.sessionActionButtonWide,
-                        !canRefreshSessions && styles.sessionActionButtonDisabled,
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel="Refresh sessions list"
-                      onPress={() => {
-                        void refreshSessions();
-                      }}
-                      disabled={!canRefreshSessions}
-                    >
-                      <View style={styles.sessionButtonContent}>
-                        <Ionicons
-                          name="refresh-outline"
-                          size={12}
-                          color={actionIconColor}
-                        />
-                        <Text
-                          style={styles.sessionActionButtonText}
-                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                        >
-                          Refresh
-                        </Text>
-                      </View>
-                    </Pressable>
-                    <Pressable
-                      style={[
-                        styles.sessionActionButton,
-                        styles.sessionActionButtonWide,
-                        !canCreateSession && styles.sessionActionButtonDisabled,
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel="Create new session"
-                      onPress={() => {
-                        void createAndSwitchSession();
-                      }}
-                      disabled={!canCreateSession}
-                    >
-                      <View style={styles.sessionButtonContent}>
-                        <Ionicons name="add" size={12} color={actionIconColor} />
-                        <Text
-                          style={styles.sessionActionButtonText}
-                          maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                        >
-                          New
-                        </Text>
-                      </View>
-                    </Pressable>
-                  </View>
-                  {isGatewayConnected ? (
-                    <View style={styles.sessionListColumn}>
-                      {visibleSessions.map((session) => {
-                        const selected = session.key === activeSessionKey;
-                        const pinned = isSessionPinned(session.key);
-                        const updatedLabel = formatSessionUpdatedAt(session.updatedAt);
-                        const renameTarget = sessionRenameTargetKey === session.key;
-                        return (
-                          <View
-                            key={session.key}
-                            style={[
-                              styles.sessionChip,
-                              selected && styles.sessionChipActive,
-                              !canSwitchSession && styles.sessionChipDisabled,
-                            ]}
-                          >
-                            <Pressable
-                              style={styles.sessionChipPrimary}
-                              accessibilityRole="button"
-                              accessibilityLabel={`Switch to session ${getSessionTitle(session)}`}
-                              onPress={() => {
-                                void switchSession(session.key);
-                              }}
-                              disabled={!canSwitchSession}
-                            >
-                              <View style={styles.sessionChipTopRow}>
-                                <Text
-                                  style={[
-                                    styles.sessionChipTitle,
-                                    selected && styles.sessionChipTitleActive,
-                                  ]}
-                                  numberOfLines={1}
-                                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                                >
-                                  {getSessionTitle(session)}
-                                </Text>
-                                <View style={styles.sessionChipBadgeRow}>
-                                  {selected ? (
-                                    <View
-                                      style={[
-                                        styles.sessionChipBadge,
-                                        styles.sessionChipBadgeCurrent,
-                                      ]}
-                                    >
-                                      <Ionicons
-                                        name="checkmark-circle"
-                                        size={10}
-                                        color={currentBadgeIconColor}
-                                      />
-                                    </View>
-                                  ) : null}
-                                  {pinned ? (
-                                    <View
-                                      style={[
-                                        styles.sessionChipBadge,
-                                        styles.sessionChipBadgePinned,
-                                      ]}
-                                    >
-                                      <Ionicons
-                                        name="star"
-                                        size={10}
-                                        color={pinnedBadgeIconColor}
-                                      />
-                                    </View>
-                                  ) : null}
-                                </View>
-                              </View>
-                              <Text
-                                style={[
-                                  styles.sessionChipMeta,
-                                  selected && styles.sessionChipMetaActive,
-                                ]}
-                                maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                              >
-                                {updatedLabel
-                                  ? `Updated ${updatedLabel} · ${session.key}`
-                                  : session.key}
-                              </Text>
-                            </Pressable>
-                            <View style={styles.sessionChipActionRow}>
-                              <Pressable
-                                style={[
-                                  styles.sessionChipActionButton,
-                                  !canRenameSession && styles.sessionChipActionButtonDisabled,
-                                ]}
-                                accessibilityRole="button"
-                                accessibilityLabel={`Rename session ${getSessionTitle(session)}`}
-                                onPress={() => {
-                                  startSessionRename(session.key);
-                                }}
-                                disabled={!canRenameSession}
-                              >
-                                <Ionicons
-                                  name="create-outline"
-                                  size={13}
-                                  color={actionIconColor}
-                                />
-                              </Pressable>
-                              <Pressable
-                                style={[
-                                  styles.sessionChipActionButton,
-                                  !canPinSession && styles.sessionChipActionButtonDisabled,
-                                ]}
-                                accessibilityRole="button"
-                                accessibilityLabel={
-                                  isSessionPinned(session.key)
-                                    ? `Unpin session ${getSessionTitle(session)}`
-                                    : `Pin session ${getSessionTitle(session)}`
-                                }
-                                onPress={() => {
-                                  toggleSessionPinned(session.key);
-                                }}
-                                disabled={!canPinSession}
-                              >
-                                <Ionicons
-                                  name={
-                                    isSessionPinned(session.key)
-                                      ? 'bookmark'
-                                      : 'bookmark-outline'
-                                  }
-                                  size={13}
-                                  color={actionIconColor}
-                                />
-                              </Pressable>
-                            </View>
-                            {isSessionRenameOpen && renameTarget ? (
-                              <View style={[styles.sessionRenameRow, styles.sessionRenameRowInline]}>
-                                <TextInput
-                                  style={[styles.input, styles.sessionRenameInput]}
-                                  maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                                  value={sessionRenameDraft}
-                                  onChangeText={setSessionRenameDraft}
-                                  placeholder="Session name"
-                                  placeholderTextColor={placeholderColor}
-                                  autoCapitalize="none"
-                                  autoCorrect={false}
-                                  returnKeyType="done"
-                                  blurOnSubmit
-                                  onSubmitEditing={() => {
-                                    void submitSessionRename();
-                                  }}
-                                />
-                                <Pressable
-                                  style={[
-                                    styles.sessionRenameActionButton,
-                                    isSessionOperationPending &&
-                                      styles.sessionRenameActionButtonDisabled,
-                                  ]}
-                                  accessibilityRole="button"
-                                  accessibilityLabel="Save session name"
-                                  onPress={() => {
-                                    void submitSessionRename();
-                                  }}
-                                  disabled={isSessionOperationPending}
-                                >
-                                  <View style={styles.sessionButtonContent}>
-                                    <Ionicons
-                                      name="checkmark-outline"
-                                      size={12}
-                                      color={actionIconColor}
-                                    />
-                                    <Text
-                                      style={styles.sessionRenameActionButtonText}
-                                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                                    >
-                                      Save
-                                    </Text>
-                                  </View>
-                                </Pressable>
-                                <Pressable
-                                  style={styles.sessionRenameActionButton}
-                                  accessibilityRole="button"
-                                  accessibilityLabel="Cancel session rename"
-                                  onPress={() => {
-                                    setIsSessionRenameOpen(false);
-                                    setSessionRenameTargetKey(null);
-                                    setSessionRenameDraft('');
-                                  }}
-                                >
-                                  <View style={styles.sessionButtonContent}>
-                                    <Ionicons
-                                      name="close-outline"
-                                      size={12}
-                                      color={actionIconColor}
-                                    />
-                                    <Text
-                                      style={styles.sessionRenameActionButtonText}
-                                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                                    >
-                                      Cancel
-                                    </Text>
-                                  </View>
-                                </Pressable>
-                              </View>
-                            ) : null}
-                          </View>
-                        );
-                      })}
-                    </View>
-                  ) : (
-                    <Text
-                      style={styles.sessionHintText}
-                      maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                    >
-                      Connect to load available sessions.
-                    </Text>
-                  )}
-                  {isGatewayConnected && sessionListHintText ? (
-                    <Text
-                      style={[
-                        styles.sessionHintText,
-                        sessionsError && styles.sessionHintTextWarning,
-                      ]}
-                      maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                    >
-                      {sessionListHintText}
-                    </Text>
-                  ) : null}
-                </View>
-
-              </View>
-            </ScrollView>
-          </KeyboardAvoidingView>
-        </SafeAreaView>
-      </Modal>
+        <SessionsPanelContent
+          styles={styles}
+          sectionIconColor={sectionIconColor}
+          actionIconColor={actionIconColor}
+          currentBadgeIconColor={currentBadgeIconColor}
+          pinnedBadgeIconColor={pinnedBadgeIconColor}
+          isGatewayConnected={isGatewayConnected}
+          canRefreshSessions={canRefreshSessions}
+          canCreateSession={canCreateSession}
+          canSwitchSession={canSwitchSession}
+          canRenameSession={canRenameSession}
+          canPinSession={canPinSession}
+          activeSessionKey={activeSessionKey}
+          visibleSessions={visibleSessions}
+          sessionRenameTargetKey={sessionRenameTargetKey}
+          isSessionRenameOpen={isSessionRenameOpen}
+          sessionRenameDraft={sessionRenameDraft}
+          setSessionRenameDraft={setSessionRenameDraft}
+          placeholderColor={placeholderColor}
+          isSessionOperationPending={isSessionOperationPending}
+          sessionsError={sessionsError}
+          sessionListHintText={sessionListHintText}
+          maxTextScale={MAX_TEXT_SCALE}
+          maxTextScaleTight={MAX_TEXT_SCALE_TIGHT}
+          refreshSessions={refreshSessions}
+          createAndSwitchSession={createAndSwitchSession}
+          switchSession={switchSession}
+          isSessionPinned={isSessionPinned}
+          getSessionTitle={getSessionTitle}
+          formatSessionUpdatedAt={formatSessionUpdatedAt}
+          startSessionRename={startSessionRename}
+          toggleSessionPinned={toggleSessionPinned}
+          submitSessionRename={submitSessionRename}
+          setIsSessionRenameOpen={setIsSessionRenameOpen}
+          setSessionRenameTargetKey={setSessionRenameTargetKey}
+        />
+      </SessionsScreenModal>
         <View style={styles.headerBoundary} pointerEvents="none" />
         {topBannerMessage && topBannerKind ? (
-          <View
-            style={[
-              styles.topBanner,
-              topBannerKind === 'speech' && styles.topBannerSpeech,
-            ]}
-            accessibilityRole="alert"
-            accessibilityLiveRegion="polite"
-          >
-            <Ionicons
-              name={topBannerIconName}
-              size={13}
-              style={styles.topBannerIcon}
-            />
-            <Text
-              style={styles.topBannerText}
-              maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-              numberOfLines={1}
-            >
-              {topBannerMessage}
-            </Text>
-            <View style={styles.topBannerActionRow}>
-              {topBannerKind === 'gateway' ? (
-                <>
-                  <Pressable
-                    style={[
-                      styles.topBannerActionButton,
-                      !canReconnectFromError && styles.topBannerActionButtonDisabled,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel="Reconnect to Gateway"
-                    onPress={handleReconnectFromError}
-                    disabled={!canReconnectFromError}
-                  >
-                    <Ionicons name="refresh-outline" size={14} style={styles.topBannerActionIcon} />
-                  </Pressable>
-                  <Pressable
-                    style={[
-                      styles.topBannerActionButton,
-                      !canRetryFromError && styles.topBannerActionButtonDisabled,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel="Retry sending the latest message"
-                    onPress={handleRetryFromError}
-                    disabled={!canRetryFromError}
-                  >
-                    <Ionicons name="arrow-redo-outline" size={14} style={styles.topBannerActionIcon} />
-                  </Pressable>
-                </>
-              ) : null}
-              {topBannerKind === 'recovery' ? (
-                <>
-                  <Pressable
-                    style={[
-                      styles.topBannerActionButton,
-                      !canRetryMissingResponse && styles.topBannerActionButtonDisabled,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel="Retry fetching final response"
-                    onPress={handleRetryMissingResponse}
-                    disabled={!canRetryMissingResponse}
-                  >
-                    <Ionicons
-                      name={isMissingResponseRecoveryInFlight ? 'sync-outline' : 'arrow-redo-outline'}
-                      size={14}
-                      style={styles.topBannerActionIcon}
-                    />
-                  </Pressable>
-                  {!isGatewayConnected ? (
-                    <Pressable
-                      style={[
-                        styles.topBannerActionButton,
-                        !canReconnectFromError && styles.topBannerActionButtonDisabled,
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel="Reconnect to Gateway"
-                      onPress={handleReconnectFromError}
-                      disabled={!canReconnectFromError}
-                    >
-                      <Ionicons name="refresh-outline" size={14} style={styles.topBannerActionIcon} />
-                    </Pressable>
-                  ) : null}
-                </>
-              ) : null}
-              {topBannerKind === 'history' || topBannerKind === 'speech' ? (
-                <Pressable
-                  style={styles.topBannerActionButton}
-                  accessibilityRole="button"
-                  accessibilityLabel="Dismiss error banner"
-                  onPress={handleDismissTopBanner}
-                >
-                  <Ionicons name="close-outline" size={14} style={styles.topBannerActionIcon} />
-                </Pressable>
-              ) : null}
-            </View>
-          </View>
+          <TopBanner
+            styles={styles}
+            kind={topBannerKind}
+            message={topBannerMessage}
+            iconName={topBannerIconName}
+            canReconnectFromError={canReconnectFromError}
+            canRetryFromError={canRetryFromError}
+            canRetryMissingResponse={canRetryMissingResponse}
+            isMissingResponseRecoveryInFlight={isMissingResponseRecoveryInFlight}
+            isGatewayConnected={isGatewayConnected}
+            onReconnectFromError={handleReconnectFromError}
+            onRetryFromError={handleRetryFromError}
+            onRetryMissingResponse={handleRetryMissingResponse}
+            onDismiss={handleDismissTopBanner}
+            maxTextScaleTight={MAX_TEXT_SCALE_TIGHT}
+          />
         ) : null}
         <View style={styles.main}>
           {showHistoryCard ? (
@@ -4615,6 +3435,7 @@ function AppContent() {
                 renderItem={renderHistoryItem}
                 contentContainerStyle={[
                   styles.chatList,
+                  { paddingBottom: historyListBottomPadding },
                   showScrollToBottomButton && styles.chatListWithScrollButton,
                 ]}
                 ListEmptyComponent={
@@ -4631,8 +3452,12 @@ function AppContent() {
                 scrollEventThrottle={16}
                 onContentSizeChange={() => {
                   if (historyAutoScrollRef.current) {
-                    historyScrollRef.current?.scrollToEnd({ animated: true });
-                    setShowScrollToBottomButton(false);
+                    scrollHistoryToBottom(false);
+                  }
+                }}
+                onLayout={() => {
+                  if (historyAutoScrollRef.current) {
+                    scrollHistoryToBottom(false);
                   }
                 }}
                 removeClippedSubviews={Platform.OS === 'android'}
@@ -4714,307 +3539,69 @@ function AppContent() {
             isTranscriptFocused && styles.bottomDockKeyboardOpen,
             isKeyboardVisible && styles.bottomDockKeyboardCompact,
           ]}
+          onLayout={(event) => {
+            const nextHeight = Math.round(event.nativeEvent.layout.height);
+            if (composerHeight !== nextHeight) {
+              setComposerHeight(nextHeight);
+            }
+          }}
         >
-          {isKeyboardBarMounted ? (
-            <Animated.View
-              style={[
-                styles.keyboardActionRow,
-                {
-                  opacity: keyboardBarAnim,
-                  transform: [
-                    {
-                      translateY: keyboardBarAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [8, 0],
-                      }),
-                    },
-                  ],
-                },
-              ]}
-            >
-              <Pressable
-                style={[
-                  styles.keyboardActionButton,
-                  showDoneOnlyAction
-                    ? styles.keyboardActionButtonSingle
-                    : styles.keyboardActionButtonWide,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="Done editing"
-                onPress={() => {
-                  Keyboard.dismiss();
-                  setFocusedField(null);
-                }}
-              >
-                <Text
-                  style={styles.keyboardActionButtonText}
-                  maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                >
-                  Done
-                </Text>
-              </Pressable>
-              {showClearInKeyboardBar ? (
-                <Pressable
-                  style={[
-                    styles.keyboardActionButton,
-                    styles.keyboardActionButtonWide,
-                    !canClearFromKeyboardBar && styles.keyboardActionButtonDisabled,
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel="Clear transcript"
-                  onPress={() => {
-                    if (!canClearFromKeyboardBar) return;
-                    clearTranscriptDraft();
-                  }}
-                  disabled={!canClearFromKeyboardBar}
-                >
-                  <Text
-                    style={[
-                      styles.keyboardActionButtonText,
-                      styles.keyboardClearActionButtonText,
-                    ]}
-                    maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                  >
-                    Clear
-                  </Text>
-                </Pressable>
-              ) : null}
-              {!showDoneOnlyAction ? (
-                <Pressable
-                  style={[
-                    styles.keyboardActionButton,
-                    styles.keyboardActionButtonWide,
-                    styles.keyboardSendActionButton,
-                    !canSendFromKeyboardBar && styles.keyboardActionButtonDisabled,
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel="Send transcript"
-                  onPress={() => {
-                    if (!canSendFromKeyboardBar) return;
-                    const text = transcript.trim() || interimTranscript.trim();
-                    if (!text) return;
-                    Keyboard.dismiss();
-                    setFocusedField(null);
-                    void sendToGateway(text);
-                  }}
-                  disabled={!canSendFromKeyboardBar}
-                >
-                  <Text
-                    style={[
-                      styles.keyboardActionButtonText,
-                      styles.keyboardSendActionButtonText,
-                    ]}
-                    maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                  >
-                    Send
-                  </Text>
-                </Pressable>
-              ) : null}
-            </Animated.View>
-          ) : (
-            <View style={styles.bottomActionRow}>
-              <View style={styles.quickTextButtonSlot}>
-                {showQuickTextLeftTooltip ? (
-                  <View style={styles.quickTextTooltip} pointerEvents="none">
-                    <Text
-                      style={styles.quickTextTooltipText}
-                      numberOfLines={3}
-                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                    >
-                      {quickTextLeftLabel}
-                    </Text>
-                  </View>
-                ) : null}
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.quickTextButton,
-                    pressed && canUseQuickTextLeft && styles.bottomActionButtonPressed,
-                    !canUseQuickTextLeft && styles.quickTextButtonDisabled,
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel={
-                    canUseQuickTextLeft
-                      ? `Insert quick text ${quickTextLeftLabel}`
-                      : 'Left quick text is empty'
-                  }
-                  accessibilityHint="Tap to insert. Long press to preview."
-                  onPress={() => {
-                    handleQuickTextPress('left', quickTextLeftLabel);
-                  }}
-                  onLongPress={() => {
-                    handleQuickTextLongPress('left', quickTextLeftLabel);
-                  }}
-                  onPressOut={() => {
-                    handleQuickTextPressOut('left');
-                  }}
-                  delayLongPress={280}
-                  disabled={!canUseQuickTextLeft}
-                >
-                  <Ionicons
-                    name={quickTextLeftIcon}
-                    size={20}
-                    style={styles.quickTextButtonIcon}
-                  />
-                </Pressable>
-              </View>
-              {canSendDraft ? (
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.roundButton,
-                    styles.sendRoundButton,
-                    pressed && !isSending && styles.bottomActionButtonPressed,
-                    isSending && styles.roundButtonDisabled,
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel={
-                    isSending
-                      ? 'Sending in progress'
-                      : isGatewayConnected
-                        ? 'Send transcript'
-                        : 'Queue transcript and send after reconnect'
-                  }
-                  onPress={() => {
-                    const text = transcript.trim() || interimTranscript.trim();
-                    if (!text) return;
-                    Keyboard.dismiss();
-                    setFocusedField(null);
-                    void sendToGateway(text);
-                  }}
-                  onPressIn={() => {
-                    void triggerHaptic('button-press');
-                  }}
-                  disabled={isSending}
-                >
-                  <Ionicons
-                    name={isSending ? 'time-outline' : 'send'}
-                    size={26}
-                    color="#ffffff"
-                  />
-                </Pressable>
-              ) : (
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.roundButton,
-                    styles.micRoundButton,
-                    isRecognizing && styles.recordingRoundButton,
-                    pressed &&
-                      !isSending &&
-                      settingsReady &&
-                      styles.bottomActionButtonPressed,
-                    (isSending || !settingsReady || !speechRecognitionSupported) &&
-                      styles.roundButtonDisabled,
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel={
-                    !speechRecognitionSupported
-                      ? 'Voice input is unavailable on web'
-                      : isRecognizing
-                      ? 'Stop voice recording'
-                      : isSending
-                        ? 'Recording disabled while sending'
-                        : 'Hold to record voice'
-                  }
-                  onPressIn={handleHoldToTalkPressIn}
-                  onPressOut={handleHoldToTalkPressOut}
-                  disabled={isSending || !settingsReady || !speechRecognitionSupported}
-                >
-                  <Ionicons
-                    name={
-                      !speechRecognitionSupported
-                        ? 'mic-off'
-                        : isRecognizing
-                          ? 'stop'
-                          : 'mic'
-                    }
-                    size={26}
-                    color="#ffffff"
-                  />
-                </Pressable>
-              )}
-              <View style={styles.quickTextButtonSlot}>
-                {showQuickTextRightTooltip ? (
-                  <View style={styles.quickTextTooltip} pointerEvents="none">
-                    <Text
-                      style={styles.quickTextTooltipText}
-                      numberOfLines={3}
-                      maxFontSizeMultiplier={MAX_TEXT_SCALE_TIGHT}
-                    >
-                      {quickTextRightLabel}
-                    </Text>
-                  </View>
-                ) : null}
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.quickTextButton,
-                    pressed && canUseQuickTextRight && styles.bottomActionButtonPressed,
-                    !canUseQuickTextRight && styles.quickTextButtonDisabled,
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel={
-                    canUseQuickTextRight
-                      ? `Insert quick text ${quickTextRightLabel}`
-                      : 'Right quick text is empty'
-                  }
-                  accessibilityHint="Tap to insert. Long press to preview."
-                  onPress={() => {
-                    handleQuickTextPress('right', quickTextRightLabel);
-                  }}
-                  onLongPress={() => {
-                    handleQuickTextLongPress('right', quickTextRightLabel);
-                  }}
-                  onPressOut={() => {
-                    handleQuickTextPressOut('right');
-                  }}
-                  delayLongPress={280}
-                  disabled={!canUseQuickTextRight}
-                >
-                  <Ionicons
-                    name={quickTextRightIcon}
-                    size={20}
-                    style={styles.quickTextButtonIcon}
-                  />
-                </Pressable>
-              </View>
-            </View>
-          )}
-          {showBottomStatus ? (
-            <View style={styles.bottomStateRow}>
-              <View
-                style={[
-                  styles.bottomStateDot,
-                  bottomActionStatus === 'connecting' && styles.bottomStateDotConnecting,
-                  bottomActionStatus === 'disconnected' && styles.bottomStateDotDisconnected,
-                  bottomActionStatus === 'recording' && styles.bottomStateDotRecording,
-                  bottomActionStatus === 'sending' && styles.bottomStateDotSending,
-                  bottomActionStatus === 'retrying' && styles.bottomStateDotRetrying,
-                  bottomActionStatus === 'complete' && styles.bottomStateDotComplete,
-                  bottomActionStatus === 'error' && styles.bottomStateDotError,
-                ]}
-              />
-              <Text
-                style={[
-                  styles.bottomStateLabel,
-                  bottomActionStatus === 'connecting' && styles.bottomStateLabelConnecting,
-                  bottomActionStatus === 'disconnected' && styles.bottomStateLabelDisconnected,
-                  bottomActionStatus === 'recording' && styles.bottomStateLabelRecording,
-                  bottomActionStatus === 'sending' && styles.bottomStateLabelSending,
-                  bottomActionStatus === 'retrying' && styles.bottomStateLabelRetrying,
-                  bottomActionStatus === 'complete' && styles.bottomStateLabelComplete,
-                  bottomActionStatus === 'error' && styles.bottomStateLabelError,
-                ]}
-                maxFontSizeMultiplier={MAX_TEXT_SCALE}
-              >
-                {BOTTOM_ACTION_STATUS_LABELS[bottomActionStatus]}
-              </Text>
-              <Text
-                style={styles.bottomStateDetail}
-                maxFontSizeMultiplier={MAX_TEXT_SCALE}
-                numberOfLines={1}
-              >
-                {bottomActionDetailText}
-              </Text>
-            </View>
-          ) : null}
+          <BottomDockControls
+            styles={styles}
+            isKeyboardBarMounted={isKeyboardBarMounted}
+            keyboardBarAnim={keyboardBarAnim}
+            showDoneOnlyAction={showDoneOnlyAction}
+            showClearInKeyboardBar={showClearInKeyboardBar}
+            canClearFromKeyboardBar={canClearFromKeyboardBar}
+            canSendFromKeyboardBar={canSendFromKeyboardBar}
+            onDone={handleDoneKeyboardAction}
+            onClear={handleClearKeyboardAction}
+            onSendFromKeyboardBar={handleSendKeyboardAction}
+            showQuickTextLeftTooltip={showQuickTextLeftTooltip}
+            showQuickTextRightTooltip={showQuickTextRightTooltip}
+            quickTextLeftLabel={quickTextLeftLabel}
+            quickTextRightLabel={quickTextRightLabel}
+            quickTextLeftIcon={quickTextLeftIcon}
+            quickTextRightIcon={quickTextRightIcon}
+            canUseQuickTextLeft={canUseQuickTextLeft}
+            canUseQuickTextRight={canUseQuickTextRight}
+            onQuickTextLeftPress={() => {
+              handleQuickTextPress('left', quickTextLeftLabel);
+            }}
+            onQuickTextLeftLongPress={() => {
+              handleQuickTextLongPress('left', quickTextLeftLabel);
+            }}
+            onQuickTextLeftPressOut={() => {
+              handleQuickTextPressOut('left');
+            }}
+            onQuickTextRightPress={() => {
+              handleQuickTextPress('right', quickTextRightLabel);
+            }}
+            onQuickTextRightLongPress={() => {
+              handleQuickTextLongPress('right', quickTextRightLabel);
+            }}
+            onQuickTextRightPressOut={() => {
+              handleQuickTextPressOut('right');
+            }}
+            canSendDraft={canSendDraft}
+            isSending={isSending}
+            isGatewayConnected={isGatewayConnected}
+            isRecognizing={isRecognizing}
+            speechRecognitionSupported={speechRecognitionSupported}
+            settingsReady={settingsReady}
+            onSendDraft={handleSendDraftAction}
+            onMicPressIn={handleHoldToTalkPressIn}
+            onMicPressOut={handleHoldToTalkPressOut}
+            onActionPressHaptic={() => {
+              void triggerHaptic('button-press');
+            }}
+            showBottomStatus={showBottomStatus}
+            bottomActionStatus={bottomActionStatus}
+            bottomActionLabel={bottomActionStatusLabel}
+            bottomActionDetailText={bottomActionDetailText}
+            maxTextScale={MAX_TEXT_SCALE}
+            maxTextScaleTight={MAX_TEXT_SCALE_TIGHT}
+          />
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -6097,7 +4684,7 @@ function createStyles(isDarkTheme: boolean) {
       gap: 0,
     },
     chatListWithScrollButton: {
-      paddingBottom: 44,
+      paddingBottom: 0,
     },
     historyDateRow: {
       flexDirection: 'row',
