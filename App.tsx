@@ -20,7 +20,6 @@ import {
   useSpeechRecognitionEvent,
 } from 'expo-speech-recognition';
 import {
-  GatewayClient,
   setStorage,
   type ChatEventPayload,
   type ChatMessage,
@@ -462,13 +461,12 @@ function AppContent() {
   const {
     state: gatewayRuntime,
     runAction: runGatewayRuntimeAction,
-    setConnectionState,
     setGatewayEventState,
     setIsSending,
     setIsSessionHistoryLoading,
     setIsMissingResponseRecoveryInFlight,
   } = useGatewayRuntime();
-  const connectionState = gatewayRuntime.connectionState;
+  const connectionState = gatewayConnectionState;
   const gatewayEventState = gatewayRuntime.gatewayEventState;
   const isSending = gatewayRuntime.isSending;
   const isSessionHistoryLoading = gatewayRuntime.isSessionHistoryLoading;
@@ -520,7 +518,6 @@ function AppContent() {
   const [speechError, setSpeechError] = useState<string | null>(null);
   const [localStateReady, setLocalStateReady] = useState(false);
 
-  const clientRef = useRef<GatewayClient | null>(null);
   const activeSessionKeyRef = useRef(DEFAULT_SESSION_KEY);
   const activeRunIdRef = useRef<string | null>(null);
   const pendingTurnIdRef = useRef<string | null>(null);
@@ -766,14 +763,6 @@ function AppContent() {
   useEffect(() => {
     gatewayUrlRef.current = gatewayUrl;
   }, [gatewayUrl]);
-
-  useEffect(() => {
-    setConnectionState(gatewayConnectionState);
-  }, [gatewayConnectionState, setConnectionState]);
-
-  useEffect(() => {
-    clientRef.current = gatewayGetClient();
-  }, [gatewayConnectionState, gatewayGetClient]);
 
   useEffect(() => {
     if (gatewayContextConnectDiagnostic) {
@@ -1103,7 +1092,6 @@ function AppContent() {
     historySyncRequestRef.current = null;
     outboxProcessingRef.current = false;
     gatewayDisconnect();
-    clientRef.current = null;
     activeRunIdRef.current = null;
     setActiveRunId(null);
     pendingTurnIdRef.current = null;
@@ -1152,7 +1140,7 @@ function AppContent() {
         silentError?: boolean;
       },
     ): Promise<boolean> => {
-      const client = clientRef.current;
+      const client = gatewayGetClient();
       if (!client || connectionState !== 'connected') {
         applySessionTurns(sessionKey, sessionTurnsRef.current.get(sessionKey) ?? []);
         return false;
@@ -1206,7 +1194,13 @@ function AppContent() {
       }
       return synced;
     },
-    [applySessionTurns, connectionState, runGatewayRuntimeAction, runHistoryRefresh],
+    [
+      applySessionTurns,
+      connectionState,
+      gatewayGetClient,
+      runGatewayRuntimeAction,
+      runHistoryRefresh,
+    ],
   );
 
   const switchSession = useCallback(
@@ -1293,7 +1287,7 @@ function AppContent() {
     setSessionsError(null);
     setIsSessionOperationPending(true);
     try {
-      const client = clientRef.current;
+      const client = gatewayGetClient();
       if (client && connectionState === 'connected') {
         try {
           await client.sessionsPatch(sessionKey, {
@@ -1328,6 +1322,7 @@ function AppContent() {
     }
   }, [
     connectionState,
+    gatewayGetClient,
     isSessionOperationPending,
     refreshSessions,
     sessionRenameDraft,
@@ -1366,7 +1361,7 @@ function AppContent() {
     if (connectionStateRef.current !== 'connected') return;
     if (isSending) return;
 
-    const client = clientRef.current;
+    const client = gatewayGetClient();
     if (!client) return;
 
     const head = outboxQueueRef.current[0];
@@ -1476,6 +1471,7 @@ function AppContent() {
     clearOutboxRetryTimer,
     isSending,
     refreshSessions,
+    gatewayGetClient,
     runGatewayHealthCheck,
     runGatewayRuntimeAction,
     updateChatTurn,
@@ -1683,7 +1679,6 @@ function AppContent() {
       setGatewayError(null);
       setGatewayConnectDiagnostic(null);
       setSessionsError(null);
-      runGatewayRuntimeAction({ type: 'CONNECT_REQUEST' });
       await gatewayConnect(trimmedGatewayUrl, {
         token: authToken.trim() || undefined,
         autoReconnect: true,
@@ -1718,12 +1713,10 @@ function AppContent() {
         onChatEvent,
         () => client.off('pairing.required', pairingListener),
       ];
-      clientRef.current = client;
     };
 
     try {
       await connectOnce(REQUESTED_GATEWAY_CLIENT_ID);
-      runGatewayRuntimeAction({ type: 'CONNECT_SUCCESS' });
       setGatewayError(null);
       setGatewayConnectDiagnostic(null);
       setGatewayEventState('ready');
@@ -1734,7 +1727,6 @@ function AppContent() {
         startupAutoConnectAttemptRef.current = 0;
       }
     } catch (err) {
-      runGatewayRuntimeAction({ type: 'CONNECT_FAILED' });
       disconnectGateway();
       const errorText = errorMessage(err);
       const diagnostic =
