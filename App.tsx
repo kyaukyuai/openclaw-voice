@@ -28,7 +28,6 @@ import {
   type Storage as OpenClawStorage,
 } from './src/openclaw';
 import {
-  mergeHistoryTurnsWithPendingLocal,
   shouldAttemptFinalRecovery,
   shouldStartStartupAutoConnect,
   isIncompleteAssistantContent,
@@ -78,7 +77,6 @@ import {
   HISTORY_NOTICE_HIDE_MS,
   AUTH_TOKEN_AUTO_MASK_MS,
   BOTTOM_STATUS_COMPLETE_HOLD_MS,
-  HISTORY_REFRESH_TIMEOUT_MS,
   getKvStore,
   MAX_TEXT_SCALE,
   MAX_TEXT_SCALE_TIGHT,
@@ -94,7 +92,6 @@ import {
   errorMessage,
   normalizeSpeechErrorCode,
   isSpeechAbortLikeError,
-  createSessionKey,
   sessionDisplayName,
   extractTimestampFromUnknown,
   normalizeChatEventState,
@@ -111,6 +108,7 @@ import { useGatewayEventBridge } from './src/ios-runtime/useGatewayEventBridge';
 import { useSessionRuntime } from './src/ios-runtime/useSessionRuntime';
 import { useGatewayConnectionFlow } from './src/ios-runtime/useGatewayConnectionFlow';
 import { useOutboxRuntime } from './src/ios-runtime/useOutboxRuntime';
+import { useSessionHistoryRuntime } from './src/ios-runtime/useSessionHistoryRuntime';
 import { scheduleHistoryScrollToEnd } from './src/ui/history-layout';
 import ConnectionHeader from './src/ui/ios/ConnectionHeader';
 import SettingsScreenModal from './src/ui/ios/SettingsScreenModal';
@@ -1064,142 +1062,42 @@ function AppContent() {
     [],
   );
 
-  const applySessionTurns = useCallback((sessionKey: string, turns: ChatTurn[]) => {
-    sessionTurnsRef.current.set(sessionKey, turns);
-    if (activeSessionKeyRef.current === sessionKey) {
-      setChatTurns(turns);
-    }
-  }, []);
-
-  const refreshSessions = useCallback(async () => {
-    if (connectionState !== 'connected') {
-      setSessions([]);
-      setSessionsError(null);
-      return;
-    }
-
-    setSessionsError(null);
-    try {
-      await gatewayRefreshSessions({ limit: 40, includeGlobal: true });
-    } catch (err) {
-      setSessionsError(`Sessions unavailable: ${errorMessage(err)}`);
-    }
-  }, [connectionState, gatewayRefreshSessions]);
-
-  const loadSessionHistory = useCallback(
-    async (
-      sessionKey: string,
-      options?: {
-        silentError?: boolean;
-      },
-    ): Promise<boolean> => {
-      if (connectionState !== 'connected') {
-        applySessionTurns(sessionKey, sessionTurnsRef.current.get(sessionKey) ?? []);
-        return false;
-      }
-
-      const synced = await runHistoryRefresh({
-        sessionKey,
-        timeoutMs: HISTORY_REFRESH_TIMEOUT_MS,
-        onStart: () => {
-          runGatewayRuntimeAction({ type: 'SYNC_REQUEST' });
-        },
-        onError: (err) => {
-          if (!options?.silentError) {
-            setGatewayError(`Failed to load session history: ${errorMessage(err)}`);
-          }
-        },
-        onFinish: (ok) => {
-          runGatewayRuntimeAction({
-            type: ok ? 'SYNC_SUCCESS' : 'SYNC_ERROR',
-          });
-        },
-        run: async () => {
-          const response = await gatewayChatHistory(sessionKey, { limit: 80 });
-          const turns = buildTurnsFromHistory(response.messages, sessionKey);
-          const localTurns = sessionTurnsRef.current.get(sessionKey) ?? [];
-          const queuedTurnIds = new Set(
-            outboxQueueRef.current
-              .filter((item) => item.sessionKey === sessionKey)
-              .map((item) => item.turnId),
-          );
-          const mergedTurns = mergeHistoryTurnsWithPendingLocal(
-            turns,
-            localTurns,
-            queuedTurnIds,
-          );
-          applySessionTurns(sessionKey, mergedTurns);
-          if (activeSessionKeyRef.current === sessionKey) {
-            setHistoryLastSyncedAt(Date.now());
-          }
-          return true;
-        },
-      });
-
-      if (!synced) {
-        applySessionTurns(sessionKey, sessionTurnsRef.current.get(sessionKey) ?? []);
-        if (!options?.silentError && connectionStateRef.current === 'connected') {
-          setGatewayError((previous) =>
-            previous || 'Refresh failed: request timed out. Please retry.',
-          );
-        }
-      }
-      return synced;
-    },
-    [
-      applySessionTurns,
-      connectionState,
-      gatewayChatHistory,
-      runGatewayRuntimeAction,
-      runHistoryRefresh,
-    ],
-  );
-
-  const switchSession = useCallback(
-    async (sessionKey: string) => {
-      const nextKey = sessionKey.trim();
-      if (!nextKey || nextKey === activeSessionKeyRef.current) return;
-      if (isSending || isSessionOperationPending) return;
-
-      Keyboard.dismiss();
-      setFocusedField(null);
-      setGatewayError(null);
-      setSessionsError(null);
-      setIsSessionRenameOpen(false);
-      setSessionRenameTargetKey(null);
-      setSessionRenameDraft('');
-      setIsSending(false);
-      setGatewayEventState('idle');
-      activeRunIdRef.current = null;
-      setActiveRunId(null);
-      pendingTurnIdRef.current = null;
-      runIdToTurnIdRef.current.clear();
-
-      const cached = sessionTurnsRef.current.get(nextKey) ?? [];
-      setChatTurns(cached);
-      setActiveSessionKey(nextKey);
-      activeSessionKeyRef.current = nextKey;
-
-      invalidateRefreshEpoch();
-      await loadSessionHistory(nextKey);
-      void refreshSessions();
-    },
-    [
-      invalidateRefreshEpoch,
-      isSending,
-      isSessionOperationPending,
-      loadSessionHistory,
-      refreshSessions,
-    ],
-  );
-
-  const createAndSwitchSession = useCallback(async () => {
-    if (isSending || isSessionOperationPending) return;
-    const nextKey = createSessionKey();
-    sessionTurnsRef.current.set(nextKey, []);
-    setSessions((previous) => [{ key: nextKey, displayName: nextKey }, ...previous]);
-    await switchSession(nextKey);
-  }, [isSending, isSessionOperationPending, switchSession]);
+  const {
+    refreshSessions,
+    loadSessionHistory,
+    switchSession,
+    createAndSwitchSession,
+  } = useSessionHistoryRuntime({
+    connectionState,
+    connectionStateRef,
+    isSending,
+    isSessionOperationPending,
+    activeSessionKeyRef,
+    activeRunIdRef,
+    pendingTurnIdRef,
+    runIdToTurnIdRef,
+    sessionTurnsRef,
+    outboxQueueRef,
+    gatewayRefreshSessions,
+    gatewayChatHistory,
+    runHistoryRefresh,
+    runGatewayRuntimeAction,
+    invalidateRefreshEpoch,
+    buildTurnsFromHistory,
+    setSessions,
+    setSessionsError,
+    setGatewayError,
+    setChatTurns,
+    setActiveSessionKey,
+    setFocusedField,
+    setIsSessionRenameOpen,
+    setSessionRenameTargetKey,
+    setSessionRenameDraft,
+    setIsSending,
+    setGatewayEventState,
+    setHistoryLastSyncedAt,
+    setActiveRunId,
+  });
 
   const isSessionPinned = useCallback(
     (sessionKey: string) => sessionPreferences[sessionKey]?.pinned === true,
