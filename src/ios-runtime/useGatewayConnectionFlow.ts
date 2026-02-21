@@ -15,6 +15,11 @@ import {
 } from '../utils';
 import { classifyGatewayConnectFailure, errorMessage } from '../utils';
 import { computeAutoConnectRetryPlan } from '../ui/runtime-logic';
+import {
+  applyDisconnectReset,
+  shouldRunAutoConnectRetry,
+  validateGatewayConnectPreflight,
+} from './gateway-connection-flow-logic';
 
 type UseGatewayConnectionFlowInput = {
   gatewayUrl: string;
@@ -74,28 +79,27 @@ export function useGatewayConnectionFlow(input: UseGatewayConnectionFlowInput) {
   }, [input]);
 
   const disconnectGateway = useCallback(() => {
-    input.invalidateRefreshEpoch();
     clearSubscriptions();
-    input.clearFinalResponseRecoveryTimer();
-    input.clearMissingResponseRecoveryState();
-    input.clearStartupAutoConnectRetryTimer();
-    input.clearBottomCompletePulseTimer();
-    input.clearOutboxRetryTimer();
-    if (input.historySyncTimerRef.current) {
-      clearTimeout(input.historySyncTimerRef.current);
-      input.historySyncTimerRef.current = null;
-    }
-    input.historySyncRequestRef.current = null;
-    input.outboxProcessingRef.current = false;
-    input.gatewayDisconnect();
-    input.activeRunIdRef.current = null;
-    input.setActiveRunId(null);
-    input.pendingTurnIdRef.current = null;
-    input.runIdToTurnIdRef.current.clear();
-    input.setIsSessionOperationPending(false);
-    input.runGatewayRuntimeAction({ type: 'RESET_RUNTIME' });
-    input.setGatewayConnectDiagnostic(null);
-    input.setIsBottomCompletePulse(false);
+    applyDisconnectReset({
+      historySyncTimerRef: input.historySyncTimerRef,
+      historySyncRequestRef: input.historySyncRequestRef,
+      outboxProcessingRef: input.outboxProcessingRef,
+      activeRunIdRef: input.activeRunIdRef,
+      pendingTurnIdRef: input.pendingTurnIdRef,
+      runIdToTurnIdRef: input.runIdToTurnIdRef,
+      setActiveRunId: input.setActiveRunId,
+      setIsSessionOperationPending: input.setIsSessionOperationPending,
+      setGatewayConnectDiagnostic: input.setGatewayConnectDiagnostic,
+      setIsBottomCompletePulse: input.setIsBottomCompletePulse,
+      runGatewayRuntimeAction: input.runGatewayRuntimeAction,
+      gatewayDisconnect: input.gatewayDisconnect,
+      clearFinalResponseRecoveryTimer: input.clearFinalResponseRecoveryTimer,
+      clearMissingResponseRecoveryState: input.clearMissingResponseRecoveryState,
+      clearStartupAutoConnectRetryTimer: input.clearStartupAutoConnectRetryTimer,
+      clearBottomCompletePulseTimer: input.clearBottomCompletePulseTimer,
+      clearOutboxRetryTimer: input.clearOutboxRetryTimer,
+      invalidateRefreshEpoch: input.invalidateRefreshEpoch,
+    });
   }, [clearSubscriptions, input]);
 
   const connectGateway = useCallback(
@@ -109,46 +113,18 @@ export function useGatewayConnectionFlow(input: UseGatewayConnectionFlowInput) {
         input.setIsStartupAutoConnecting(false);
       }
 
-      if (!input.settingsReady) {
-        input.setGatewayError('Initializing. Please wait a few seconds and try again.');
-        if (isAutoConnect) input.setIsStartupAutoConnecting(false);
-        return;
-      }
-
-      if (!trimmedGatewayUrl) {
-        input.setGatewayError('Please enter a Gateway URL.');
-        if (isAutoConnect) input.setIsStartupAutoConnecting(false);
-        return;
-      }
-
-      let parsedGatewayUrl: URL;
-      try {
-        parsedGatewayUrl = new URL(trimmedGatewayUrl);
-      } catch {
-        const invalidUrlDiagnostic: GatewayConnectDiagnostic = {
-          kind: 'invalid-url',
-          summary: 'Gateway URL is invalid.',
-          guidance: 'Use ws:// or wss:// with a valid host.',
-        };
-        input.setGatewayConnectDiagnostic(invalidUrlDiagnostic);
-        input.setGatewayError(
-          `${invalidUrlDiagnostic.summary} ${invalidUrlDiagnostic.guidance}`,
-        );
-        if (isAutoConnect) input.setIsStartupAutoConnecting(false);
-        return;
-      }
-
-      if (!/^wss?:$/i.test(parsedGatewayUrl.protocol)) {
-        const invalidSchemeDiagnostic: GatewayConnectDiagnostic = {
-          kind: 'invalid-url',
-          summary: 'Gateway URL must start with ws:// or wss://.',
-          guidance: `Current protocol is ${parsedGatewayUrl.protocol}`,
-        };
-        input.setGatewayConnectDiagnostic(invalidSchemeDiagnostic);
-        input.setGatewayError(
-          `${invalidSchemeDiagnostic.summary} ${invalidSchemeDiagnostic.guidance}`,
-        );
-        if (isAutoConnect) input.setIsStartupAutoConnecting(false);
+      const preflight = validateGatewayConnectPreflight({
+        settingsReady: input.settingsReady,
+        gatewayUrl: trimmedGatewayUrl,
+      });
+      if (!preflight.ok) {
+        if (preflight.diagnostic) {
+          input.setGatewayConnectDiagnostic(preflight.diagnostic);
+        }
+        input.setGatewayError(preflight.message);
+        if (isAutoConnect) {
+          input.setIsStartupAutoConnecting(false);
+        }
         return;
       }
 
@@ -231,9 +207,15 @@ export function useGatewayConnectionFlow(input: UseGatewayConnectionFlowInput) {
             input.clearStartupAutoConnectRetryTimer();
             input.startupAutoConnectRetryTimerRef.current = setTimeout(() => {
               input.startupAutoConnectRetryTimerRef.current = null;
-              if (input.isUnmountingRef.current) return;
-              if (!input.gatewayUrlRef.current.trim()) return;
-              if (input.connectionStateRef.current !== 'disconnected') return;
+              if (
+                !shouldRunAutoConnectRetry({
+                  isUnmounting: input.isUnmountingRef.current,
+                  gatewayUrl: input.gatewayUrlRef.current,
+                  connectionState: input.connectionStateRef.current,
+                })
+              ) {
+                return;
+              }
               void connectGateway({ auto: true, autoAttempt: retryPlan.nextAttempt });
             }, retryPlan.delayMs);
             input.setGatewayError(retryPlan.message);
