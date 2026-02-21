@@ -28,7 +28,6 @@ import {
   type Storage as OpenClawStorage,
 } from './src/openclaw';
 import {
-  computeAutoConnectRetryPlan,
   mergeHistoryTurnsWithPendingLocal,
   normalizeMessageForDedupe,
   resolveSendDispatch,
@@ -62,10 +61,7 @@ import {
 
 // Import extracted constants
 import {
-  REQUESTED_GATEWAY_CLIENT_ID,
-  GATEWAY_DISPLAY_NAME,
   ENABLE_DEBUG_WARNINGS,
-  GATEWAY_PLATFORM,
   DEFAULTS,
   TIMINGS,
   UI,
@@ -89,8 +85,6 @@ import {
   SEND_TIMEOUT_MS,
   OUTBOX_RETRY_BASE_MS,
   OUTBOX_RETRY_MAX_MS,
-  STARTUP_AUTO_CONNECT_MAX_ATTEMPTS,
-  STARTUP_AUTO_CONNECT_RETRY_BASE_MS,
   HISTORY_REFRESH_TIMEOUT_MS,
   getKvStore,
   MAX_TEXT_SCALE,
@@ -105,7 +99,6 @@ import {
   textFromUnknown,
   dedupeLines,
   errorMessage,
-  classifyGatewayConnectFailure,
   normalizeSpeechErrorCode,
   isSpeechAbortLikeError,
   createTurnId,
@@ -126,6 +119,7 @@ import { useHomeUiHandlers } from './src/ios-runtime/useHomeUiHandlers';
 import { useHomeUiState } from './src/ios-runtime/useHomeUiState';
 import { useGatewayEventBridge } from './src/ios-runtime/useGatewayEventBridge';
 import { useSessionRuntime } from './src/ios-runtime/useSessionRuntime';
+import { useGatewayConnectionFlow } from './src/ios-runtime/useGatewayConnectionFlow';
 import { scheduleHistoryScrollToEnd } from './src/ui/history-layout';
 import ConnectionHeader from './src/ui/ios/ConnectionHeader';
 import SettingsScreenModal from './src/ui/ios/SettingsScreenModal';
@@ -1066,42 +1060,6 @@ function AppContent() {
     setSpeechError(`Speech recognition error: ${errorMessage(event.error)}`);
   });
 
-  const clearSubscriptions = () => {
-    subscriptionsRef.current.forEach((unsubscribe) => {
-      try {
-        unsubscribe();
-      } catch {
-        // ignore
-      }
-    });
-    subscriptionsRef.current = [];
-  };
-
-  const disconnectGateway = () => {
-    invalidateRefreshEpoch();
-    clearSubscriptions();
-    clearFinalResponseRecoveryTimer();
-    clearMissingResponseRecoveryState();
-    clearStartupAutoConnectRetryTimer();
-    clearBottomCompletePulseTimer();
-    clearOutboxRetryTimer();
-    if (historySyncTimerRef.current) {
-      clearTimeout(historySyncTimerRef.current);
-      historySyncTimerRef.current = null;
-    }
-    historySyncRequestRef.current = null;
-    outboxProcessingRef.current = false;
-    gatewayDisconnect();
-    activeRunIdRef.current = null;
-    setActiveRunId(null);
-    pendingTurnIdRef.current = null;
-    runIdToTurnIdRef.current.clear();
-    setIsSessionOperationPending(false);
-    runGatewayRuntimeAction({ type: 'RESET_RUNTIME' });
-    setGatewayConnectDiagnostic(null);
-    setIsBottomCompletePulse(false);
-  };
-
   const updateChatTurn = useCallback(
     (turnId: string, updater: (turn: ChatTurn) => ChatTurn) => {
       setChatTurns((previous) =>
@@ -1615,156 +1573,45 @@ function AppContent() {
     extractFinalChatEventText,
   });
 
-  const connectGateway = async (options?: { auto?: boolean; autoAttempt?: number }) => {
-    const isAutoConnect = options?.auto === true;
-    const autoAttempt = options?.autoAttempt ?? 1;
-    const trimmedGatewayUrl = gatewayUrl.trim();
-    const hasToken = authToken.trim().length > 0;
-    if (!isAutoConnect) {
-      clearStartupAutoConnectRetryTimer();
-      setIsStartupAutoConnecting(false);
-    }
-
-    if (!settingsReady) {
-      setGatewayError('Initializing. Please wait a few seconds and try again.');
-      if (isAutoConnect) setIsStartupAutoConnecting(false);
-      return;
-    }
-
-    if (!trimmedGatewayUrl) {
-      setGatewayError('Please enter a Gateway URL.');
-      if (isAutoConnect) setIsStartupAutoConnecting(false);
-      return;
-    }
-
-    let parsedGatewayUrl: URL;
-    try {
-      parsedGatewayUrl = new URL(trimmedGatewayUrl);
-    } catch {
-      const invalidUrlDiagnostic: GatewayConnectDiagnostic = {
-        kind: 'invalid-url',
-        summary: 'Gateway URL is invalid.',
-        guidance: 'Use ws:// or wss:// with a valid host.',
-      };
-      setGatewayConnectDiagnostic(invalidUrlDiagnostic);
-      setGatewayError(
-        `${invalidUrlDiagnostic.summary} ${invalidUrlDiagnostic.guidance}`,
-      );
-      if (isAutoConnect) setIsStartupAutoConnecting(false);
-      return;
-    }
-
-    if (!/^wss?:$/i.test(parsedGatewayUrl.protocol)) {
-      const invalidSchemeDiagnostic: GatewayConnectDiagnostic = {
-        kind: 'invalid-url',
-        summary: 'Gateway URL must start with ws:// or wss://.',
-        guidance: `Current protocol is ${parsedGatewayUrl.protocol}`,
-      };
-      setGatewayConnectDiagnostic(invalidSchemeDiagnostic);
-      setGatewayError(
-        `${invalidSchemeDiagnostic.summary} ${invalidSchemeDiagnostic.guidance}`,
-      );
-      if (isAutoConnect) setIsStartupAutoConnecting(false);
-      return;
-    }
-
-    if (isAutoConnect) {
-      setIsStartupAutoConnecting(true);
-      startupAutoConnectAttemptRef.current = autoAttempt;
-    }
-
-    const connectOnce = async (clientId: string) => {
-      invalidateRefreshEpoch();
-      disconnectGateway();
-      setGatewayError(null);
-      setGatewayConnectDiagnostic(null);
-      setSessionsError(null);
-      await gatewayConnect(trimmedGatewayUrl, {
-        token: authToken.trim() || undefined,
-        autoReconnect: true,
-        platform: GATEWAY_PLATFORM,
-        clientId,
-        displayName: GATEWAY_DISPLAY_NAME,
-        scopes: ['operator.read', 'operator.write'],
-        caps: ['talk'],
-      });
-
-      const client = gatewayGetClient();
-      if (!client) {
-        throw new Error('Connection established but Gateway client is unavailable.');
-      }
-
-      const pairingListener = () => {
-        setGatewayError(
-          'Pairing approval required. Please allow this device on OpenClaw.',
-        );
-        setGatewayConnectDiagnostic({
-          kind: 'pairing',
-          summary: 'Pairing approval required.',
-          guidance: 'Approve this device from OpenClaw pairing screen.',
-        });
-        setGatewayEventState('pairing-required');
-      };
-
-      const onChatEvent = client.onChatEvent(handleChatEvent);
-      client.on('pairing.required', pairingListener);
-
-      subscriptionsRef.current = [
-        onChatEvent,
-        () => client.off('pairing.required', pairingListener),
-      ];
-    };
-
-    try {
-      await connectOnce(REQUESTED_GATEWAY_CLIENT_ID);
-      setGatewayError(null);
-      setGatewayConnectDiagnostic(null);
-      setGatewayEventState('ready');
-      setIsSettingsPanelOpen(false);
-      forceMaskAuthToken();
-      if (isAutoConnect) {
-        clearStartupAutoConnectRetryTimer();
-        startupAutoConnectAttemptRef.current = 0;
-      }
-    } catch (err) {
-      disconnectGateway();
-      const errorText = errorMessage(err);
-      const diagnostic =
-        gatewayContextConnectDiagnostic ??
-        classifyGatewayConnectFailure({
-          error: err,
-          hasToken,
-        });
-      setGatewayConnectDiagnostic(diagnostic);
-      if (isAutoConnect) {
-        const retryPlan = computeAutoConnectRetryPlan({
-          attempt: autoAttempt,
-          maxAttempts: STARTUP_AUTO_CONNECT_MAX_ATTEMPTS,
-          baseDelayMs: STARTUP_AUTO_CONNECT_RETRY_BASE_MS,
-          errorText: `${diagnostic.summary} ${errorText}`,
-        });
-        if (retryPlan.shouldRetry) {
-          clearStartupAutoConnectRetryTimer();
-          startupAutoConnectRetryTimerRef.current = setTimeout(() => {
-            startupAutoConnectRetryTimerRef.current = null;
-            if (isUnmountingRef.current) return;
-            if (!gatewayUrlRef.current.trim()) return;
-            if (connectionStateRef.current !== 'disconnected') return;
-            void connectGateway({ auto: true, autoAttempt: retryPlan.nextAttempt });
-          }, retryPlan.delayMs);
-          setGatewayError(retryPlan.message);
-        } else {
-          setGatewayError(retryPlan.message);
-        }
-      } else {
-        setGatewayError(`${diagnostic.summary} ${diagnostic.guidance}`);
-      }
-    } finally {
-      if (isAutoConnect) {
-        setIsStartupAutoConnecting(false);
-      }
-    }
-  };
+  const { disconnectGateway, connectGateway } = useGatewayConnectionFlow({
+      gatewayUrl,
+      authToken,
+      settingsReady,
+      gatewayContextConnectDiagnostic,
+      gatewayConnect,
+      gatewayDisconnect,
+      gatewayGetClient,
+      gatewayUrlRef,
+      connectionStateRef,
+      isUnmountingRef,
+      subscriptionsRef,
+      historySyncTimerRef,
+      historySyncRequestRef,
+      outboxProcessingRef,
+      startupAutoConnectAttemptRef,
+      startupAutoConnectRetryTimerRef,
+      activeRunIdRef,
+      pendingTurnIdRef,
+      runIdToTurnIdRef,
+      setActiveRunId,
+      setGatewayError,
+      setGatewayConnectDiagnostic,
+      setSessionsError,
+      setGatewayEventState,
+      setIsSettingsPanelOpen,
+      setIsStartupAutoConnecting,
+      setIsSessionOperationPending,
+      setIsBottomCompletePulse,
+      clearFinalResponseRecoveryTimer,
+      clearMissingResponseRecoveryState,
+      clearStartupAutoConnectRetryTimer,
+      clearBottomCompletePulseTimer,
+      clearOutboxRetryTimer,
+      invalidateRefreshEpoch,
+      forceMaskAuthToken,
+      runGatewayRuntimeAction,
+      handleChatEvent,
+    });
 
   useEffect(() => {
     if (!localStateReady) {
@@ -1842,7 +1689,6 @@ function AppContent() {
       }
       quickTextLongPressSideRef.current = null;
       disconnectGateway();
-      clearSubscriptions();
       if (supportsSpeechRecognitionOnCurrentPlatform()) {
         ExpoSpeechRecognitionModule.abort();
       }
