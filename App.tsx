@@ -29,7 +29,6 @@ import {
   type Storage as OpenClawStorage,
 } from './src/openclaw';
 import {
-  computeHistorySyncRetryPlan,
   computeAutoConnectRetryPlan,
   mergeHistoryTurnsWithPendingLocal,
   normalizeMessageForDedupe,
@@ -93,14 +92,6 @@ import {
   OUTBOX_RETRY_MAX_MS,
   STARTUP_AUTO_CONNECT_MAX_ATTEMPTS,
   STARTUP_AUTO_CONNECT_RETRY_BASE_MS,
-  FINAL_RESPONSE_RECOVERY_BASE_DELAY_MS,
-  FINAL_RESPONSE_RECOVERY_MAX_ATTEMPTS,
-  MISSING_RESPONSE_RECOVERY_INITIAL_DELAY_MS,
-  MISSING_RESPONSE_RECOVERY_RETRY_BASE_MS,
-  MISSING_RESPONSE_RECOVERY_MAX_ATTEMPTS,
-  HISTORY_SYNC_INITIAL_DELAY_MS,
-  HISTORY_SYNC_RETRY_BASE_MS,
-  HISTORY_SYNC_MAX_ATTEMPTS,
   HISTORY_REFRESH_TIMEOUT_MS,
   getKvStore,
   MAX_TEXT_SCALE,
@@ -135,6 +126,7 @@ import { useComposerRuntime } from './src/ios-runtime/useComposerRuntime';
 import { useHomeUiHandlers } from './src/ios-runtime/useHomeUiHandlers';
 import { useHomeUiState } from './src/ios-runtime/useHomeUiState';
 import { useGatewayEventBridge } from './src/ios-runtime/useGatewayEventBridge';
+import { useSessionRuntime } from './src/ios-runtime/useSessionRuntime';
 import { scheduleHistoryScrollToEnd } from './src/ui/history-layout';
 import ConnectionHeader from './src/ui/ios/ConnectionHeader';
 import SettingsScreenModal from './src/ui/ios/SettingsScreenModal';
@@ -1996,251 +1988,26 @@ function AppContent() {
     }, Platform.OS === 'ios' ? 240 : 120);
   }, []);
 
-  const scheduleSessionHistorySync = useCallback(
-    (
-      sessionKey: string,
-      options?: {
-        attempt?: number;
-        delayMs?: number;
-      },
-    ) => {
-      const targetSessionKey = sessionKey.trim();
-      if (!targetSessionKey) return;
-      const attempt = Math.max(1, options?.attempt ?? 1);
-      const delayMs = Math.max(
-        0,
-        options?.delayMs ??
-          (attempt === 1
-            ? HISTORY_SYNC_INITIAL_DELAY_MS
-            : HISTORY_SYNC_RETRY_BASE_MS),
-      );
-
-      historySyncRequestRef.current = {
-        sessionKey: targetSessionKey,
-        attempt,
-      };
-
-      if (historySyncTimerRef.current) {
-        clearTimeout(historySyncTimerRef.current);
-        historySyncTimerRef.current = null;
-      }
-
-      historySyncTimerRef.current = setTimeout(() => {
-        historySyncTimerRef.current = null;
-        const request = historySyncRequestRef.current;
-        if (
-          !request ||
-          request.sessionKey !== targetSessionKey ||
-          request.attempt !== attempt
-        ) {
-          return;
-        }
-
-        void (async () => {
-          const synced = await loadSessionHistory(targetSessionKey, {
-            silentError: attempt > 1,
-          });
-          if (synced) {
-            const currentRequest = historySyncRequestRef.current;
-            if (
-              currentRequest &&
-              currentRequest.sessionKey === targetSessionKey &&
-              currentRequest.attempt === attempt
-            ) {
-              historySyncRequestRef.current = null;
-            }
-            void refreshSessions();
-            return;
-          }
-
-          const retryPlan = computeHistorySyncRetryPlan({
-            attempt,
-            maxAttempts: HISTORY_SYNC_MAX_ATTEMPTS,
-            baseDelayMs: HISTORY_SYNC_RETRY_BASE_MS,
-          });
-          if (!retryPlan.shouldRetry || connectionStateRef.current !== 'connected') {
-            const currentRequest = historySyncRequestRef.current;
-            if (
-              currentRequest &&
-              currentRequest.sessionKey === targetSessionKey &&
-              currentRequest.attempt === attempt
-            ) {
-              historySyncRequestRef.current = null;
-            }
-            return;
-          }
-
-          scheduleSessionHistorySync(targetSessionKey, {
-            attempt: retryPlan.nextAttempt,
-            delayMs: retryPlan.delayMs,
-          });
-        })();
-      }, delayMs);
-    },
-    [loadSessionHistory, refreshSessions],
-  );
-
-  const scheduleMissingResponseRecovery = useCallback(
-    (
-      sessionKey: string,
-      turnId: string,
-      options?: {
-        attempt?: number;
-        delayMs?: number;
-      },
-    ) => {
-      const targetSessionKey = sessionKey.trim();
-      const targetTurnId = turnId.trim();
-      if (!targetSessionKey || !targetTurnId) return;
-
-      const attempt = Math.max(1, options?.attempt ?? 1);
-      const delayMs = Math.max(
-        0,
-        options?.delayMs ??
-          (attempt === 1
-            ? MISSING_RESPONSE_RECOVERY_INITIAL_DELAY_MS
-            : MISSING_RESPONSE_RECOVERY_RETRY_BASE_MS * 2 ** (attempt - 1)),
-      );
-
-      missingResponseRecoveryRequestRef.current = {
-        sessionKey: targetSessionKey,
-        turnId: targetTurnId,
-        attempt,
-      };
-
-      clearMissingResponseRecoveryTimer();
-      missingResponseRecoveryTimerRef.current = setTimeout(() => {
-        missingResponseRecoveryTimerRef.current = null;
-        const request = missingResponseRecoveryRequestRef.current;
-        if (
-          !request ||
-          request.sessionKey !== targetSessionKey ||
-          request.turnId !== targetTurnId ||
-          request.attempt !== attempt
-        ) {
-          return;
-        }
-
-        if (connectionStateRef.current !== 'connected') {
-          setMissingResponseNotice({
-            sessionKey: targetSessionKey,
-            turnId: targetTurnId,
-            attempt,
-            message: 'Final response may be stale. Reconnect and tap retry fetch.',
-          });
-          missingResponseRecoveryRequestRef.current = null;
-          return;
-        }
-
-        void (async () => {
-          setIsMissingResponseRecoveryInFlight(true);
-          const synced = await loadSessionHistory(targetSessionKey, { silentError: true });
-          setIsMissingResponseRecoveryInFlight(false);
-
-          const currentRequest = missingResponseRecoveryRequestRef.current;
-          if (
-            !currentRequest ||
-            currentRequest.sessionKey !== targetSessionKey ||
-            currentRequest.turnId !== targetTurnId ||
-            currentRequest.attempt !== attempt
-          ) {
-            return;
-          }
-
-          if (synced) {
-            void refreshSessions();
-          }
-
-          const turns = sessionTurnsRef.current.get(targetSessionKey) ?? [];
-          const targetTurn = turns.find((turn) => turn.id === targetTurnId);
-          const latestTurn = turns[turns.length - 1];
-          const turnForCheck = targetTurn ?? latestTurn;
-          const stillIncomplete = !synced
-            ? true
-            : !turnForCheck
-              ? true
-              : turnForCheck.id !== targetTurnId
-                ? false
-                : isTurnWaitingState(turnForCheck.state) ||
-                  shouldAttemptFinalRecovery(
-                    turnForCheck.assistantText,
-                    turnForCheck.assistantText,
-                  );
-
-          if (!stillIncomplete) {
-            missingResponseRecoveryRequestRef.current = null;
-            setMissingResponseNotice((previous) => {
-              if (
-                !previous ||
-                previous.sessionKey !== targetSessionKey ||
-                previous.turnId !== targetTurnId
-              ) {
-                return previous;
-              }
-              return null;
-            });
-            return;
-          }
-
-          if (attempt >= MISSING_RESPONSE_RECOVERY_MAX_ATTEMPTS) {
-            missingResponseRecoveryRequestRef.current = null;
-            setMissingResponseNotice({
-              sessionKey: targetSessionKey,
-              turnId: targetTurnId,
-              attempt,
-              message: 'Final response not synced yet. Tap retry fetch.',
-            });
-            return;
-          }
-
-          setMissingResponseNotice({
-            sessionKey: targetSessionKey,
-            turnId: targetTurnId,
-            attempt,
-            message: `Final response delayed. Auto retrying (${attempt}/${MISSING_RESPONSE_RECOVERY_MAX_ATTEMPTS})...`,
-          });
-          scheduleMissingResponseRecovery(targetSessionKey, targetTurnId, {
-            attempt: attempt + 1,
-          });
-        })();
-      }, delayMs);
-    },
-    [clearMissingResponseRecoveryTimer, loadSessionHistory, refreshSessions],
-  );
-
-  const scheduleFinalResponseRecovery = useCallback(
-    (sessionKey: string, attempt = 1) => {
-      if (attempt > FINAL_RESPONSE_RECOVERY_MAX_ATTEMPTS) return;
-      clearFinalResponseRecoveryTimer();
-      finalResponseRecoveryTimerRef.current = setTimeout(() => {
-        finalResponseRecoveryTimerRef.current = null;
-        void (async () => {
-          const synced = await loadSessionHistory(sessionKey, { silentError: true });
-          if (!synced) {
-            if (connectionStateRef.current !== 'connected') return;
-            scheduleFinalResponseRecovery(sessionKey, attempt + 1);
-            return;
-          }
-          void refreshSessions();
-
-          const turns = sessionTurnsRef.current.get(sessionKey) ?? [];
-          const latestTurn = turns[turns.length - 1];
-          const stillIncomplete =
-            !latestTurn ||
-            isTurnWaitingState(latestTurn.state) ||
-            shouldAttemptFinalRecovery(
-              latestTurn.assistantText,
-              latestTurn.assistantText,
-            );
-
-          if (stillIncomplete) {
-            scheduleFinalResponseRecovery(sessionKey, attempt + 1);
-          }
-        })();
-      }, FINAL_RESPONSE_RECOVERY_BASE_DELAY_MS * attempt);
-    },
-    [clearFinalResponseRecoveryTimer, loadSessionHistory, refreshSessions],
-  );
+  const {
+    scheduleSessionHistorySync,
+    scheduleMissingResponseRecovery,
+    scheduleFinalResponseRecovery,
+  } = useSessionRuntime({
+    historySyncTimerRef,
+    historySyncRequestRef,
+    missingResponseRecoveryTimerRef,
+    missingResponseRecoveryRequestRef,
+    finalResponseRecoveryTimerRef,
+    connectionStateRef,
+    sessionTurnsRef,
+    clearMissingResponseRecoveryTimer,
+    clearFinalResponseRecoveryTimer,
+    loadSessionHistory,
+    refreshSessions,
+    setIsMissingResponseRecoveryInFlight,
+    setMissingResponseNotice,
+    isTurnWaitingState,
+  });
 
   const {
     canSendDraft,
