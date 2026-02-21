@@ -2,7 +2,6 @@ import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction 
 import type {
   ChatEventPayload,
   ConnectionState,
-  GatewayClient,
   GatewayClientOptions,
 } from '../openclaw';
 import type { GatewayConnectDiagnostic } from '../types';
@@ -28,7 +27,13 @@ type UseGatewayConnectionFlowInput = {
   gatewayContextConnectDiagnostic: GatewayConnectDiagnostic | null;
   gatewayConnect: (url: string, options?: GatewayClientOptions) => Promise<void>;
   gatewayDisconnect: () => void;
-  gatewayGetClient: () => GatewayClient | null;
+  gatewaySubscribeChatEvent: (
+    callback: (payload: ChatEventPayload) => void,
+  ) => () => void;
+  gatewaySubscribeEvent: (
+    eventName: string,
+    callback: (payload: unknown) => void,
+  ) => () => void;
   gatewayUrlRef: MutableRefObject<string>;
   connectionStateRef: MutableRefObject<ConnectionState>;
   isUnmountingRef: MutableRefObject<boolean>;
@@ -149,11 +154,6 @@ export function useGatewayConnectionFlow(input: UseGatewayConnectionFlowInput) {
           caps: ['talk'],
         });
 
-        const client = input.gatewayGetClient();
-        if (!client) {
-          throw new Error('Connection established but Gateway client is unavailable.');
-        }
-
         const pairingListener = () => {
           input.setGatewayError(
             'Pairing approval required. Please allow this device on OpenClaw.',
@@ -166,12 +166,9 @@ export function useGatewayConnectionFlow(input: UseGatewayConnectionFlowInput) {
           input.setGatewayEventState('pairing-required');
         };
 
-        const onChatEvent = client.onChatEvent(input.handleChatEvent);
-        client.on('pairing.required', pairingListener);
-
         input.subscriptionsRef.current = [
-          onChatEvent,
-          () => client.off('pairing.required', pairingListener),
+          input.gatewaySubscribeChatEvent(input.handleChatEvent),
+          input.gatewaySubscribeEvent('pairing.required', pairingListener),
         ];
       };
 

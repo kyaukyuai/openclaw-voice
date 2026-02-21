@@ -15,9 +15,14 @@ import React, {
   type ReactNode,
 } from 'react';
 import {
+  type ChatAttachmentPayload,
   GatewayClient,
   type GatewayClientOptions,
+  type ChatEventPayload,
+  type ChatHistoryPayload,
+  type ChatSendResponse,
   type ConnectionState,
+  type SessionPatchInput,
   type SessionEntry,
 } from '../openclaw';
 import type { GatewayConnectDiagnostic, GatewayHealthState } from '../types';
@@ -60,7 +65,26 @@ type GatewayActions = {
     limit?: number;
     includeGlobal?: boolean;
   }) => Promise<SessionEntry[]>;
-  getClient: () => GatewayClient | null;
+  chatHistory: (
+    sessionKey: string,
+    options?: { limit?: number },
+  ) => Promise<ChatHistoryPayload>;
+  chatSend: (
+    sessionKey: string,
+    message: string,
+    options?: {
+      thinking?: string;
+      attachments?: ChatAttachmentPayload[];
+      idempotencyKey?: string;
+      timeoutMs?: number;
+    },
+  ) => Promise<ChatSendResponse>;
+  patchSession: (sessionKey: string, patch: SessionPatchInput) => Promise<void>;
+  subscribeChatEvent: (callback: (payload: ChatEventPayload) => void) => () => void;
+  subscribeEvent: (
+    eventName: string,
+    callback: (payload: unknown) => void,
+  ) => () => void;
 };
 
 type GatewayContextValue = GatewayState & GatewayActions;
@@ -304,8 +328,65 @@ export function GatewayProvider({ children }: GatewayProviderProps) {
     [],
   );
 
-  // Get client ref
-  const getClient = useCallback(() => clientRef.current, []);
+  const requireConnectedClient = useCallback((action: string) => {
+    const client = clientRef.current;
+    if (!client || connectionStateRef.current !== 'connected') {
+      throw new Error(`Gateway is not connected (${action}).`);
+    }
+    return client;
+  }, []);
+
+  const chatHistory = useCallback(
+    async (sessionKey: string, options?: { limit?: number }) => {
+      const client = requireConnectedClient('chat history');
+      return client.chatHistory(sessionKey, options);
+    },
+    [requireConnectedClient],
+  );
+
+  const chatSend = useCallback(
+    async (
+      sessionKey: string,
+      message: string,
+      options?: {
+        thinking?: string;
+        attachments?: ChatAttachmentPayload[];
+        idempotencyKey?: string;
+        timeoutMs?: number;
+      },
+    ) => {
+      const client = requireConnectedClient('chat send');
+      return client.chatSend(sessionKey, message, options);
+    },
+    [requireConnectedClient],
+  );
+
+  const patchSession = useCallback(
+    async (sessionKey: string, patch: SessionPatchInput) => {
+      const client = requireConnectedClient('session patch');
+      await client.sessionsPatch(sessionKey, patch);
+    },
+    [requireConnectedClient],
+  );
+
+  const subscribeChatEvent = useCallback(
+    (callback: (payload: ChatEventPayload) => void) => {
+      const client = requireConnectedClient('chat event subscribe');
+      return client.onChatEvent(callback);
+    },
+    [requireConnectedClient],
+  );
+
+  const subscribeEvent = useCallback(
+    (eventName: string, callback: (payload: unknown) => void) => {
+      const client = requireConnectedClient(`event subscribe: ${eventName}`);
+      client.on(eventName, callback);
+      return () => {
+        client.off(eventName, callback);
+      };
+    },
+    [requireConnectedClient],
+  );
 
   const value = useMemo<GatewayContextValue>(
     () => ({
@@ -324,7 +405,11 @@ export function GatewayProvider({ children }: GatewayProviderProps) {
       disconnect,
       checkHealth,
       refreshSessions,
-      getClient,
+      chatHistory,
+      chatSend,
+      patchSession,
+      subscribeChatEvent,
+      subscribeEvent,
     }),
     [
       connectionState,
@@ -340,7 +425,11 @@ export function GatewayProvider({ children }: GatewayProviderProps) {
       disconnect,
       checkHealth,
       refreshSessions,
-      getClient,
+      chatHistory,
+      chatSend,
+      patchSession,
+      subscribeChatEvent,
+      subscribeEvent,
     ],
   );
 

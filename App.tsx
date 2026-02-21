@@ -432,7 +432,11 @@ function AppContent() {
     disconnect: gatewayDisconnect,
     checkHealth: gatewayCheckHealth,
     refreshSessions: gatewayRefreshSessions,
-    getClient: gatewayGetClient,
+    chatHistory: gatewayChatHistory,
+    chatSend: gatewayChatSend,
+    patchSession: gatewayPatchSession,
+    subscribeChatEvent: gatewaySubscribeChatEvent,
+    subscribeEvent: gatewaySubscribeEvent,
     connectionState: gatewayConnectionState,
     connectDiagnostic: gatewayContextConnectDiagnostic,
     sessions: gatewaySessions,
@@ -1089,8 +1093,7 @@ function AppContent() {
         silentError?: boolean;
       },
     ): Promise<boolean> => {
-      const client = gatewayGetClient();
-      if (!client || connectionState !== 'connected') {
+      if (connectionState !== 'connected') {
         applySessionTurns(sessionKey, sessionTurnsRef.current.get(sessionKey) ?? []);
         return false;
       }
@@ -1112,7 +1115,7 @@ function AppContent() {
           });
         },
         run: async () => {
-          const response = await client.chatHistory(sessionKey, { limit: 80 });
+          const response = await gatewayChatHistory(sessionKey, { limit: 80 });
           const turns = buildTurnsFromHistory(response.messages, sessionKey);
           const localTurns = sessionTurnsRef.current.get(sessionKey) ?? [];
           const queuedTurnIds = new Set(
@@ -1146,7 +1149,7 @@ function AppContent() {
     [
       applySessionTurns,
       connectionState,
-      gatewayGetClient,
+      gatewayChatHistory,
       runGatewayRuntimeAction,
       runHistoryRefresh,
     ],
@@ -1236,10 +1239,9 @@ function AppContent() {
     setSessionsError(null);
     setIsSessionOperationPending(true);
     try {
-      const client = gatewayGetClient();
-      if (client && connectionState === 'connected') {
+      if (connectionState === 'connected') {
         try {
-          await client.sessionsPatch(sessionKey, {
+          await gatewayPatchSession(sessionKey, {
             label: alias || undefined,
             displayName: alias || undefined,
           });
@@ -1271,7 +1273,7 @@ function AppContent() {
     }
   }, [
     connectionState,
-    gatewayGetClient,
+    gatewayPatchSession,
     isSessionOperationPending,
     refreshSessions,
     sessionRenameDraft,
@@ -1342,7 +1344,8 @@ function AppContent() {
     gatewayContextConnectDiagnostic,
     gatewayConnect,
     gatewayDisconnect,
-    gatewayGetClient,
+    gatewaySubscribeChatEvent,
+    gatewaySubscribeEvent,
     gatewayUrlRef,
     connectionStateRef,
     isUnmountingRef,
@@ -1390,7 +1393,7 @@ function AppContent() {
     pendingTurnIdRef,
     activeRunIdRef,
     runIdToTurnIdRef,
-    gatewayGetClient,
+    gatewaySendChat: gatewayChatSend,
     runGatewayHealthCheck,
     runGatewayRuntimeAction,
     updateChatTurn,

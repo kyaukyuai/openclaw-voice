@@ -1,5 +1,5 @@
 import { useCallback, useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
-import type { ConnectionState, GatewayClient } from '../openclaw';
+import type { ChatSendResponse, ConnectionState } from '../openclaw';
 import type { ChatTurn, OutboxQueueItem } from '../types';
 import {
   SEND_TIMEOUT_MS,
@@ -31,7 +31,14 @@ type UseOutboxRuntimeInput = {
   pendingTurnIdRef: MutableRefObject<string | null>;
   activeRunIdRef: MutableRefObject<string | null>;
   runIdToTurnIdRef: MutableRefObject<Map<string, string>>;
-  gatewayGetClient: () => GatewayClient | null;
+  gatewaySendChat: (
+    sessionKey: string,
+    message: string,
+    options?: {
+      idempotencyKey?: string;
+      timeoutMs?: number;
+    },
+  ) => Promise<ChatSendResponse>;
   runGatewayHealthCheck: (options?: { silent?: boolean; timeoutMs?: number }) => Promise<boolean>;
   runGatewayRuntimeAction: (action: { type: 'SEND_REQUEST' | 'SEND_ERROR' }) => void;
   updateChatTurn: (turnId: string, updater: (turn: ChatTurn) => ChatTurn) => void;
@@ -52,9 +59,6 @@ export function useOutboxRuntime(input: UseOutboxRuntimeInput) {
     if (input.outboxProcessingRef.current) return;
     if (input.connectionStateRef.current !== 'connected') return;
     if (input.isSending) return;
-
-    const client = input.gatewayGetClient();
-    if (!client) return;
 
     const head = input.outboxQueueRef.current[0];
     if (!head) {
@@ -99,7 +103,7 @@ export function useOutboxRuntime(input: UseOutboxRuntimeInput) {
     }));
 
     try {
-      const result = await client.chatSend(head.sessionKey, head.message, {
+      const result = await input.gatewaySendChat(head.sessionKey, head.message, {
         timeoutMs: SEND_TIMEOUT_MS,
         idempotencyKey: head.idempotencyKey,
       });
