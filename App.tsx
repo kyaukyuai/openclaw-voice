@@ -146,14 +146,11 @@ import { useHistoryRuntime } from './src/ios-runtime/useHistoryRuntime';
 import { useComposerRuntime } from './src/ios-runtime/useComposerRuntime';
 import { scheduleHistoryScrollToEnd } from './src/ui/history-layout';
 import ConnectionHeader from './src/ui/ios/ConnectionHeader';
-import TopBanner from './src/ui/ios/TopBanner';
-import BottomDockControls from './src/ui/ios/BottomDockControls';
 import SettingsScreenModal from './src/ui/ios/SettingsScreenModal';
 import SessionsScreenModal from './src/ui/ios/SessionsScreenModal';
 import SettingsPanelContent from './src/ui/ios/SettingsPanelContent';
 import SessionsPanelContent from './src/ui/ios/SessionsPanelContent';
-import HistoryTimelineCard from './src/ui/ios/HistoryTimelineCard';
-import TranscriptComposerCard from './src/ui/ios/TranscriptComposerCard';
+import HomeMainLayout from './src/ui/ios/HomeMainLayout';
 
 // Import contexts
 import {
@@ -2966,6 +2963,27 @@ function AppContent() {
     },
     [chatTurns.length],
   );
+  const handleHistoryAutoScroll = useCallback(() => {
+    if (historyAutoScrollRef.current) {
+      scrollHistoryToBottom(false);
+    }
+  }, [scrollHistoryToBottom]);
+  const handleHistoryLayoutAutoScroll = useCallback(() => {
+    if (historyAutoScrollRef.current) {
+      scrollHistoryToBottom(false);
+    }
+  }, [scrollHistoryToBottom]);
+  const handleBottomDockHeightChange = useCallback(
+    (nextHeight: number) => {
+      if (composerHeight !== nextHeight) {
+        setComposerHeight(nextHeight);
+      }
+    },
+    [composerHeight],
+  );
+  const handleBottomDockActionPressHaptic = useCallback(() => {
+    void triggerHaptic('button-press');
+  }, []);
 
   const styles = useMemo(() => createStyles(isDarkTheme), [isDarkTheme]);
   const placeholderColor = isDarkTheme ? '#95a8ca' : '#C4C4C0';
@@ -3127,146 +3145,87 @@ function AppContent() {
           setSessionRenameTargetKey={setSessionRenameTargetKey}
         />
       </SessionsScreenModal>
-        <View style={styles.headerBoundary} pointerEvents="none" />
-        {topBannerMessage && topBannerKind ? (
-          <TopBanner
-            styles={styles}
-            kind={topBannerKind}
-            message={topBannerMessage}
-            iconName={topBannerIconName}
-            canReconnectFromError={canReconnectFromError}
-            canRetryFromError={canRetryFromError}
-            canRetryMissingResponse={canRetryMissingResponse}
-            isMissingResponseRecoveryInFlight={isMissingResponseRecoveryInFlight}
-            isGatewayConnected={isGatewayConnected}
-            onReconnectFromError={handleReconnectFromError}
-            onRetryFromError={handleRetryFromError}
-            onRetryMissingResponse={handleRetryMissingResponse}
-            onDismiss={handleDismissTopBanner}
-            maxTextScaleTight={MAX_TEXT_SCALE_TIGHT}
-          />
-        ) : null}
-        <View style={styles.main}>
-          <HistoryTimelineCard
-            styles={styles}
-            isDarkTheme={isDarkTheme}
-            showHistoryCard={showHistoryCard}
-            showHistoryRefreshButton={showHistoryRefreshButton}
-            isGatewayConnected={isGatewayConnected}
-            isSessionHistoryLoading={isSessionHistoryLoading}
-            onRefreshHistory={handleRefreshHistory}
-            showHistoryUpdatedMeta={showHistoryUpdatedMeta}
-            historyUpdatedLabel={historyUpdatedLabel}
-            historyScrollRef={historyScrollRef}
-            historyItems={historyItems}
-            historyListBottomPadding={historyListBottomPadding}
-            showScrollToBottomButton={showScrollToBottomButton}
-            showHistoryScrollButton={showHistoryScrollButton}
-            isHomeComposingMode={isHomeComposingMode}
-            showHistoryDateDivider={showHistoryDateDivider}
-            onHistoryScroll={handleHistoryScroll}
-            onHistoryAutoScroll={() => {
-              if (historyAutoScrollRef.current) {
-                scrollHistoryToBottom(false);
-              }
-            }}
-            onHistoryLayoutAutoScroll={() => {
-              if (historyAutoScrollRef.current) {
-                scrollHistoryToBottom(false);
-              }
-            }}
-            onScrollToBottom={handleScrollHistoryToBottom}
-            maxTextScale={MAX_TEXT_SCALE}
-            maxTextScaleTight={MAX_TEXT_SCALE_TIGHT}
-          />
-          <TranscriptComposerCard
-            styles={styles}
-            isRecognizing={isRecognizing}
-            isTranscriptEditingWithKeyboard={isTranscriptEditingWithKeyboard}
-            shouldUseCompactTranscriptCard={shouldUseCompactTranscriptCard}
-            focusedField={focusedField}
-            transcript={transcript}
-            transcriptPlaceholder={transcriptPlaceholder}
-            placeholderColor={placeholderColor}
-            interimTranscript={interimTranscript}
-            maxTextScale={MAX_TEXT_SCALE}
-            onTranscriptChange={handleTranscriptChange}
-            onFocusTranscript={handleTranscriptFocus}
-            onBlurTranscript={handleTranscriptBlur}
-          />
-        </View>
-
-        <View
-          style={[
-            styles.bottomDock,
-            isHomeComposingMode && styles.bottomDockComposing,
-            isTranscriptFocused && styles.bottomDockKeyboardOpen,
-            isKeyboardVisible && styles.bottomDockKeyboardCompact,
-          ]}
-          onLayout={(event) => {
-            const nextHeight = Math.round(event.nativeEvent.layout.height);
-            if (composerHeight !== nextHeight) {
-              setComposerHeight(nextHeight);
-            }
-          }}
-        >
-          <BottomDockControls
-            styles={styles}
-            isKeyboardBarMounted={isKeyboardBarMounted}
-            keyboardBarAnim={keyboardBarAnim}
-            showDoneOnlyAction={showDoneOnlyAction}
-            showClearInKeyboardBar={showClearInKeyboardBar}
-            canClearFromKeyboardBar={canClearFromKeyboardBar}
-            canSendFromKeyboardBar={canSendFromKeyboardBar}
-            onDone={handleDoneKeyboardAction}
-            onClear={handleClearKeyboardAction}
-            onSendFromKeyboardBar={handleSendKeyboardAction}
-            showQuickTextLeftTooltip={showQuickTextLeftTooltip}
-            showQuickTextRightTooltip={showQuickTextRightTooltip}
-            quickTextLeftLabel={quickTextLeftLabel}
-            quickTextRightLabel={quickTextRightLabel}
-            quickTextLeftIcon={quickTextLeftIcon}
-            quickTextRightIcon={quickTextRightIcon}
-            canUseQuickTextLeft={canUseQuickTextLeft}
-            canUseQuickTextRight={canUseQuickTextRight}
-            onQuickTextLeftPress={() => {
-              handleQuickTextPress('left', quickTextLeftLabel);
-            }}
-            onQuickTextLeftLongPress={() => {
-              handleQuickTextLongPress('left', quickTextLeftLabel);
-            }}
-            onQuickTextLeftPressOut={() => {
-              handleQuickTextPressOut('left');
-            }}
-            onQuickTextRightPress={() => {
-              handleQuickTextPress('right', quickTextRightLabel);
-            }}
-            onQuickTextRightLongPress={() => {
-              handleQuickTextLongPress('right', quickTextRightLabel);
-            }}
-            onQuickTextRightPressOut={() => {
-              handleQuickTextPressOut('right');
-            }}
-            canSendDraft={canSendDraft}
-            isSending={isSending}
-            isGatewayConnected={isGatewayConnected}
-            isRecognizing={isRecognizing}
-            speechRecognitionSupported={speechRecognitionSupported}
-            settingsReady={settingsReady}
-            onSendDraft={handleSendDraftAction}
-            onMicPressIn={handleHoldToTalkPressIn}
-            onMicPressOut={handleHoldToTalkPressOut}
-            onActionPressHaptic={() => {
-              void triggerHaptic('button-press');
-            }}
-            showBottomStatus={showBottomStatus}
-            bottomActionStatus={bottomActionStatus}
-            bottomActionLabel={bottomActionStatusLabel}
-            bottomActionDetailText={bottomActionDetailText}
-            maxTextScale={MAX_TEXT_SCALE}
-            maxTextScaleTight={MAX_TEXT_SCALE_TIGHT}
-          />
-        </View>
+        <HomeMainLayout
+          styles={styles}
+          isDarkTheme={isDarkTheme}
+          topBannerKind={topBannerKind}
+          topBannerMessage={topBannerMessage ?? null}
+          topBannerIconName={topBannerIconName}
+          canReconnectFromError={canReconnectFromError}
+          canRetryFromError={canRetryFromError}
+          canRetryMissingResponse={canRetryMissingResponse}
+          isMissingResponseRecoveryInFlight={isMissingResponseRecoveryInFlight}
+          isGatewayConnected={isGatewayConnected}
+          onReconnectFromError={handleReconnectFromError}
+          onRetryFromError={handleRetryFromError}
+          onRetryMissingResponse={handleRetryMissingResponse}
+          onDismissTopBanner={handleDismissTopBanner}
+          showHistoryCard={showHistoryCard}
+          showHistoryRefreshButton={showHistoryRefreshButton}
+          isSessionHistoryLoading={isSessionHistoryLoading}
+          onRefreshHistory={handleRefreshHistory}
+          showHistoryUpdatedMeta={showHistoryUpdatedMeta}
+          historyUpdatedLabel={historyUpdatedLabel}
+          historyScrollRef={historyScrollRef}
+          historyItems={historyItems}
+          historyListBottomPadding={historyListBottomPadding}
+          showScrollToBottomButton={showScrollToBottomButton}
+          showHistoryScrollButton={showHistoryScrollButton}
+          isHomeComposingMode={isHomeComposingMode}
+          showHistoryDateDivider={showHistoryDateDivider}
+          onHistoryScroll={handleHistoryScroll}
+          onHistoryAutoScroll={handleHistoryAutoScroll}
+          onHistoryLayoutAutoScroll={handleHistoryLayoutAutoScroll}
+          onScrollHistoryToBottom={handleScrollHistoryToBottom}
+          isRecognizing={isRecognizing}
+          isTranscriptEditingWithKeyboard={isTranscriptEditingWithKeyboard}
+          shouldUseCompactTranscriptCard={shouldUseCompactTranscriptCard}
+          focusedField={focusedField}
+          transcript={transcript}
+          transcriptPlaceholder={transcriptPlaceholder}
+          placeholderColor={placeholderColor}
+          interimTranscript={interimTranscript}
+          onTranscriptChange={handleTranscriptChange}
+          onFocusTranscript={handleTranscriptFocus}
+          onBlurTranscript={handleTranscriptBlur}
+          isTranscriptFocused={isTranscriptFocused}
+          isKeyboardVisible={isKeyboardVisible}
+          onBottomDockHeightChange={handleBottomDockHeightChange}
+          isKeyboardBarMounted={isKeyboardBarMounted}
+          keyboardBarAnim={keyboardBarAnim}
+          showDoneOnlyAction={showDoneOnlyAction}
+          showClearInKeyboardBar={showClearInKeyboardBar}
+          canClearFromKeyboardBar={canClearFromKeyboardBar}
+          canSendFromKeyboardBar={canSendFromKeyboardBar}
+          onDoneKeyboardAction={handleDoneKeyboardAction}
+          onClearKeyboardAction={handleClearKeyboardAction}
+          onSendKeyboardAction={handleSendKeyboardAction}
+          showQuickTextLeftTooltip={showQuickTextLeftTooltip}
+          showQuickTextRightTooltip={showQuickTextRightTooltip}
+          quickTextLeftLabel={quickTextLeftLabel}
+          quickTextRightLabel={quickTextRightLabel}
+          quickTextLeftIcon={quickTextLeftIcon}
+          quickTextRightIcon={quickTextRightIcon}
+          canUseQuickTextLeft={canUseQuickTextLeft}
+          canUseQuickTextRight={canUseQuickTextRight}
+          onQuickTextPress={handleQuickTextPress}
+          onQuickTextLongPress={handleQuickTextLongPress}
+          onQuickTextPressOut={handleQuickTextPressOut}
+          canSendDraft={canSendDraft}
+          isSending={isSending}
+          speechRecognitionSupported={speechRecognitionSupported}
+          settingsReady={settingsReady}
+          onSendDraftAction={handleSendDraftAction}
+          onMicPressIn={handleHoldToTalkPressIn}
+          onMicPressOut={handleHoldToTalkPressOut}
+          onActionPressHaptic={handleBottomDockActionPressHaptic}
+          showBottomStatus={showBottomStatus}
+          bottomActionStatus={bottomActionStatus}
+          bottomActionLabel={bottomActionStatusLabel}
+          bottomActionDetailText={bottomActionDetailText}
+          maxTextScale={MAX_TEXT_SCALE}
+          maxTextScaleTight={MAX_TEXT_SCALE_TIGHT}
+        />
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
