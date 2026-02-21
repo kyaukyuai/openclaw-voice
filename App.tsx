@@ -43,11 +43,8 @@ import {
 // Import extracted types
 import type {
   AppTheme,
-  BottomActionStatus,
-  ComponentProps,
   FocusField,
   GatewayConnectDiagnostic,
-  HomeDisplayMode,
   QuickTextButtonSide,
   QuickTextFocusField,
   QuickTextIcon,
@@ -68,7 +65,6 @@ import {
 
 // Import extracted constants
 import {
-  CONNECTION_LABELS,
   REQUESTED_GATEWAY_CLIENT_ID,
   GATEWAY_DISPLAY_NAME,
   ENABLE_DEBUG_WARNINGS,
@@ -76,7 +72,6 @@ import {
   DEFAULTS,
   TIMINGS,
   UI,
-  BOTTOM_ACTION_STATUS_LABELS,
   QUICK_TEXT_ICON_SET,
   MESSAGES,
   // Legacy exports for backward compatibility
@@ -141,6 +136,7 @@ import { useGatewayRuntime } from './src/ios-runtime/useGatewayRuntime';
 import { useHistoryRuntime } from './src/ios-runtime/useHistoryRuntime';
 import { useComposerRuntime } from './src/ios-runtime/useComposerRuntime';
 import { useHomeUiHandlers } from './src/ios-runtime/useHomeUiHandlers';
+import { useHomeUiState } from './src/ios-runtime/useHomeUiState';
 import { scheduleHistoryScrollToEnd } from './src/ui/history-layout';
 import ConnectionHeader from './src/ui/ios/ConnectionHeader';
 import SettingsScreenModal from './src/ui/ios/SettingsScreenModal';
@@ -2391,303 +2387,120 @@ function AppContent() {
     [clearFinalResponseRecoveryTimer, loadSessionHistory, refreshSessions],
   );
 
-  const draftText = transcript.trim() || interimTranscript.trim();
-  const hasDraft = Boolean(draftText);
-  const canSendDraft = hasDraft && !isRecognizing;
-  const quickTextLeftLabel = quickTextLeft.trim();
-  const quickTextRightLabel = quickTextRight.trim();
-  const isTranscriptFocused = focusedField === 'transcript';
-  const isQuickTextFieldFocused =
-    focusedField === 'quick-text-left' || focusedField === 'quick-text-right';
-  const isQuickTextSettingsEditMode =
-    shouldShowSettingsScreen && isQuickTextFieldFocused;
-  const isGatewayFieldFocused =
-    focusedField === 'gateway-url' ||
-    focusedField === 'auth-token' ||
-    isQuickTextFieldFocused;
-  const showKeyboardActionBar =
-    isKeyboardVisible && (isTranscriptFocused || isGatewayFieldFocused);
-  const showDoneOnlyAction = showKeyboardActionBar && isGatewayFieldFocused;
-  const showClearInKeyboardBar = showKeyboardActionBar && isTranscriptFocused;
-  const canSendFromKeyboardBar =
-    hasDraft && !isRecognizing && !isSending;
-  const canClearFromKeyboardBar =
-    transcript.length > 0 || interimTranscript.length > 0;
-  const speechRecognitionSupported = supportsSpeechRecognitionOnCurrentPlatform();
-  const speechUnsupportedMessage = isMacDesktopRuntime()
-    ? 'macOSでは音声入力未対応です。'
-    : 'Webでは音声入力未対応です。';
-  const canUseQuickText = !isRecognizing && settingsReady;
-  const canUseQuickTextLeft = canUseQuickText && quickTextLeftLabel.length > 0;
-  const canUseQuickTextRight = canUseQuickText && quickTextRightLabel.length > 0;
-  const showQuickTextLeftTooltip = quickTextTooltipSide === 'left' && canUseQuickTextLeft;
-  const showQuickTextRightTooltip =
-    quickTextTooltipSide === 'right' && canUseQuickTextRight;
-  const isTranscriptEditingWithKeyboard = isKeyboardVisible && isTranscriptFocused;
-  const isTranscriptExpanded = isTranscriptFocused || isRecognizing;
-  const homeDisplayMode: HomeDisplayMode = isSending
-    ? 'sending'
-    : isTranscriptFocused || isRecognizing
-      ? 'composing'
-      : 'idle';
-  const isHomeIdleMode = homeDisplayMode === 'idle';
-  const isHomeComposingMode = homeDisplayMode === 'composing';
-  const showHistorySecondaryUi = !isHomeComposingMode;
-  const showHistoryCard = !isTranscriptEditingWithKeyboard;
-  const showHistoryRefreshButton =
-    showHistoryCard &&
-    showHistorySecondaryUi &&
-    !isSending;
-  const transcriptPlaceholder = isTranscriptFocused
-    ? 'Type your message.'
-    : 'Tap to type or hold mic.';
-  const shouldUseCompactTranscriptCard =
-    isHomeIdleMode && !hasDraft && !isTranscriptExpanded;
-  const canSwitchSession = !isSending && !isSessionOperationPending;
-  const canRefreshSessions =
-    isGatewayConnected && !isSessionsLoading && !isSessionOperationPending;
-  const canCreateSession = canSwitchSession;
-  const canRenameSession = canSwitchSession;
-  const canPinSession = !isSessionOperationPending;
-  const hasGatewaySessions = sessions.length > 0;
-  const visibleSessions = useMemo(() => {
-    const active = activeSessionKey;
-    const merged = [...sessions];
-    if (!merged.some((session) => session.key === active)) {
-      merged.unshift({ key: active, displayName: active });
-    }
-    merged.sort((a, b) => {
-      if (a.key === active && b.key !== active) return -1;
-      if (b.key === active && a.key !== active) return 1;
-
-      const aPinned = sessionPreferences[a.key]?.pinned === true;
-      const bPinned = sessionPreferences[b.key]?.pinned === true;
-      if (aPinned !== bPinned) return aPinned ? -1 : 1;
-
-      const byUpdatedAt = (b.updatedAt ?? 0) - (a.updatedAt ?? 0);
-      if (byUpdatedAt !== 0) return byUpdatedAt;
-      return a.key.localeCompare(b.key);
-    });
-    return merged.slice(0, 20);
-  }, [activeSessionKey, sessionPreferences, sessions]);
-  const sessionPanelStatusText = sessionsError
-    ? 'Error'
-    : isSessionsLoading
-      ? 'Loading sessions...'
-      : hasGatewaySessions
-        ? `${visibleSessions.length} sessions`
-        : 'Local session only';
-  const sessionListHintText = sessionsError
-    ? 'Sync failed. Tap Refresh.'
-    : !hasGatewaySessions
-      ? 'No sessions yet. Tap New.'
-    : isSending || isSessionOperationPending
-        ? 'Busy now. Try again in a moment.'
-        : null;
-  const settingsStatusText = !settingsReady
-    ? 'Loading settings...'
-    : isSettingsSaving || settingsPendingSaveCount > 0
-      ? 'Syncing...'
-    : settingsSaveError
-      ? settingsSaveError
-      : settingsLastSavedAt
-        ? `Saved ${formatClockLabel(settingsLastSavedAt)}`
-        : 'Saved';
-  const isSettingsStatusError = Boolean(settingsSaveError);
-  const isSettingsStatusPending = isSettingsSaving || settingsPendingSaveCount > 0;
-  const sectionIconColor = isDarkTheme ? '#9eb1d2' : '#70706A';
-  const actionIconColor = isDarkTheme ? '#b8c9e6' : '#5C5C5C';
-  const currentBadgeIconColor = isDarkTheme ? '#9ec0ff' : '#1D4ED8';
-  const pinnedBadgeIconColor = isDarkTheme ? '#dbe7ff' : '#4B5563';
-  const optionIconColor = isDarkTheme ? '#b8c9e6' : '#5C5C5C';
-  const showOnboardingGuide = settingsReady && !isOnboardingCompleted;
-  const isOnboardingGatewayConfigured = gatewayUrl.trim().length > 0;
-  const isOnboardingConnectDone = isGatewayConnected;
-  const isOnboardingResponseDone = chatTurns.some(
-    (turn) =>
-      turn.state === 'complete' && !isIncompleteAssistantContent(turn.assistantText),
-  );
-  const canRunOnboardingConnectTest = settingsReady && !isGatewayConnecting;
-  const canRunOnboardingSampleSend =
-    isGatewayConnected && !isSending && !isOnboardingWaitingForResponse;
-  const onboardingSampleButtonLabel = isOnboardingWaitingForResponse
-    ? 'Waiting reply...'
-    : 'Send Sample';
-  const showGatewayDiagnostic =
-    !isGatewayConnected && gatewayConnectDiagnostic != null;
-  const gatewayDiagnosticIconName: ComponentProps<typeof Ionicons>['name'] =
-    gatewayConnectDiagnostic?.kind === 'tls'
-      ? 'shield-checkmark-outline'
-      : gatewayConnectDiagnostic?.kind === 'auth'
-        ? 'key-outline'
-        : gatewayConnectDiagnostic?.kind === 'timeout'
-          ? 'time-outline'
-          : gatewayConnectDiagnostic?.kind === 'dns'
-            ? 'globe-outline'
-            : gatewayConnectDiagnostic?.kind === 'network'
-              ? 'cloud-offline-outline'
-              : gatewayConnectDiagnostic?.kind === 'server'
-                ? 'server-outline'
-                : gatewayConnectDiagnostic?.kind === 'pairing'
-                  ? 'people-outline'
-                  : gatewayConnectDiagnostic?.kind === 'invalid-url'
-                    ? 'link-outline'
-                    : 'alert-circle-outline';
-  const outboxPendingCount = outboxQueue.length;
-  const activeMissingResponseNotice =
-    missingResponseNotice?.sessionKey === activeSessionKey
-      ? missingResponseNotice
-      : null;
-  const canRetryMissingResponse =
-    Boolean(activeMissingResponseNotice) &&
-    isGatewayConnected &&
-    !isMissingResponseRecoveryInFlight;
-  const historyRefreshErrorMessage =
-    historyRefreshNotice?.kind === 'error' ? historyRefreshNotice.message : null;
-  const historyUpdatedLabel =
-    historyLastSyncedAt != null
-      ? `Updated ${formatClockLabel(historyLastSyncedAt)}`
-      : null;
-  const showHistoryUpdatedMeta =
-    showHistoryCard &&
-    showHistorySecondaryUi &&
-    Boolean(historyUpdatedLabel);
-  const historyListBottomPadding = Math.max(
-    12,
-    historyBottomInset + (showScrollToBottomButton ? 28 : 0),
-  );
-  const hasRetryingState =
-    Boolean(activeMissingResponseNotice) ||
-    (outboxPendingCount > 0 && connectionState === 'connected');
-  const hasErrorState =
-    Boolean(gatewayError) ||
-    Boolean(speechError) ||
-    Boolean(historyRefreshErrorMessage);
-  const isStreamingGatewayEvent =
-    gatewayEventState === 'delta' || gatewayEventState === 'streaming';
-  const bottomActionStatus: BottomActionStatus = isRecognizing
-    ? 'recording'
-    : isSending
-      ? 'sending'
-      : hasRetryingState
-        ? 'retrying'
-        : hasErrorState
-          ? 'error'
-          : !isGatewayConnected
-            ? isGatewayConnecting || isStartupAutoConnecting
-              ? 'connecting'
-              : 'disconnected'
-            : isBottomCompletePulse
-              ? 'complete'
-              : 'ready';
-  const bottomActionDetailText =
-    bottomActionStatus === 'recording'
-      ? 'Release to stop'
-      : bottomActionStatus === 'sending'
-        ? isStreamingGatewayEvent
-          ? 'Streaming response'
-          : 'Waiting response'
-        : bottomActionStatus === 'retrying'
-          ? activeMissingResponseNotice
-            ? isMissingResponseRecoveryInFlight
-              ? 'Fetching final output'
-              : 'Retry available'
-            : `Queued ${outboxPendingCount}`
-          : bottomActionStatus === 'complete'
-            ? 'Sent successfully'
-            : bottomActionStatus === 'connecting'
-              ? outboxPendingCount > 0
-                ? `Queued ${outboxPendingCount}`
-                : 'Please wait'
-              : bottomActionStatus === 'disconnected'
-                ? outboxPendingCount > 0
-                  ? `Queued ${outboxPendingCount}`
-                  : 'Connect Gateway'
-                : bottomActionStatus === 'error'
-                  ? 'Check top banner'
-                    : canSendDraft
-                      ? 'Tap send'
-                      : speechRecognitionSupported
-                        ? 'Hold to record'
-                        : speechUnsupportedMessage;
-  const showBottomStatus = !isKeyboardBarMounted && !isHomeComposingMode;
-  const bottomActionStatusLabel = BOTTOM_ACTION_STATUS_LABELS[bottomActionStatus];
-  const connectionStatusLabel = CONNECTION_LABELS[connectionState];
-  const showHistoryDateDivider = showHistorySecondaryUi;
-  const showHistoryScrollButton =
-    showScrollToBottomButton &&
-    !isHomeComposingMode;
-  const historyItems = useMemo<HistoryListItem[]>(() => {
-    if (chatTurns.length === 0) return [];
-
-    const items: HistoryListItem[] = [];
-    let previousDayKey: string | null = null;
-
-    chatTurns.forEach((turn, index) => {
-      const dayKey = getHistoryDayKey(turn.createdAt);
-      if (dayKey !== previousDayKey) {
-        items.push({
-          kind: 'date',
-          id: `date-${dayKey}`,
-          label: getHistoryDayLabel(turn.createdAt),
-        });
-        previousDayKey = dayKey;
-      }
-
-      items.push({
-        kind: 'turn',
-        id: turn.id,
-        turn,
-        isLast: index === chatTurns.length - 1,
-      });
-    });
-
-    return items;
-  }, [chatTurns]);
-  const latestRetryText = useMemo(() => {
-    const currentDraft = (transcript.trim() || interimTranscript.trim()).trim();
-    if (currentDraft) return currentDraft;
-
-    for (let index = chatTurns.length - 1; index >= 0; index -= 1) {
-      const turn = chatTurns[index];
-      if (
-        (turn.state === 'error' || turn.state === 'aborted') &&
-        turn.userText.trim()
-      ) {
-        return turn.userText.trim();
-      }
-    }
-    return '';
-  }, [chatTurns, interimTranscript, transcript]);
-  const canReconnectFromError = settingsReady && !isGatewayConnecting;
-  const canRetryFromError =
-    Boolean(latestRetryText) && !isSending;
-  const topBannerKind:
-    | 'gateway'
-    | 'recovery'
-    | 'history'
-    | 'speech'
-    | null = gatewayError
-    ? 'gateway'
-    : activeMissingResponseNotice
-      ? 'recovery'
-      : historyRefreshErrorMessage
-        ? 'history'
-        : speechError
-          ? 'speech'
-          : null;
-  const topBannerMessage =
-    gatewayError ??
-    activeMissingResponseNotice?.message ??
-    historyRefreshErrorMessage ??
-    speechError;
-  const topBannerIconName = topBannerKind === 'gateway'
-    ? 'cloud-offline-outline'
-    : topBannerKind === 'recovery'
-      ? 'time-outline'
-      : topBannerKind === 'history'
-        ? 'refresh-outline'
-        : 'mic-off-outline';
+  const {
+    canSendDraft,
+    quickTextLeftLabel,
+    quickTextRightLabel,
+    isTranscriptFocused,
+    isQuickTextSettingsEditMode,
+    showKeyboardActionBar,
+    showDoneOnlyAction,
+    showClearInKeyboardBar,
+    canSendFromKeyboardBar,
+    canClearFromKeyboardBar,
+    speechRecognitionSupported,
+    canUseQuickTextLeft,
+    canUseQuickTextRight,
+    showQuickTextLeftTooltip,
+    showQuickTextRightTooltip,
+    isTranscriptEditingWithKeyboard,
+    isHomeComposingMode,
+    showHistoryCard,
+    showHistoryRefreshButton,
+    transcriptPlaceholder,
+    shouldUseCompactTranscriptCard,
+    canSwitchSession,
+    canRefreshSessions,
+    canCreateSession,
+    canRenameSession,
+    canPinSession,
+    visibleSessions,
+    sessionPanelStatusText,
+    sessionListHintText,
+    settingsStatusText,
+    isSettingsStatusError,
+    isSettingsStatusPending,
+    sectionIconColor,
+    actionIconColor,
+    currentBadgeIconColor,
+    pinnedBadgeIconColor,
+    optionIconColor,
+    showOnboardingGuide,
+    isOnboardingGatewayConfigured,
+    isOnboardingConnectDone,
+    isOnboardingResponseDone,
+    canRunOnboardingConnectTest,
+    canRunOnboardingSampleSend,
+    onboardingSampleButtonLabel,
+    showGatewayDiagnostic,
+    gatewayDiagnosticIconName,
+    activeMissingResponseNotice,
+    canRetryMissingResponse,
+    historyUpdatedLabel,
+    showHistoryUpdatedMeta,
+    historyListBottomPadding,
+    bottomActionStatus,
+    bottomActionDetailText,
+    showBottomStatus,
+    bottomActionStatusLabel,
+    connectionStatusLabel,
+    showHistoryDateDivider,
+    showHistoryScrollButton,
+    historyItems,
+    latestRetryText,
+    canReconnectFromError,
+    canRetryFromError,
+    topBannerKind,
+    topBannerMessage,
+    topBannerIconName,
+  } = useHomeUiState({
+    transcript,
+    interimTranscript,
+    isRecognizing,
+    quickTextLeft,
+    quickTextRight,
+    focusedField,
+    shouldShowSettingsScreen,
+    isKeyboardVisible,
+    isSending,
+    settingsReady,
+    isSessionOperationPending,
+    isGatewayConnected,
+    isSessionsLoading,
+    sessions,
+    sessionPreferences,
+    sessionsError,
+    isSettingsSaving,
+    settingsPendingSaveCount,
+    settingsSaveError,
+    settingsLastSavedAt,
+    isDarkTheme,
+    isOnboardingCompleted,
+    gatewayUrl,
+    chatTurns,
+    isGatewayConnecting,
+    isOnboardingWaitingForResponse,
+    gatewayConnectDiagnostic,
+    outboxQueueLength: outboxQueue.length,
+    missingResponseNotice,
+    activeSessionKey,
+    isMissingResponseRecoveryInFlight,
+    historyRefreshNotice,
+    historyLastSyncedAt,
+    historyBottomInset,
+    showScrollToBottomButton,
+    gatewayError,
+    speechError,
+    gatewayEventState,
+    connectionState,
+    isStartupAutoConnecting,
+    isBottomCompletePulse,
+    isKeyboardBarMounted,
+    formatClockLabel,
+    getHistoryDayKey,
+    getHistoryDayLabel,
+    quickTextTooltipSide,
+  });
   const handleButtonPressHaptic = useCallback(() => {
     void triggerHaptic('button-press');
   }, []);
