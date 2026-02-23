@@ -2,8 +2,8 @@ import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction 
 import type {
   ChatEventPayload,
   ConnectionState,
-  GatewayClientOptions,
 } from '../openclaw';
+import { useGateway } from '../contexts';
 import type { GatewayConnectDiagnostic } from '../types';
 import {
   GATEWAY_DISPLAY_NAME,
@@ -24,16 +24,6 @@ type UseGatewayConnectionFlowInput = {
   gatewayUrl: string;
   authToken: string;
   settingsReady: boolean;
-  gatewayContextConnectDiagnostic: GatewayConnectDiagnostic | null;
-  gatewayConnect: (url: string, options?: GatewayClientOptions) => Promise<void>;
-  gatewayDisconnect: () => void;
-  gatewaySubscribeChatEvent: (
-    callback: (payload: ChatEventPayload) => void,
-  ) => () => void;
-  gatewaySubscribeEvent: (
-    eventName: string,
-    callback: (payload: unknown) => void,
-  ) => () => void;
   gatewayUrlRef: MutableRefObject<string>;
   connectionStateRef: MutableRefObject<ConnectionState>;
   isUnmountingRef: MutableRefObject<boolean>;
@@ -72,6 +62,14 @@ type UseGatewayConnectionFlowInput = {
 };
 
 export function useGatewayConnectionFlow(input: UseGatewayConnectionFlowInput) {
+  const {
+    connect: gatewayConnect,
+    disconnect: gatewayDisconnect,
+    subscribeChatEvent: gatewaySubscribeChatEvent,
+    subscribeEvent: gatewaySubscribeEvent,
+    connectDiagnostic: gatewayContextConnectDiagnostic,
+  } = useGateway();
+
   const clearSubscriptions = useCallback(() => {
     input.subscriptionsRef.current.forEach((unsubscribe) => {
       try {
@@ -97,7 +95,7 @@ export function useGatewayConnectionFlow(input: UseGatewayConnectionFlowInput) {
       setGatewayConnectDiagnostic: input.setGatewayConnectDiagnostic,
       setIsBottomCompletePulse: input.setIsBottomCompletePulse,
       runGatewayRuntimeAction: input.runGatewayRuntimeAction,
-      gatewayDisconnect: input.gatewayDisconnect,
+      gatewayDisconnect,
       clearFinalResponseRecoveryTimer: input.clearFinalResponseRecoveryTimer,
       clearMissingResponseRecoveryState: input.clearMissingResponseRecoveryState,
       clearStartupAutoConnectRetryTimer: input.clearStartupAutoConnectRetryTimer,
@@ -105,7 +103,7 @@ export function useGatewayConnectionFlow(input: UseGatewayConnectionFlowInput) {
       clearOutboxRetryTimer: input.clearOutboxRetryTimer,
       invalidateRefreshEpoch: input.invalidateRefreshEpoch,
     });
-  }, [clearSubscriptions, input]);
+  }, [clearSubscriptions, gatewayDisconnect, input]);
 
   const connectGateway = useCallback(
     async (options?: { auto?: boolean; autoAttempt?: number }) => {
@@ -144,7 +142,7 @@ export function useGatewayConnectionFlow(input: UseGatewayConnectionFlowInput) {
         input.setGatewayError(null);
         input.setGatewayConnectDiagnostic(null);
         input.setSessionsError(null);
-        await input.gatewayConnect(trimmedGatewayUrl, {
+        await gatewayConnect(trimmedGatewayUrl, {
           token: input.authToken.trim() || undefined,
           autoReconnect: true,
           platform: GATEWAY_PLATFORM,
@@ -167,8 +165,8 @@ export function useGatewayConnectionFlow(input: UseGatewayConnectionFlowInput) {
         };
 
         input.subscriptionsRef.current = [
-          input.gatewaySubscribeChatEvent(input.handleChatEvent),
-          input.gatewaySubscribeEvent('pairing.required', pairingListener),
+          gatewaySubscribeChatEvent(input.handleChatEvent),
+          gatewaySubscribeEvent('pairing.required', pairingListener),
         ];
       };
 
@@ -187,7 +185,7 @@ export function useGatewayConnectionFlow(input: UseGatewayConnectionFlowInput) {
         disconnectGateway();
         const errorText = errorMessage(err);
         const diagnostic =
-          input.gatewayContextConnectDiagnostic ??
+          gatewayContextConnectDiagnostic ??
           classifyGatewayConnectFailure({
             error: err,
             hasToken,
@@ -228,7 +226,14 @@ export function useGatewayConnectionFlow(input: UseGatewayConnectionFlowInput) {
         }
       }
     },
-    [disconnectGateway, input],
+    [
+      disconnectGateway,
+      gatewayConnect,
+      gatewayContextConnectDiagnostic,
+      gatewaySubscribeChatEvent,
+      gatewaySubscribeEvent,
+      input,
+    ],
   );
 
   return {
