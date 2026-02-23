@@ -19,8 +19,13 @@ Manual checks:
 
 - Connect -> send -> complete does not leave `Sending...` stuck.
 - Refresh history returns from `Refreshing...` to terminal state (updated/failed).
+- Reconnecting state still allows manual disconnect/reconnect.
 - Keyboard open/close still keeps the latest history message visible.
 - Session switch/rename/pin and quick-text insert still work.
+
+Runtime note:
+
+- iOS now uses a single runtime path (legacy fallback toggle removed).
 
 ## `Cannot find native module 'ExpoSecureStore'`
 

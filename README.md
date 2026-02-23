@@ -332,6 +332,7 @@ Recent iOS stability work introduces:
 - Unified settings persistence in `SettingsContext` (single source of truth)
 - History refresh in-flight guard + 20s timeout fail-close behavior
 - Shared history bottom-scroll scheduler (`requestAnimationFrame` x2) for safer tail visibility
+- iOS runtime is now a single path (legacy fallback path removed)
 
 Primary files:
 
@@ -353,10 +354,11 @@ npm test -- --watch=false
 Manual iOS device checks:
 
 1. Launch debug app (`npm run ios:dev:device:install`) with Metro running.
-2. Verify connect -> send -> complete transitions do not leave `Sending...` stuck.
-3. Verify session refresh does not leave `Refreshing...` stuck.
-4. Open keyboard and ensure latest history line is fully visible (no bottom clipping).
-5. Switch sessions and ensure draft/quick text behavior still works.
+2. Verify connect -> send -> complete does not leave `Sending...` stuck.
+3. Verify refresh returns from `Refreshing...` to terminal state.
+4. Verify reconnecting state still allows manual disconnect/reconnect.
+5. Open keyboard and ensure latest history line is fully visible (no bottom clipping).
+6. Switch sessions and ensure draft/quick text behavior still works.
 
 ## Connection Defaults
 
@@ -512,7 +514,7 @@ npm run doctor:release
 gh workflow run release.yml
 ```
 
-Manual fallback:
+Manual release path:
 
 ```bash
 npm version patch --no-git-tag-version
