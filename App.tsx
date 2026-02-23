@@ -41,7 +41,7 @@ import type {
   MissingResponseRecoveryNotice,
   OutboxQueueItem,
 } from './src/types';
-import type { SessionPreference, SessionPreferences } from './src/types';
+import type { SessionPreferences } from './src/types';
 import {
   STORAGE_KEYS,
   OPENCLAW_IDENTITY_STORAGE_KEY,
@@ -78,8 +78,6 @@ import {
   triggerHaptic,
   textFromUnknown,
   dedupeLines,
-  errorMessage,
-  sessionDisplayName,
   extractTimestampFromUnknown,
   normalizeChatEventState,
   getTextOverlapSize,
@@ -96,6 +94,7 @@ import { useSessionRuntime } from './src/ios-runtime/useSessionRuntime';
 import { useGatewayConnectionFlow } from './src/ios-runtime/useGatewayConnectionFlow';
 import { useOutboxRuntime } from './src/ios-runtime/useOutboxRuntime';
 import { useSessionHistoryRuntime } from './src/ios-runtime/useSessionHistoryRuntime';
+import { useSessionActionsRuntime } from './src/ios-runtime/useSessionActionsRuntime';
 import { useSpeechRuntime } from './src/ios-runtime/useSpeechRuntime';
 import { useAppLifecycleRuntime } from './src/ios-runtime/useAppLifecycleRuntime';
 import { useSettingsUiRuntime } from './src/ios-runtime/useSettingsUiRuntime';
@@ -815,111 +814,35 @@ function AppContent() {
     setActiveRunId,
   });
 
-  const isSessionPinned = useCallback(
-    (sessionKey: string) => sessionPreferences[sessionKey]?.pinned === true,
-    [sessionPreferences],
-  );
-
-  const getSessionTitle = useCallback(
-    (session: SessionEntry) => {
-      const alias = sessionPreferences[session.key]?.alias?.trim();
-      if (alias) return alias;
-      return sessionDisplayName(session);
-    },
-    [sessionPreferences],
-  );
-
-  const startSessionRename = useCallback(
-    (sessionKey: string) => {
-      const targetKey = sessionKey.trim();
-      if (!targetKey) return;
-      const currentAlias = sessionPreferences[targetKey]?.alias?.trim();
-      const baseSession =
-        sessions.find((session) => session.key === targetKey) ??
-        ({ key: targetKey, displayName: targetKey } as SessionEntry);
-
-      setSessionRenameTargetKey(targetKey);
-      setSessionRenameDraft(currentAlias || sessionDisplayName(baseSession));
-      setIsSessionRenameOpen(true);
-    },
-    [sessionPreferences, sessions],
-  );
-
-  const submitSessionRename = useCallback(async () => {
-    const sessionKey = (sessionRenameTargetKey ?? '').trim();
-    if (!sessionKey || isSessionOperationPending) return;
-
-    const alias = sessionRenameDraft.trim();
-    setSessionsError(null);
-    setIsSessionOperationPending(true);
-    try {
-      if (connectionState === 'connected') {
-        try {
-          await gatewayPatchSession(sessionKey, {
-            label: alias || undefined,
-            displayName: alias || undefined,
-          });
-        } catch (err) {
-          setSessionsError(`Session rename synced locally only: ${errorMessage(err)}`);
-        }
-      }
-
-      setSessionPreferences((previous) => {
-        const current = previous[sessionKey] ?? {};
-        const next: SessionPreference = {
-          ...current,
-          alias: alias || undefined,
-        };
-        if (!next.alias && !next.pinned) {
-          if (!(sessionKey in previous)) return previous;
-          const { [sessionKey]: _removed, ...rest } = previous;
-          return rest;
-        }
-        return { ...previous, [sessionKey]: next };
-      });
-
-      setIsSessionRenameOpen(false);
-      setSessionRenameTargetKey(null);
-      setSessionRenameDraft('');
-      void refreshSessions();
-    } finally {
-      setIsSessionOperationPending(false);
-    }
-  }, [
+  const {
+    isSessionPinned,
+    getSessionTitle,
+    startSessionRename,
+    submitSessionRename,
+    toggleSessionPinned,
+    switchSession: switchSessionAction,
+    createAndSwitchSession: createAndSwitchSessionAction,
+  } = useSessionActionsRuntime({
     connectionState,
-    gatewayPatchSession,
+    isGatewayConnected,
     isSessionOperationPending,
-    refreshSessions,
-    sessionRenameDraft,
     sessionRenameTargetKey,
-  ]);
-
-  const toggleSessionPinned = useCallback(
-    (sessionKey: string) => {
-      const targetKey = sessionKey.trim();
-      if (!targetKey || isSessionOperationPending) return;
-      setSessionPreferences((previous) => {
-        const current = previous[targetKey] ?? {};
-        const next: SessionPreference = {
-          ...current,
-          pinned: !current.pinned,
-        };
-        if (!next.alias && !next.pinned) {
-          if (!(targetKey in previous)) return previous;
-          const { [targetKey]: _removed, ...rest } = previous;
-          return rest;
-        }
-        return { ...previous, [targetKey]: next };
-      });
-    },
-    [isSessionOperationPending],
-  );
-
-  useEffect(() => {
-    if (!isGatewayConnected) return;
-    void refreshSessions();
-    void loadSessionHistory(activeSessionKeyRef.current);
-  }, [isGatewayConnected, loadSessionHistory, refreshSessions]);
+    sessionRenameDraft,
+    sessionPreferences,
+    sessions,
+    activeSessionKeyRef,
+    refreshSessions,
+    loadSessionHistory,
+    switchSession,
+    createAndSwitchSession,
+    gatewayPatchSession,
+    setSessionsError,
+    setIsSessionOperationPending,
+    setSessionPreferences,
+    setIsSessionRenameOpen,
+    setSessionRenameTargetKey,
+    setSessionRenameDraft,
+  });
 
   const { handleChatEvent } = useGatewayEventBridge({
     activeSessionKeyRef,
