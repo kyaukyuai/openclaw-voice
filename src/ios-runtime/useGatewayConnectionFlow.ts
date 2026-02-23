@@ -4,7 +4,6 @@ import type {
   ConnectionState,
 } from '../openclaw';
 import { useGateway } from '../contexts';
-import type { GatewayConnectDiagnostic } from '../types';
 import {
   GATEWAY_DISPLAY_NAME,
   GATEWAY_PLATFORM,
@@ -41,9 +40,6 @@ type UseGatewayConnectionFlowInput = {
   runIdToTurnIdRef: MutableRefObject<Map<string, string>>;
   setActiveRunId: Dispatch<SetStateAction<string | null>>;
   setGatewayError: Dispatch<SetStateAction<string | null>>;
-  setGatewayConnectDiagnostic: Dispatch<
-    SetStateAction<GatewayConnectDiagnostic | null>
-  >;
   setSessionsError: Dispatch<SetStateAction<string | null>>;
   setGatewayEventState: (value: string) => void;
   setIsSettingsPanelOpen: Dispatch<SetStateAction<boolean>>;
@@ -67,6 +63,7 @@ export function useGatewayConnectionFlow(input: UseGatewayConnectionFlowInput) {
     disconnect: gatewayDisconnect,
     subscribeChatEvent: gatewaySubscribeChatEvent,
     subscribeEvent: gatewaySubscribeEvent,
+    setConnectDiagnostic: setGatewayConnectDiagnostic,
     connectDiagnostic: gatewayContextConnectDiagnostic,
   } = useGateway();
 
@@ -92,7 +89,7 @@ export function useGatewayConnectionFlow(input: UseGatewayConnectionFlowInput) {
       runIdToTurnIdRef: input.runIdToTurnIdRef,
       setActiveRunId: input.setActiveRunId,
       setIsSessionOperationPending: input.setIsSessionOperationPending,
-      setGatewayConnectDiagnostic: input.setGatewayConnectDiagnostic,
+      setGatewayConnectDiagnostic,
       setIsBottomCompletePulse: input.setIsBottomCompletePulse,
       runGatewayRuntimeAction: input.runGatewayRuntimeAction,
       gatewayDisconnect,
@@ -122,7 +119,7 @@ export function useGatewayConnectionFlow(input: UseGatewayConnectionFlowInput) {
       });
       if (!preflight.ok) {
         if (preflight.diagnostic) {
-          input.setGatewayConnectDiagnostic(preflight.diagnostic);
+          setGatewayConnectDiagnostic(preflight.diagnostic);
         }
         input.setGatewayError(preflight.message);
         if (isAutoConnect) {
@@ -140,7 +137,7 @@ export function useGatewayConnectionFlow(input: UseGatewayConnectionFlowInput) {
         input.invalidateRefreshEpoch();
         disconnectGateway();
         input.setGatewayError(null);
-        input.setGatewayConnectDiagnostic(null);
+        setGatewayConnectDiagnostic(null);
         input.setSessionsError(null);
         await gatewayConnect(trimmedGatewayUrl, {
           token: input.authToken.trim() || undefined,
@@ -156,7 +153,7 @@ export function useGatewayConnectionFlow(input: UseGatewayConnectionFlowInput) {
           input.setGatewayError(
             'Pairing approval required. Please allow this device on OpenClaw.',
           );
-          input.setGatewayConnectDiagnostic({
+          setGatewayConnectDiagnostic({
             kind: 'pairing',
             summary: 'Pairing approval required.',
             guidance: 'Approve this device from OpenClaw pairing screen.',
@@ -173,7 +170,7 @@ export function useGatewayConnectionFlow(input: UseGatewayConnectionFlowInput) {
       try {
         await connectOnce(REQUESTED_GATEWAY_CLIENT_ID);
         input.setGatewayError(null);
-        input.setGatewayConnectDiagnostic(null);
+        setGatewayConnectDiagnostic(null);
         input.setGatewayEventState('ready');
         input.setIsSettingsPanelOpen(false);
         input.forceMaskAuthToken();
@@ -190,7 +187,7 @@ export function useGatewayConnectionFlow(input: UseGatewayConnectionFlowInput) {
             error: err,
             hasToken,
           });
-        input.setGatewayConnectDiagnostic(diagnostic);
+        setGatewayConnectDiagnostic(diagnostic);
         if (isAutoConnect) {
           const retryPlan = computeAutoConnectRetryPlan({
             attempt: autoAttempt,
@@ -230,6 +227,7 @@ export function useGatewayConnectionFlow(input: UseGatewayConnectionFlowInput) {
       disconnectGateway,
       gatewayConnect,
       gatewayContextConnectDiagnostic,
+      setGatewayConnectDiagnostic,
       gatewaySubscribeChatEvent,
       gatewaySubscribeEvent,
       input,

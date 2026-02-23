@@ -2,7 +2,6 @@ import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } 
 import type { ConnectionState, SessionEntry } from '../openclaw';
 import type {
   ChatTurn,
-  GatewayConnectDiagnostic,
   MissingResponseRecoveryNotice,
   OutboxQueueItem,
   SessionPreferences,
@@ -27,10 +26,6 @@ type UseRuntimeUiEffectsInput = {
   setShowScrollToBottomButton: Dispatch<SetStateAction<boolean>>;
   gatewayUrl: string;
   gatewayUrlRef: MutableRefObject<string>;
-  gatewayContextConnectDiagnostic: GatewayConnectDiagnostic | null;
-  setGatewayConnectDiagnostic: Dispatch<
-    SetStateAction<GatewayConnectDiagnostic | null>
-  >;
   connectionState: ConnectionState;
   connectionStateRef: MutableRefObject<ConnectionState>;
   outboxQueue: OutboxQueueItem[];
@@ -107,12 +102,6 @@ export function useRuntimeUiEffects(input: UseRuntimeUiEffectsInput) {
   useEffect(() => {
     input.gatewayUrlRef.current = input.gatewayUrl;
   }, [input.gatewayUrl, input.gatewayUrlRef]);
-
-  useEffect(() => {
-    if (input.gatewayContextConnectDiagnostic) {
-      input.setGatewayConnectDiagnostic(input.gatewayContextConnectDiagnostic);
-    }
-  }, [input.gatewayContextConnectDiagnostic, input.setGatewayConnectDiagnostic]);
 
   useEffect(() => {
     input.connectionStateRef.current = input.connectionState;

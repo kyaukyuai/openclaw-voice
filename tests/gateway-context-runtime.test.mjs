@@ -34,6 +34,16 @@ test('gateway context runtime handles connect success/failure and disconnect res
   assert.equal(state.connectDiagnostic?.kind, 'auth');
 
   state = gatewayContextRuntimeReducer(state, {
+    type: 'SET_CONNECT_DIAGNOSTIC',
+    diagnostic: {
+      kind: 'pairing',
+      summary: 'Pairing approval required',
+      guidance: 'Approve this device',
+    },
+  });
+  assert.equal(state.connectDiagnostic?.kind, 'pairing');
+
+  state = gatewayContextRuntimeReducer(state, {
     type: 'CONNECTION_STATE_CHANGED',
     value: 'reconnecting',
   });

@@ -16,6 +16,7 @@ export type GatewayContextRuntimeAction =
   | { type: 'CONNECT_REQUEST' }
   | { type: 'CONNECT_SUCCESS' }
   | { type: 'CONNECT_FAILED'; message: string; diagnostic: GatewayConnectDiagnostic | null }
+  | { type: 'SET_CONNECT_DIAGNOSTIC'; diagnostic: GatewayConnectDiagnostic | null }
   | { type: 'CONNECTION_STATE_CHANGED'; value: ConnectionState }
   | { type: 'DISCONNECT' }
   | { type: 'HEALTH_RESET' }
@@ -62,6 +63,11 @@ export function gatewayContextRuntimeReducer(
         ...state,
         connectionState: 'disconnected',
         error: action.message,
+        connectDiagnostic: action.diagnostic,
+      };
+    case 'SET_CONNECT_DIAGNOSTIC':
+      return {
+        ...state,
         connectDiagnostic: action.diagnostic,
       };
     case 'CONNECTION_STATE_CHANGED':

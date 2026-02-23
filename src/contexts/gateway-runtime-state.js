@@ -33,6 +33,11 @@ function gatewayContextRuntimeReducer(state, action) {
         error: action.message,
         connectDiagnostic: action.diagnostic,
       };
+    case 'SET_CONNECT_DIAGNOSTIC':
+      return {
+        ...state,
+        connectDiagnostic: action.diagnostic,
+      };
     case 'CONNECTION_STATE_CHANGED':
       return {
         ...state,

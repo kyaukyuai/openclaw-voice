@@ -57,6 +57,9 @@ type GatewayState = {
 type GatewayActions = {
   connect: (url: string, options?: GatewayClientOptions) => Promise<void>;
   disconnect: () => void;
+  setConnectDiagnostic: (
+    diagnostic: GatewayConnectDiagnostic | null,
+  ) => void;
   checkHealth: (options?: {
     silent?: boolean;
     timeoutMs?: number;
@@ -292,6 +295,13 @@ export function GatewayProvider({ children }: GatewayProviderProps) {
     dispatchRuntimeState({ type: 'DISCONNECT' });
   }, []);
 
+  const setConnectDiagnostic = useCallback(
+    (diagnostic: GatewayConnectDiagnostic | null) => {
+      dispatchRuntimeState({ type: 'SET_CONNECT_DIAGNOSTIC', diagnostic });
+    },
+    [],
+  );
+
   // Refresh sessions
   const refreshSessions = useCallback(
     async (options?: { limit?: number; includeGlobal?: boolean }) => {
@@ -403,6 +413,7 @@ export function GatewayProvider({ children }: GatewayProviderProps) {
       // Actions
       connect,
       disconnect,
+      setConnectDiagnostic,
       checkHealth,
       refreshSessions,
       chatHistory,
@@ -423,6 +434,7 @@ export function GatewayProvider({ children }: GatewayProviderProps) {
       sessionsError,
       connect,
       disconnect,
+      setConnectDiagnostic,
       checkHealth,
       refreshSessions,
       chatHistory,

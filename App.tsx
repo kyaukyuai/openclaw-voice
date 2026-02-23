@@ -30,7 +30,6 @@ import {
 import type {
   AppTheme,
   FocusField,
-  GatewayConnectDiagnostic,
   QuickTextButtonSide,
   QuickTextIcon,
   SpeechLang,
@@ -429,7 +428,7 @@ function AppContent() {
     chatSend: gatewayChatSend,
     patchSession: gatewayPatchSession,
     connectionState: gatewayConnectionState,
-    connectDiagnostic: gatewayContextConnectDiagnostic,
+    connectDiagnostic: gatewayConnectDiagnostic,
     sessions: gatewaySessions,
     isSessionsLoading: gatewaySessionsLoading,
     sessionsError: gatewaySessionsError,
@@ -481,8 +480,6 @@ function AppContent() {
   const [missingResponseNotice, setMissingResponseNotice] =
     useState<MissingResponseRecoveryNotice | null>(null);
   const [showScrollToBottomButton, setShowScrollToBottomButton] = useState(false);
-  const [gatewayConnectDiagnostic, setGatewayConnectDiagnostic] =
-    useState<GatewayConnectDiagnostic | null>(null);
   const [outboxQueue, setOutboxQueue] = useState<OutboxQueueItem[]>([]);
   // Theme is now managed by ThemeContext
   const { theme, setTheme, isDark: isDarkTheme } = useTheme();
@@ -722,8 +719,6 @@ function AppContent() {
     setShowScrollToBottomButton,
     gatewayUrl,
     gatewayUrlRef,
-    gatewayContextConnectDiagnostic,
-    setGatewayConnectDiagnostic,
     connectionState,
     connectionStateRef,
     outboxQueue,
@@ -974,7 +969,6 @@ function AppContent() {
     runIdToTurnIdRef,
     setActiveRunId,
     setGatewayError,
-    setGatewayConnectDiagnostic,
     setSessionsError,
     setGatewayEventState,
     setIsSettingsPanelOpen,
