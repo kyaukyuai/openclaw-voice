@@ -22,6 +22,18 @@ Manual checks:
 - Keyboard open/close still keeps the latest history message visible.
 - Session switch/rename/pin and quick-text insert still work.
 
+## iOS runtime V2 fallback switch
+
+If iOS behavior regresses after runtime updates, temporarily fallback for one release:
+
+```bash
+# .env
+EXPO_PUBLIC_IOS_RUNTIME_V2=false
+```
+
+Then rebuild and relaunch iOS app.
+Use this only as a temporary rollback path.
+
 ## `Cannot find native module 'ExpoSecureStore'`
 
 ```bash

@@ -27,6 +27,20 @@ export const ENABLE_DEBUG_WARNINGS = /^(1|true|yes|on)$/i.test(
   (process.env.EXPO_PUBLIC_DEBUG_MODE ?? '').trim(),
 );
 
+function parseEnvBoolean(value: string | undefined, defaultValue: boolean): boolean {
+  const raw = value?.trim();
+  if (!raw) return defaultValue;
+  if (/^(1|true|yes|on)$/i.test(raw)) return true;
+  if (/^(0|false|no|off)$/i.test(raw)) return false;
+  return defaultValue;
+}
+
+// Runtime V2 is enabled by default. Set EXPO_PUBLIC_IOS_RUNTIME_V2=false to fallback.
+export const ENABLE_IOS_RUNTIME_V2 = parseEnvBoolean(
+  process.env.EXPO_PUBLIC_IOS_RUNTIME_V2,
+  true,
+);
+
 export const GATEWAY_PLATFORM: 'ios' | 'android' | 'web' =
   Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'web';
 

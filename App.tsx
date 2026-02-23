@@ -55,6 +55,7 @@ import {
   UI,
   QUICK_TEXT_ICON_SET,
   MESSAGES,
+  ENABLE_IOS_RUNTIME_V2,
   // Legacy exports for backward compatibility
   DEFAULT_GATEWAY_URL,
   DEFAULT_THEME,
@@ -444,7 +445,9 @@ function AppContent() {
     setIsSending,
     setIsSessionHistoryLoading,
     setIsMissingResponseRecoveryInFlight,
-  } = useGatewayRuntime();
+  } = useGatewayRuntime({
+    enableV2: Platform.OS !== 'ios' || ENABLE_IOS_RUNTIME_V2,
+  });
   const connectionState = gatewayConnectionState;
   const gatewayEventState = gatewayRuntime.gatewayEventState;
   const isSending = gatewayRuntime.isSending;
