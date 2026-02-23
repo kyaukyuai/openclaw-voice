@@ -1,39 +1,18 @@
-import { useCallback, useReducer, useState } from 'react';
+import { useCallback, useReducer } from 'react';
 import type { ConnectionState } from '../openclaw';
 import {
   gatewayRuntimeReducer,
   initialGatewayRuntimeState,
   type GatewayRuntimeAction,
-  type GatewayRuntimeState,
 } from './runtime-state';
-import { applyGatewayRuntimeActionByMode } from './gateway-runtime-mode-logic';
-
-type UseGatewayRuntimeInput = {
-  enableV2?: boolean;
-};
-
-export function useGatewayRuntime(input?: UseGatewayRuntimeInput) {
-  const enableV2 = input?.enableV2 ?? true;
+export function useGatewayRuntime() {
   const [state, dispatch] = useReducer(
     gatewayRuntimeReducer,
     initialGatewayRuntimeState,
   );
-  const [legacyState, setLegacyState] = useState<GatewayRuntimeState>(
-    initialGatewayRuntimeState,
-  );
-
-  const runAction = useCallback(
-    (action: GatewayRuntimeAction) => {
-      if (enableV2) {
-        dispatch(action);
-        return;
-      }
-      setLegacyState((previous) =>
-        applyGatewayRuntimeActionByMode(previous, action, { enableV2: false }),
-      );
-    },
-    [enableV2],
-  );
+  const runAction = useCallback((action: GatewayRuntimeAction) => {
+    dispatch(action);
+  }, []);
 
   const setConnectionState = useCallback((value: ConnectionState) => {
     runAction({ type: 'SET_CONNECTION_STATE', value });
@@ -56,13 +35,12 @@ export function useGatewayRuntime(input?: UseGatewayRuntimeInput) {
   }, [runAction]);
 
   return {
-    state: enableV2 ? state : legacyState,
+    state,
     runAction,
     setConnectionState,
     setGatewayEventState,
     setIsSending,
     setIsSessionHistoryLoading,
     setIsMissingResponseRecoveryInFlight,
-    isV2Enabled: enableV2,
   };
 }

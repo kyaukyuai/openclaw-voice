@@ -322,7 +322,6 @@ cp .env.example .env
 - `EXPO_PUBLIC_GATEWAY_CLIENT_ID` (default: `openclaw-ios`)
 - `EXPO_PUBLIC_GATEWAY_DISPLAY_NAME` (default: `OpenClaw Pocket`)
 - `EXPO_PUBLIC_DEBUG_MODE` (`true` to show dev warnings and runtime debug panel, default: `false`)
-- `EXPO_PUBLIC_IOS_RUNTIME_V2` (`true` by default, set `false` for one-release fallback path)
 
 ## iOS Stability Runtime
 
@@ -340,12 +339,6 @@ Primary files:
 - `/Users/kyaukyuai/src/github.com/kyaukyuai/openclaw-voice/src/ios-runtime/useGatewayRuntime.ts`
 - `/Users/kyaukyuai/src/github.com/kyaukyuai/openclaw-voice/src/ios-runtime/useHistoryRuntime.ts`
 - `/Users/kyaukyuai/src/github.com/kyaukyuai/openclaw-voice/src/ui/history-layout.ts`
-
-### iOS Runtime V2 rollout toggle
-
-- Default: `EXPO_PUBLIC_IOS_RUNTIME_V2=true`
-- Fallback (temporary): set `EXPO_PUBLIC_IOS_RUNTIME_V2=false` in `.env`
-- iOS only: Android/Web keep current runtime path regardless of this flag
 
 ### iOS Regression Checklist
 
