@@ -14,6 +14,11 @@ import {
   HISTORY_NOTICE_HIDE_MS,
 } from '../utils';
 import { scheduleHistoryScrollToEnd } from '../ui/history-layout';
+import {
+  canRunGatewayHealthCheck,
+  resolveClearedMissingResponseNotice,
+  shouldResetMissingRecoveryRequest,
+} from './runtime-ui-helpers-logic';
 
 type TimerRef = MutableRefObject<ReturnType<typeof setTimeout> | null>;
 
@@ -162,17 +167,13 @@ export function useRuntimeUiHelpers(input: UseRuntimeUiHelpersInput) {
     (sessionKey?: string) => {
       const targetSessionKey = sessionKey?.trim();
       const request = missingResponseRecoveryRequestRef.current;
-      if (!targetSessionKey || request?.sessionKey === targetSessionKey) {
+      if (shouldResetMissingRecoveryRequest({ targetSessionKey, request })) {
         clearMissingResponseRecoveryTimer();
         missingResponseRecoveryRequestRef.current = null;
         setIsMissingResponseRecoveryInFlight(false);
       }
       setMissingResponseNotice((previous) => {
-        if (!previous) return previous;
-        if (targetSessionKey && previous.sessionKey !== targetSessionKey) {
-          return previous;
-        }
-        return null;
+        return resolveClearedMissingResponseNotice(previous, targetSessionKey);
       });
     },
     [
@@ -185,7 +186,7 @@ export function useRuntimeUiHelpers(input: UseRuntimeUiHelpersInput) {
 
   const runGatewayHealthCheck = useCallback(
     async (options?: { silent?: boolean; timeoutMs?: number }): Promise<boolean> => {
-      if (connectionStateRef.current !== 'connected') {
+      if (!canRunGatewayHealthCheck(connectionStateRef.current)) {
         return false;
       }
       try {
