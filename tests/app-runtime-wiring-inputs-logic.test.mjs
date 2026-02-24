@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const {
+  buildRuntimeUiHelpersInput,
   buildRuntimeOrchestratorInput,
   buildRuntimeSideEffectsInput,
 } = require('../src/ios-runtime/app-runtime-wiring-inputs-logic.js');
@@ -166,6 +167,21 @@ test('buildRuntimeOrchestratorInput maps runtime references and helpers', () => 
   assert.equal(result.sessionActionsInput.isGatewayConnected, true);
   assert.equal(result.speechRuntimeInput.speechLang, deps.settings.speechLang);
   assert.equal(result.sessionRuntimeInput.isTurnWaitingState('streaming'), true);
+});
+
+test('buildRuntimeUiHelpersInput maps health/timer refs and setter functions', () => {
+  const deps = createRuntimeDeps();
+  const result = buildRuntimeUiHelpersInput(deps);
+
+  assert.equal(result.historyNoticeTimerRef, deps.appState.historyNoticeTimerRef);
+  assert.equal(result.connectionStateRef, deps.appState.connectionStateRef);
+  assert.equal(result.historyAutoScrollRef, deps.appState.historyAutoScrollRef);
+  assert.equal(result.gatewayCheckHealth, deps.gateway.checkHealth);
+  assert.equal(
+    result.setIsMissingResponseRecoveryInFlight,
+    deps.gatewayRuntimeController.setIsMissingResponseRecoveryInFlight,
+  );
+  assert.equal(result.setMissingResponseNotice, deps.appState.setMissingResponseNotice);
 });
 
 test('buildRuntimeSideEffectsInput wires persistence and lifecycle constants', () => {

@@ -54,7 +54,6 @@ export function useAppScreenWiring(input: UseAppScreenWiringInput) {
     gateway,
     appState,
     gatewayRuntimeController,
-    composerRuntime,
     historyRuntime,
     settingsUiRuntime,
     uiFlags,

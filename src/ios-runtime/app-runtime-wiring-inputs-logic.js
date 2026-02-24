@@ -12,6 +12,31 @@ const STORAGE_KEYS = {
 const OPENCLAW_IDENTITY_STORAGE_KEY = 'openclaw_device_identity';
 const DEFAULT_SESSION_KEY = 'main';
 
+function buildRuntimeUiHelpersInput(input) {
+  const { gateway, appState, gatewayRuntimeController } = input;
+
+  return {
+    historyNoticeTimerRef: appState.historyNoticeTimerRef,
+    bottomCompletePulseTimerRef: appState.bottomCompletePulseTimerRef,
+    authTokenMaskTimerRef: appState.authTokenMaskTimerRef,
+    outboxRetryTimerRef: appState.outboxRetryTimerRef,
+    startupAutoConnectRetryTimerRef: appState.startupAutoConnectRetryTimerRef,
+    finalResponseRecoveryTimerRef: appState.finalResponseRecoveryTimerRef,
+    missingResponseRecoveryTimerRef: appState.missingResponseRecoveryTimerRef,
+    missingResponseRecoveryRequestRef: appState.missingResponseRecoveryRequestRef,
+    connectionStateRef: appState.connectionStateRef,
+    historyScrollRef: appState.historyScrollRef,
+    historyAutoScrollRef: appState.historyAutoScrollRef,
+    gatewayCheckHealth: gateway.checkHealth,
+    setIsAuthTokenMasked: appState.setIsAuthTokenMasked,
+    setHistoryRefreshNotice: appState.setHistoryRefreshNotice,
+    setShowScrollToBottomButton: appState.setShowScrollToBottomButton,
+    setIsMissingResponseRecoveryInFlight:
+      gatewayRuntimeController.setIsMissingResponseRecoveryInFlight,
+    setMissingResponseNotice: appState.setMissingResponseNotice,
+  };
+}
+
 function buildRuntimeOrchestratorInput(input) {
   const {
     settings,
@@ -302,6 +327,7 @@ function buildRuntimeSideEffectsInput(input) {
 }
 
 module.exports = {
+  buildRuntimeUiHelpersInput,
   buildRuntimeOrchestratorInput,
   buildRuntimeSideEffectsInput,
 };

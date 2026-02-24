@@ -41,6 +41,21 @@ Quick triage:
 - `Sending...` / `Refreshing...` not clearing: inspect `runtime-state.ts` transitions and runtime side-effects
 - Layout-only issues (cards, spacing, keyboard insets): inspect `useAppPresentationWiring.ts` and `src/ui/history-layout.ts`
 
+## iOS runtime stability regression checks
+
+Run:
+
+```bash
+npm run test -- --watch=false
+```
+
+Key integration coverage:
+
+- `tests/ios-runtime-integration.test.mjs`
+  - send lifecycle terminalization (`sending` stuck regression)
+  - history timeout fail-close (`Refreshing...` stuck regression)
+  - reconnecting -> disconnect reset safety
+
 ## `Cannot find native module 'ExpoSecureStore'`
 
 ```bash

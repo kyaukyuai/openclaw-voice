@@ -20,11 +20,18 @@ import type { useSettingsUiRuntime } from './useSettingsUiRuntime';
 type AppRuntimeState = ReturnType<typeof useAppRuntimeState>;
 type GatewayRuntimeController = ReturnType<typeof useGatewayRuntime>;
 type HistoryRuntimeState = ReturnType<typeof useHistoryRuntime>;
+type RuntimeUiHelpersInput = Parameters<typeof useRuntimeUiHelpers>[0];
 type RuntimeUiHelpers = ReturnType<typeof useRuntimeUiHelpers>;
 type SettingsUiRuntimeState = ReturnType<typeof useSettingsUiRuntime>;
 type RuntimeActions = ReturnType<typeof useAppRuntimeOrchestrator>;
 type RuntimeOrchestratorInput = Parameters<typeof useAppRuntimeOrchestrator>[0];
 type RuntimeSideEffectsInput = Parameters<typeof useAppRuntimeSideEffects>[0];
+
+type BuildRuntimeUiHelpersInput = {
+  gateway: GatewayContextValue;
+  appState: AppRuntimeState;
+  gatewayRuntimeController: GatewayRuntimeController;
+};
 
 type BuildRuntimeOrchestratorInput = {
   settings: SettingsContextValue;
@@ -49,6 +56,33 @@ type BuildRuntimeSideEffectsInput = {
   kvStore: ReturnType<typeof getKvStore>;
   openClawIdentityMemory: Map<string, string>;
 };
+
+export function buildRuntimeUiHelpersInput(
+  input: BuildRuntimeUiHelpersInput,
+): RuntimeUiHelpersInput {
+  const { gateway, appState, gatewayRuntimeController } = input;
+
+  return {
+    historyNoticeTimerRef: appState.historyNoticeTimerRef,
+    bottomCompletePulseTimerRef: appState.bottomCompletePulseTimerRef,
+    authTokenMaskTimerRef: appState.authTokenMaskTimerRef,
+    outboxRetryTimerRef: appState.outboxRetryTimerRef,
+    startupAutoConnectRetryTimerRef: appState.startupAutoConnectRetryTimerRef,
+    finalResponseRecoveryTimerRef: appState.finalResponseRecoveryTimerRef,
+    missingResponseRecoveryTimerRef: appState.missingResponseRecoveryTimerRef,
+    missingResponseRecoveryRequestRef: appState.missingResponseRecoveryRequestRef,
+    connectionStateRef: appState.connectionStateRef,
+    historyScrollRef: appState.historyScrollRef,
+    historyAutoScrollRef: appState.historyAutoScrollRef,
+    gatewayCheckHealth: gateway.checkHealth,
+    setIsAuthTokenMasked: appState.setIsAuthTokenMasked,
+    setHistoryRefreshNotice: appState.setHistoryRefreshNotice,
+    setShowScrollToBottomButton: appState.setShowScrollToBottomButton,
+    setIsMissingResponseRecoveryInFlight:
+      gatewayRuntimeController.setIsMissingResponseRecoveryInFlight,
+    setMissingResponseNotice: appState.setMissingResponseNotice,
+  };
+}
 
 export function buildRuntimeOrchestratorInput(
   input: BuildRuntimeOrchestratorInput,

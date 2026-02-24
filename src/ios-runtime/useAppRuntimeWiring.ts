@@ -3,6 +3,7 @@ import {
 } from '../utils';
 import type { GatewayContextValue, SettingsContextValue } from '../contexts';
 import {
+  buildRuntimeUiHelpersInput,
   buildRuntimeOrchestratorInput,
   buildRuntimeSideEffectsInput,
 } from './app-runtime-wiring-inputs-logic';
@@ -12,13 +13,11 @@ import { useRuntimeUiHelpers } from './useRuntimeUiHelpers';
 import type { GatewayUiFlags } from './app-screen-wiring-logic';
 import type { useAppRuntimeState } from './useAppRuntimeState';
 import type { useGatewayRuntime } from './useGatewayRuntime';
-import type { useComposerRuntime } from './useComposerRuntime';
 import type { useHistoryRuntime } from './useHistoryRuntime';
 import type { useSettingsUiRuntime } from './useSettingsUiRuntime';
 
 type AppRuntimeState = ReturnType<typeof useAppRuntimeState>;
 type GatewayRuntimeController = ReturnType<typeof useGatewayRuntime>;
-type ComposerRuntimeState = ReturnType<typeof useComposerRuntime>;
 type HistoryRuntimeState = ReturnType<typeof useHistoryRuntime>;
 type SettingsUiRuntimeState = ReturnType<typeof useSettingsUiRuntime>;
 
@@ -27,7 +26,6 @@ type UseAppRuntimeWiringInput = {
   gateway: GatewayContextValue;
   appState: AppRuntimeState;
   gatewayRuntimeController: GatewayRuntimeController;
-  composerRuntime: ComposerRuntimeState;
   historyRuntime: HistoryRuntimeState;
   settingsUiRuntime: SettingsUiRuntimeState;
   uiFlags: GatewayUiFlags;
@@ -41,7 +39,6 @@ export function useAppRuntimeWiring(input: UseAppRuntimeWiringInput) {
     gateway,
     appState,
     gatewayRuntimeController,
-    composerRuntime,
     historyRuntime,
     settingsUiRuntime,
     uiFlags,
@@ -49,26 +46,13 @@ export function useAppRuntimeWiring(input: UseAppRuntimeWiringInput) {
     openClawIdentityMemory,
   } = input;
 
-  const runtimeUiHelpers = useRuntimeUiHelpers({
-    historyNoticeTimerRef: appState.historyNoticeTimerRef,
-    bottomCompletePulseTimerRef: appState.bottomCompletePulseTimerRef,
-    authTokenMaskTimerRef: appState.authTokenMaskTimerRef,
-    outboxRetryTimerRef: appState.outboxRetryTimerRef,
-    startupAutoConnectRetryTimerRef: appState.startupAutoConnectRetryTimerRef,
-    finalResponseRecoveryTimerRef: appState.finalResponseRecoveryTimerRef,
-    missingResponseRecoveryTimerRef: appState.missingResponseRecoveryTimerRef,
-    missingResponseRecoveryRequestRef: appState.missingResponseRecoveryRequestRef,
-    connectionStateRef: appState.connectionStateRef,
-    historyScrollRef: appState.historyScrollRef,
-    historyAutoScrollRef: appState.historyAutoScrollRef,
-    gatewayCheckHealth: gateway.checkHealth,
-    setIsAuthTokenMasked: appState.setIsAuthTokenMasked,
-    setHistoryRefreshNotice: appState.setHistoryRefreshNotice,
-    setShowScrollToBottomButton: appState.setShowScrollToBottomButton,
-    setIsMissingResponseRecoveryInFlight:
-      gatewayRuntimeController.setIsMissingResponseRecoveryInFlight,
-    setMissingResponseNotice: appState.setMissingResponseNotice,
-  });
+  const runtimeUiHelpers = useRuntimeUiHelpers(
+    buildRuntimeUiHelpersInput({
+      gateway,
+      appState,
+      gatewayRuntimeController,
+    }),
+  );
 
   const runtimeActions = useAppRuntimeOrchestrator(
     buildRuntimeOrchestratorInput({

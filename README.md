@@ -346,6 +346,13 @@ Primary files:
 - `/Users/kyaukyuai/src/github.com/kyaukyuai/openclaw-voice/src/ios-runtime/useGatewayRuntime.ts`
 - `/Users/kyaukyuai/src/github.com/kyaukyuai/openclaw-voice/src/ios-runtime/useHistoryRuntime.ts`
 - `/Users/kyaukyuai/src/github.com/kyaukyuai/openclaw-voice/src/ui/history-layout.ts`
+- `/Users/kyaukyuai/src/github.com/kyaukyuai/openclaw-voice/tests/ios-runtime-integration.test.mjs`
+
+Integration scenarios covered by tests:
+
+- Send lifecycle reaches terminal state from both streaming-complete and failure branches
+- History refresh timeout fail-closes and clears in-flight tracking
+- Reconnecting -> disconnect reset clears runtime and allows reconnect
 
 ### iOS Regression Checklist
 
