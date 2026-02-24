@@ -100,42 +100,8 @@ const openClawStorage: OpenClawStorage = {
 setStorage(openClawStorage);
 
 function AppContent() {
-  // Settings are now managed by SettingsContext
-  const {
-    gatewayUrl,
-    setGatewayUrl,
-    authToken,
-    setAuthToken,
-    speechLang,
-    setSpeechLang,
-    quickTextLeft,
-    setQuickTextLeft,
-    quickTextRight,
-    setQuickTextRight,
-    quickTextLeftIcon,
-    setQuickTextLeftIcon,
-    quickTextRightIcon,
-    setQuickTextRightIcon,
-    isOnboardingCompleted,
-    setOnboardingCompleted: setIsOnboardingCompleted,
-    isReady: settingsReady,
-    isSaving: isSettingsSaving,
-    pendingSaveCount: settingsPendingSaveCount,
-    lastSavedAt: settingsLastSavedAt,
-    saveError: settingsSaveError,
-  } = useSettings();
-  const {
-    checkHealth: gatewayCheckHealth,
-    refreshSessions: gatewayRefreshSessions,
-    chatHistory: gatewayChatHistory,
-    chatSend: gatewayChatSend,
-    patchSession: gatewayPatchSession,
-    connectionState: gatewayConnectionState,
-    connectDiagnostic: gatewayConnectDiagnostic,
-    sessions: gatewaySessions,
-    isSessionsLoading: gatewaySessionsLoading,
-    sessionsError: gatewaySessionsError,
-  } = useGateway();
+  const settings = useSettings();
+  const gateway = useGateway();
 
   const {
     state: gatewayRuntime,
@@ -145,7 +111,7 @@ function AppContent() {
     setIsSessionHistoryLoading,
     setIsMissingResponseRecoveryInFlight,
   } = useGatewayRuntime();
-  const connectionState = gatewayConnectionState;
+  const connectionState = gateway.connectionState;
   const gatewayEventState = gatewayRuntime.gatewayEventState;
   const isSending = gatewayRuntime.isSending;
   const isSessionHistoryLoading = gatewayRuntime.isSessionHistoryLoading;
@@ -159,6 +125,13 @@ function AppContent() {
     historyBottomInset,
   } = useComposerRuntime();
   const { runHistoryRefresh, invalidateRefreshEpoch } = useHistoryRuntime();
+  const appState = useAppRuntimeState({
+    defaultSessionKey: DEFAULT_SESSION_KEY,
+    initialGatewayEventState: gatewayEventState,
+    initialGatewayUrl: settings.gatewayUrl,
+    initialConnectionState: connectionState,
+  });
+  const runtimeRefs = appState;
   const {
     isAuthTokenMasked,
     setIsAuthTokenMasked,
@@ -220,6 +193,41 @@ function AppContent() {
     setSpeechError,
     localStateReady,
     setLocalStateReady,
+  } = appState;
+  const setIsOnboardingCompleted = settings.setOnboardingCompleted;
+  const settingsReady = settings.isReady;
+  const isSettingsSaving = settings.isSaving;
+  const settingsPendingSaveCount = settings.pendingSaveCount;
+  const settingsLastSavedAt = settings.lastSavedAt;
+  const settingsSaveError = settings.saveError;
+  const {
+    gatewayUrl,
+    setGatewayUrl,
+    authToken,
+    setAuthToken,
+    speechLang,
+    setSpeechLang,
+    quickTextLeft,
+    setQuickTextLeft,
+    quickTextRight,
+    setQuickTextRight,
+    quickTextLeftIcon,
+    setQuickTextLeftIcon,
+    quickTextRightIcon,
+    setQuickTextRightIcon,
+    isOnboardingCompleted,
+  } = settings;
+  const {
+    connectDiagnostic: gatewayConnectDiagnostic,
+    sessions: gatewaySessions,
+    sessionsError: gatewaySessionsError,
+    checkHealth: gatewayCheckHealth,
+    refreshSessions: gatewayRefreshSessions,
+    chatHistory: gatewayChatHistory,
+    patchSession: gatewayPatchSession,
+    chatSend: gatewayChatSend,
+  } = gateway;
+  const {
     activeSessionKeyRef,
     activeRunIdRef,
     pendingTurnIdRef,
@@ -252,12 +260,7 @@ function AppContent() {
     expectedSpeechStopRef,
     isUnmountingRef,
     startupAutoConnectAttemptedRef,
-  } = useAppRuntimeState({
-    defaultSessionKey: DEFAULT_SESSION_KEY,
-    initialGatewayEventState: gatewayEventState,
-    initialGatewayUrl: gatewayUrl,
-    initialConnectionState: connectionState,
-  });
+  } = runtimeRefs;
   // Theme is now managed by ThemeContext
   const { theme, setTheme, isDark: isDarkTheme } = useTheme();
 
@@ -284,7 +287,7 @@ function AppContent() {
   const shouldShowSettingsScreen = shouldForceSettingsScreen || isSettingsPanelOpen;
   const canToggleSettingsPanel = isGatewayConnected || isMacRuntime;
   const canDismissSettingsScreen = isGatewayConnected || isMacRuntime;
-  const isSessionsLoading = gatewaySessionsLoading;
+  const isSessionsLoading = gateway.isSessionsLoading;
   // isDarkTheme is now provided by useTheme()
 
   const {
