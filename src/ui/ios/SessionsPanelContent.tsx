@@ -1,5 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
+import type { Dispatch, SetStateAction } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
+import type { SessionEntry } from '../../openclaw';
 
 type SessionsPanelContentProps = {
   styles: Record<string, any>;
@@ -14,11 +16,11 @@ type SessionsPanelContentProps = {
   canRenameSession: boolean;
   canPinSession: boolean;
   activeSessionKey: string;
-  visibleSessions: Array<any>;
+  visibleSessions: SessionEntry[];
   sessionRenameTargetKey: string | null;
   isSessionRenameOpen: boolean;
   sessionRenameDraft: string;
-  setSessionRenameDraft: (value: string) => void;
+  setSessionRenameDraft: Dispatch<SetStateAction<string>>;
   placeholderColor: string;
   isSessionOperationPending: boolean;
   sessionsError: string | null;
@@ -29,13 +31,13 @@ type SessionsPanelContentProps = {
   createAndSwitchSession: () => Promise<void>;
   switchSession: (key: string) => Promise<void>;
   isSessionPinned: (key: string) => boolean;
-  getSessionTitle: (session: any) => string;
+  getSessionTitle: (session: SessionEntry) => string;
   formatSessionUpdatedAt: (updatedAt?: number) => string;
   startSessionRename: (key: string) => void;
   toggleSessionPinned: (key: string) => void;
   submitSessionRename: () => Promise<void>;
-  setIsSessionRenameOpen: (value: boolean) => void;
-  setSessionRenameTargetKey: (value: string | null) => void;
+  setIsSessionRenameOpen: Dispatch<SetStateAction<boolean>>;
+  setSessionRenameTargetKey: Dispatch<SetStateAction<string | null>>;
 };
 
 export default function SessionsPanelContent({

@@ -1,8 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo } from 'react';
-import { Ionicons } from '@expo/vector-icons';
 import {
-  ActivityIndicator,
   Keyboard,
   KeyboardAvoidingView,
   LogBox,
@@ -17,14 +15,6 @@ import {
   setStorage,
   type Storage as OpenClawStorage,
 } from './src/openclaw';
-import {
-  isIncompleteAssistantContent,
-} from './src/ui/runtime-logic';
-
-// Import extracted types
-import type {
-  ChatTurn,
-} from './src/types';
 import {
   STORAGE_KEYS,
   OPENCLAW_IDENTITY_STORAGE_KEY,
@@ -66,14 +56,8 @@ import { useComposerRuntime } from './src/ios-runtime/useComposerRuntime';
 import { useAppRuntimeState } from './src/ios-runtime/useAppRuntimeState';
 import { useGatewayActionHandlers } from './src/ios-runtime/useGatewayActionHandlers';
 import { useAppViewModel } from './src/ios-runtime/useAppViewModel';
+import { useAppRuntimeOrchestrator } from './src/ios-runtime/useAppRuntimeOrchestrator';
 import { useHomeUiState } from './src/ios-runtime/useHomeUiState';
-import { useGatewayEventBridge } from './src/ios-runtime/useGatewayEventBridge';
-import { useSessionRuntime } from './src/ios-runtime/useSessionRuntime';
-import { useGatewayConnectionFlow } from './src/ios-runtime/useGatewayConnectionFlow';
-import { useOutboxRuntime } from './src/ios-runtime/useOutboxRuntime';
-import { useSessionHistoryRuntime } from './src/ios-runtime/useSessionHistoryRuntime';
-import { useSessionActionsRuntime } from './src/ios-runtime/useSessionActionsRuntime';
-import { useSpeechRuntime } from './src/ios-runtime/useSpeechRuntime';
 import { useAppLifecycleRuntime } from './src/ios-runtime/useAppLifecycleRuntime';
 import { useSettingsUiRuntime } from './src/ios-runtime/useSettingsUiRuntime';
 import { useKeyboardUiRuntime } from './src/ios-runtime/useKeyboardUiRuntime';
@@ -83,8 +67,6 @@ import {
 } from './src/ios-runtime/useAppRuntimeEffects';
 import { useRuntimeUiHelpers } from './src/ios-runtime/useRuntimeUiHelpers';
 import {
-  buildTurnsFromHistory,
-  extractFinalChatEventText,
   formatClockLabel,
   formatSessionUpdatedAt,
   getHistoryDayKey,
@@ -422,176 +404,174 @@ function AppContent() {
     setLocalStateReady,
   });
 
-  const updateChatTurn = useCallback(
-    (turnId: string, updater: (turn: ChatTurn) => ChatTurn) => {
-      setChatTurns((previous) =>
-        previous.map((turn) => (turn.id === turnId ? updater(turn) : turn)),
-      );
-    },
-    [],
-  );
-
   const {
     refreshSessions,
     loadSessionHistory,
     switchSession,
     createAndSwitchSession,
-  } = useSessionHistoryRuntime({
-    connectionState,
-    connectionStateRef,
-    isSending,
-    isSessionOperationPending,
-    activeSessionKeyRef,
-    activeRunIdRef,
-    pendingTurnIdRef,
-    runIdToTurnIdRef,
-    sessionTurnsRef,
-    outboxQueueRef,
-    gatewayRefreshSessions,
-    gatewayChatHistory,
-    runHistoryRefresh,
-    runGatewayRuntimeAction,
-    invalidateRefreshEpoch,
-    buildTurnsFromHistory,
-    setSessions,
-    setSessionsError,
-    setGatewayError,
-    setChatTurns,
-    setActiveSessionKey,
-    setFocusedField,
-    setIsSessionRenameOpen,
-    setSessionRenameTargetKey,
-    setSessionRenameDraft,
-    setIsSending,
-    setGatewayEventState,
-    setHistoryLastSyncedAt,
-    setActiveRunId,
-  });
-
-  const {
     isSessionPinned,
     getSessionTitle,
     startSessionRename,
     submitSessionRename,
     toggleSessionPinned,
-    switchSession: switchSessionAction,
-    createAndSwitchSession: createAndSwitchSessionAction,
-  } = useSessionActionsRuntime({
-    connectionState,
-    isGatewayConnected,
-    isSessionOperationPending,
-    sessionRenameTargetKey,
-    sessionRenameDraft,
-    sessionPreferences,
-    sessions,
-    activeSessionKeyRef,
-    refreshSessions,
-    loadSessionHistory,
-    switchSession,
-    createAndSwitchSession,
-    gatewayPatchSession,
-    setSessionsError,
-    setIsSessionOperationPending,
-    setSessionPreferences,
-    setIsSessionRenameOpen,
-    setSessionRenameTargetKey,
-    setSessionRenameDraft,
-  });
-
-  const { handleChatEvent } = useGatewayEventBridge({
-    activeSessionKeyRef,
-    activeRunIdRef,
-    pendingTurnIdRef,
-    runIdToTurnIdRef,
-    sessionTurnsRef,
-    updateChatTurn,
-    setGatewayEventState,
-    setIsSending,
-    setActiveRunId,
-    isOnboardingWaitingForResponse,
-    isIncompleteAssistantContent,
-    setIsOnboardingWaitingForResponse,
-    setIsOnboardingCompleted,
-    scheduleFinalResponseRecovery: (sessionKey, attempt) => {
-      scheduleFinalResponseRecovery(sessionKey, attempt);
-    },
-    scheduleMissingResponseRecovery: (sessionKey, turnId, options) => {
-      scheduleMissingResponseRecovery(sessionKey, turnId, options);
-    },
-    scheduleSessionHistorySync: (sessionKey, options) => {
-      scheduleSessionHistorySync(sessionKey, options);
-    },
-    clearFinalResponseRecoveryTimer,
-    clearMissingResponseRecoveryState,
-    refreshSessions,
-    setGatewayError,
-    extractFinalChatEventText,
-  });
-
-  const { disconnectGateway, connectGateway } = useGatewayConnectionFlow({
-    gatewayUrl,
-    authToken,
-    settingsReady,
-    gatewayUrlRef,
-    connectionStateRef,
-    isUnmountingRef,
-    subscriptionsRef,
-    historySyncTimerRef,
-    historySyncRequestRef,
-    outboxProcessingRef,
-    startupAutoConnectAttemptRef,
-    startupAutoConnectRetryTimerRef,
-    activeRunIdRef,
-    pendingTurnIdRef,
-    runIdToTurnIdRef,
-    setActiveRunId,
-    setGatewayError,
-    setSessionsError,
-    setGatewayEventState,
-    setIsSettingsPanelOpen,
-    setIsStartupAutoConnecting,
-    setIsSessionOperationPending,
-    setIsBottomCompletePulse,
-    clearFinalResponseRecoveryTimer,
-    clearMissingResponseRecoveryState,
-    clearStartupAutoConnectRetryTimer,
-    clearBottomCompletePulseTimer,
-    clearOutboxRetryTimer,
-    invalidateRefreshEpoch,
-    forceMaskAuthToken,
-    runGatewayRuntimeAction,
-    handleChatEvent,
-  });
-
-  const { sendToGateway } = useOutboxRuntime({
-    isSending,
-    connectionState,
-    outboxQueue,
-    outboxQueueRef,
-    outboxProcessingRef,
-    outboxRetryTimerRef,
-    connectionStateRef,
-    activeSessionKeyRef,
-    transcriptRef,
-    interimTranscriptRef,
-    sendFingerprintRef,
-    pendingTurnIdRef,
-    activeRunIdRef,
-    runIdToTurnIdRef,
-    gatewaySendChat: gatewayChatSend,
-    runGatewayHealthCheck,
-    runGatewayRuntimeAction,
-    updateChatTurn,
-    refreshSessions,
-    clearOutboxRetryTimer,
-    clearMissingResponseRecoveryState,
-    setGatewayError,
-    setGatewayEventState,
-    setOutboxQueue,
+    connectGateway,
+    disconnectGateway,
+    sendToGateway,
+    startRecognition,
+    stopRecognition,
+    scheduleSessionHistorySync,
+    scheduleMissingResponseRecovery,
+    scheduleFinalResponseRecovery,
+  } = useAppRuntimeOrchestrator({
     setChatTurns,
-    setTranscript,
-    setInterimTranscript,
-    setActiveRunId,
+    sessionHistoryInput: {
+      connectionState,
+      connectionStateRef,
+      isSending,
+      isSessionOperationPending,
+      activeSessionKeyRef,
+      activeRunIdRef,
+      pendingTurnIdRef,
+      runIdToTurnIdRef,
+      sessionTurnsRef,
+      outboxQueueRef,
+      gatewayRefreshSessions,
+      gatewayChatHistory,
+      runHistoryRefresh,
+      runGatewayRuntimeAction,
+      invalidateRefreshEpoch,
+      setSessions,
+      setSessionsError,
+      setGatewayError,
+      setChatTurns,
+      setActiveSessionKey,
+      setFocusedField,
+      setIsSessionRenameOpen,
+      setSessionRenameTargetKey,
+      setSessionRenameDraft,
+      setIsSending,
+      setGatewayEventState,
+      setHistoryLastSyncedAt,
+      setActiveRunId,
+    },
+    sessionActionsInput: {
+      connectionState,
+      isGatewayConnected,
+      isSessionOperationPending,
+      sessionRenameTargetKey,
+      sessionRenameDraft,
+      sessionPreferences,
+      sessions,
+      activeSessionKeyRef,
+      gatewayPatchSession,
+      setSessionsError,
+      setIsSessionOperationPending,
+      setSessionPreferences,
+      setIsSessionRenameOpen,
+      setSessionRenameTargetKey,
+      setSessionRenameDraft,
+    },
+    sessionRuntimeInput: {
+      historySyncTimerRef,
+      historySyncRequestRef,
+      missingResponseRecoveryTimerRef,
+      missingResponseRecoveryRequestRef,
+      finalResponseRecoveryTimerRef,
+      connectionStateRef,
+      sessionTurnsRef,
+      clearMissingResponseRecoveryTimer,
+      clearFinalResponseRecoveryTimer,
+      setIsMissingResponseRecoveryInFlight,
+      setMissingResponseNotice,
+      isTurnWaitingState,
+    },
+    gatewayEventBridgeInput: {
+      activeSessionKeyRef,
+      activeRunIdRef,
+      pendingTurnIdRef,
+      runIdToTurnIdRef,
+      sessionTurnsRef,
+      setGatewayEventState,
+      setIsSending,
+      setActiveRunId,
+      isOnboardingWaitingForResponse,
+      setIsOnboardingWaitingForResponse,
+      setIsOnboardingCompleted,
+      clearFinalResponseRecoveryTimer,
+      clearMissingResponseRecoveryState,
+      setGatewayError,
+    },
+    gatewayConnectionFlowInput: {
+      gatewayUrl,
+      authToken,
+      settingsReady,
+      gatewayUrlRef,
+      connectionStateRef,
+      isUnmountingRef,
+      subscriptionsRef,
+      historySyncTimerRef,
+      historySyncRequestRef,
+      outboxProcessingRef,
+      startupAutoConnectAttemptRef,
+      startupAutoConnectRetryTimerRef,
+      activeRunIdRef,
+      pendingTurnIdRef,
+      runIdToTurnIdRef,
+      setActiveRunId,
+      setGatewayError,
+      setSessionsError,
+      setGatewayEventState,
+      setIsSettingsPanelOpen,
+      setIsStartupAutoConnecting,
+      setIsSessionOperationPending,
+      setIsBottomCompletePulse,
+      clearFinalResponseRecoveryTimer,
+      clearMissingResponseRecoveryState,
+      clearStartupAutoConnectRetryTimer,
+      clearBottomCompletePulseTimer,
+      clearOutboxRetryTimer,
+      invalidateRefreshEpoch,
+      forceMaskAuthToken,
+      runGatewayRuntimeAction,
+    },
+    outboxRuntimeInput: {
+      isSending,
+      connectionState,
+      outboxQueue,
+      outboxQueueRef,
+      outboxProcessingRef,
+      outboxRetryTimerRef,
+      connectionStateRef,
+      activeSessionKeyRef,
+      transcriptRef,
+      interimTranscriptRef,
+      sendFingerprintRef,
+      pendingTurnIdRef,
+      activeRunIdRef,
+      runIdToTurnIdRef,
+      gatewaySendChat: gatewayChatSend,
+      runGatewayHealthCheck,
+      runGatewayRuntimeAction,
+      clearOutboxRetryTimer,
+      clearMissingResponseRecoveryState,
+      setGatewayError,
+      setGatewayEventState,
+      setOutboxQueue,
+      setChatTurns,
+      setTranscript,
+      setInterimTranscript,
+      setActiveRunId,
+    },
+    speechRuntimeInput: {
+      speechLang,
+      isRecognizing,
+      expectedSpeechStopRef,
+      isUnmountingRef,
+      setIsRecognizing,
+      setSpeechError,
+      setTranscript,
+      setInterimTranscript,
+    },
   });
 
   const abortSpeechRecognitionIfSupported = useCallback(() => {
@@ -627,38 +607,6 @@ function AppContent() {
     quickTextLongPressSideRef,
     disconnectGateway,
     abortSpeechRecognitionIfSupported,
-  });
-
-  const { startRecognition, stopRecognition } = useSpeechRuntime({
-    speechLang,
-    isRecognizing,
-    expectedSpeechStopRef,
-    isUnmountingRef,
-    setIsRecognizing,
-    setSpeechError,
-    setTranscript,
-    setInterimTranscript,
-  });
-
-  const {
-    scheduleSessionHistorySync,
-    scheduleMissingResponseRecovery,
-    scheduleFinalResponseRecovery,
-  } = useSessionRuntime({
-    historySyncTimerRef,
-    historySyncRequestRef,
-    missingResponseRecoveryTimerRef,
-    missingResponseRecoveryRequestRef,
-    finalResponseRecoveryTimerRef,
-    connectionStateRef,
-    sessionTurnsRef,
-    clearMissingResponseRecoveryTimer,
-    clearFinalResponseRecoveryTimer,
-    loadSessionHistory,
-    refreshSessions,
-    setIsMissingResponseRecoveryInFlight,
-    setMissingResponseNotice,
-    isTurnWaitingState,
   });
 
   const {

@@ -1,5 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
+import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import { ActivityIndicator, Keyboard, Pressable, Text, TextInput, View } from 'react-native';
+import type { ConnectionState } from '../../openclaw';
+import type {
+  AppTheme,
+  FocusField,
+  GatewayConnectDiagnostic,
+  QuickTextFocusField,
+  QuickTextIcon,
+  SpeechLang,
+} from '../../types';
 import DebugInfoPanel from '../DebugInfoPanel';
 import { QUICK_TEXT_ICON_OPTIONS, SPEECH_LANG_OPTIONS } from '../../utils';
 
@@ -24,8 +34,8 @@ type SettingsPanelContentProps = {
   onOnboardingConnectTest: () => void;
   onOnboardingSendSample: () => void;
   onCompleteOnboarding: () => void;
-  focusedField: string | null;
-  setFocusedField: (value: any) => void;
+  focusedField: FocusField;
+  setFocusedField: Dispatch<SetStateAction<FocusField>>;
   gatewayUrl: string;
   setGatewayUrl: (value: string) => void;
   authToken: string;
@@ -38,24 +48,24 @@ type SettingsPanelContentProps = {
   isStartupAutoConnecting: boolean;
   isDarkTheme: boolean;
   showGatewayDiagnostic: boolean;
-  gatewayDiagnosticIconName: any;
-  gatewayConnectDiagnostic: { summary?: string; guidance?: string } | null;
-  theme: 'light' | 'dark';
-  setTheme: (value: 'light' | 'dark') => void;
-  speechLang: 'ja-JP' | 'en-US';
-  setSpeechLang: (value: 'ja-JP' | 'en-US') => void;
-  quickTextInputRefs: any;
+  gatewayDiagnosticIconName: QuickTextIcon;
+  gatewayConnectDiagnostic: GatewayConnectDiagnostic | null;
+  theme: AppTheme;
+  setTheme: (value: AppTheme) => void;
+  speechLang: SpeechLang;
+  setSpeechLang: (value: SpeechLang) => void;
+  quickTextInputRefs: MutableRefObject<Record<QuickTextFocusField, TextInput | null>>;
   quickTextLeft: string;
   setQuickTextLeft: (value: string) => void;
   quickTextRight: string;
   setQuickTextRight: (value: string) => void;
-  quickTextLeftIcon: any;
-  setQuickTextLeftIcon: (value: any) => void;
-  quickTextRightIcon: any;
-  setQuickTextRightIcon: (value: any) => void;
+  quickTextLeftIcon: QuickTextIcon;
+  setQuickTextLeftIcon: (value: QuickTextIcon) => void;
+  quickTextRightIcon: QuickTextIcon;
+  setQuickTextRightIcon: (value: QuickTextIcon) => void;
   ensureSettingsFieldVisible: (field: 'quick-text-left' | 'quick-text-right') => void;
   enableDebugWarnings: boolean;
-  connectionState: string;
+  connectionState: ConnectionState;
   gatewayEventState: string;
   activeSessionKey: string;
   activeRunId: string | null;
@@ -274,11 +284,11 @@ export default function SettingsPanelContent({
             blurOnSubmit
             onSubmitEditing={() => Keyboard.dismiss()}
             onFocus={() => setFocusedField('gateway-url')}
-            onBlur={() =>
-              setFocusedField((current: string | null) =>
-                current === 'gateway-url' ? null : current,
-              )
-            }
+              onBlur={() =>
+                setFocusedField((current) =>
+                  current === 'gateway-url' ? null : current,
+                )
+              }
           />
 
           <Text style={[styles.label, styles.labelSpacing]} maxFontSizeMultiplier={maxTextScaleTight}>
@@ -308,7 +318,7 @@ export default function SettingsPanelContent({
               onSubmitEditing={() => Keyboard.dismiss()}
               onFocus={() => setFocusedField('auth-token')}
               onBlur={() =>
-                setFocusedField((current: string | null) =>
+                setFocusedField((current) =>
                   current === 'auth-token' ? null : current,
                 )
               }
@@ -552,7 +562,7 @@ export default function SettingsPanelContent({
                 ensureSettingsFieldVisible('quick-text-left');
               }}
               onBlur={() =>
-                setFocusedField((current: string | null) =>
+                setFocusedField((current) =>
                   current === 'quick-text-left' ? null : current,
                 )
               }
@@ -619,7 +629,7 @@ export default function SettingsPanelContent({
                 ensureSettingsFieldVisible('quick-text-right');
               }}
               onBlur={() =>
-                setFocusedField((current: string | null) =>
+                setFocusedField((current) =>
                   current === 'quick-text-right' ? null : current,
                 )
               }

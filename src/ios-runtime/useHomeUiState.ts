@@ -10,6 +10,7 @@ import type {
   GatewayConnectDiagnostic,
   HomeDisplayMode,
   BottomActionStatus,
+  QuickTextIcon,
 } from '../types';
 import {
   BOTTOM_ACTION_STATUS_LABELS,
@@ -205,7 +206,7 @@ export function useHomeUiState(input: UseHomeUiStateInput) {
     : 'Send Sample';
   const showGatewayDiagnostic =
     !input.isGatewayConnected && input.gatewayConnectDiagnostic != null;
-  const gatewayDiagnosticIconName =
+  const gatewayDiagnosticIconName: QuickTextIcon =
     input.gatewayConnectDiagnostic?.kind === 'tls'
       ? 'shield-checkmark-outline'
       : input.gatewayConnectDiagnostic?.kind === 'auth'
