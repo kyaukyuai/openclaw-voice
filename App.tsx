@@ -1,5 +1,5 @@
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import {
   Keyboard,
   KeyboardAvoidingView,
@@ -8,9 +8,6 @@ import {
   SafeAreaView,
   View,
 } from 'react-native';
-import {
-  ExpoSpeechRecognitionModule,
-} from 'expo-speech-recognition';
 import {
   setStorage,
   type Storage as OpenClawStorage,
@@ -48,7 +45,6 @@ import {
   dedupeLines,
   getTextOverlapSize,
   isMacDesktopRuntime,
-  supportsSpeechRecognitionOnCurrentPlatform,
 } from './src/utils';
 import { useGatewayRuntime } from './src/ios-runtime/useGatewayRuntime';
 import { useHistoryRuntime } from './src/ios-runtime/useHistoryRuntime';
@@ -58,13 +54,9 @@ import { useGatewayActionHandlers } from './src/ios-runtime/useGatewayActionHand
 import { useAppViewModel } from './src/ios-runtime/useAppViewModel';
 import { useAppRuntimeOrchestrator } from './src/ios-runtime/useAppRuntimeOrchestrator';
 import { useHomeUiState } from './src/ios-runtime/useHomeUiState';
-import { useAppLifecycleRuntime } from './src/ios-runtime/useAppLifecycleRuntime';
 import { useSettingsUiRuntime } from './src/ios-runtime/useSettingsUiRuntime';
 import { useKeyboardUiRuntime } from './src/ios-runtime/useKeyboardUiRuntime';
-import {
-  useRuntimePersistenceEffects,
-  useRuntimeUiEffects,
-} from './src/ios-runtime/useAppRuntimeEffects';
+import { useAppRuntimeSideEffects } from './src/ios-runtime/useAppRuntimeSideEffects';
 import { useRuntimeUiHelpers } from './src/ios-runtime/useRuntimeUiHelpers';
 import {
   formatClockLabel,
@@ -337,73 +329,6 @@ function AppContent() {
     setMissingResponseNotice,
   });
 
-  useRuntimeUiEffects({
-    shouldShowSettingsScreen,
-    forceMaskAuthToken,
-    missingResponseNotice,
-    activeSessionKey,
-    chatTurns,
-    clearMissingResponseRecoveryState,
-    isTurnWaitingState,
-    transcript,
-    transcriptRef,
-    interimTranscript,
-    interimTranscriptRef,
-    activeSessionKeyRef,
-    historyAutoScrollRef,
-    setShowScrollToBottomButton,
-    gatewayUrl,
-    gatewayUrlRef,
-    connectionState,
-    connectionStateRef,
-    outboxQueue,
-    outboxQueueRef,
-    gatewaySessions,
-    setSessions,
-    gatewaySessionsError,
-    setSessionsError,
-    gatewayEventState,
-    gatewayEventStateRef,
-    isSending,
-    setIsBottomCompletePulse,
-    clearBottomCompletePulseTimer,
-    bottomCompletePulseTimerRef,
-    setGatewayEventState,
-    sessionTurnsRef,
-    scrollHistoryToBottom,
-    isOnboardingCompleted,
-    isOnboardingWaitingForResponse,
-    setIsOnboardingCompleted,
-    setIsOnboardingWaitingForResponse,
-    isGatewayConnected,
-    setIsSessionPanelOpen,
-  });
-
-  useRuntimePersistenceEffects({
-    settingsReady,
-    persistRuntimeSetting,
-    activeSessionKey,
-    sessionPreferences,
-    outboxQueue,
-    kvStore,
-    sessionKeyStorageKey: STORAGE_KEYS.sessionKey,
-    sessionPrefsStorageKey: STORAGE_KEYS.sessionPrefs,
-    outboxQueueStorageKey: STORAGE_KEYS.outboxQueue,
-    identityStorageKey: OPENCLAW_IDENTITY_STORAGE_KEY,
-    openClawIdentityMemory,
-    parseSessionPreferences,
-    parseOutboxQueue,
-    defaultSessionKey: DEFAULT_SESSION_KEY,
-    activeSessionKeyRef,
-    sessionTurnsRef,
-    setActiveSessionKey,
-    setSessionPreferences,
-    setOutboxQueue,
-    setGatewayEventState,
-    setChatTurns,
-    setLocalStateReady,
-  });
-
   const {
     refreshSessions,
     loadSessionHistory,
@@ -574,39 +499,100 @@ function AppContent() {
     },
   });
 
-  const abortSpeechRecognitionIfSupported = useCallback(() => {
-    if (!supportsSpeechRecognitionOnCurrentPlatform()) return;
-    ExpoSpeechRecognitionModule.abort();
-  }, []);
-
-  useAppLifecycleRuntime({
-    localStateReady,
-    settingsReady,
-    gatewayUrl,
-    connectionState,
-    startupAutoConnectAttemptedRef,
-    startupAutoConnectAttemptRef,
-    connectGateway,
-    isUnmountingRef,
-    invalidateRefreshEpoch,
-    expectedSpeechStopRef,
-    holdStartTimerRef,
-    historySyncTimerRef,
-    historySyncRequestRef,
-    historyNoticeTimerRef,
-    bottomCompletePulseTimerRef,
-    authTokenMaskTimerRef,
-    outboxRetryTimerRef,
-    startupAutoConnectRetryTimerRef,
-    finalResponseRecoveryTimerRef,
-    missingResponseRecoveryTimerRef,
-    missingResponseRecoveryRequestRef,
-    settingsFocusScrollTimerRef,
-    quickTextTooltipTimerRef,
-    quickTextLongPressResetTimerRef,
-    quickTextLongPressSideRef,
-    disconnectGateway,
-    abortSpeechRecognitionIfSupported,
+  useAppRuntimeSideEffects({
+    uiEffectsInput: {
+      shouldShowSettingsScreen,
+      forceMaskAuthToken,
+      missingResponseNotice,
+      activeSessionKey,
+      chatTurns,
+      clearMissingResponseRecoveryState,
+      isTurnWaitingState,
+      transcript,
+      transcriptRef,
+      interimTranscript,
+      interimTranscriptRef,
+      activeSessionKeyRef,
+      historyAutoScrollRef,
+      setShowScrollToBottomButton,
+      gatewayUrl,
+      gatewayUrlRef,
+      connectionState,
+      connectionStateRef,
+      outboxQueue,
+      outboxQueueRef,
+      gatewaySessions,
+      setSessions,
+      gatewaySessionsError,
+      setSessionsError,
+      gatewayEventState,
+      gatewayEventStateRef,
+      isSending,
+      setIsBottomCompletePulse,
+      clearBottomCompletePulseTimer,
+      bottomCompletePulseTimerRef,
+      setGatewayEventState,
+      sessionTurnsRef,
+      scrollHistoryToBottom,
+      isOnboardingCompleted,
+      isOnboardingWaitingForResponse,
+      setIsOnboardingCompleted,
+      setIsOnboardingWaitingForResponse,
+      isGatewayConnected,
+      setIsSessionPanelOpen,
+    },
+    persistenceEffectsInput: {
+      settingsReady,
+      persistRuntimeSetting,
+      activeSessionKey,
+      sessionPreferences,
+      outboxQueue,
+      kvStore,
+      sessionKeyStorageKey: STORAGE_KEYS.sessionKey,
+      sessionPrefsStorageKey: STORAGE_KEYS.sessionPrefs,
+      outboxQueueStorageKey: STORAGE_KEYS.outboxQueue,
+      identityStorageKey: OPENCLAW_IDENTITY_STORAGE_KEY,
+      openClawIdentityMemory,
+      parseSessionPreferences,
+      parseOutboxQueue,
+      defaultSessionKey: DEFAULT_SESSION_KEY,
+      activeSessionKeyRef,
+      sessionTurnsRef,
+      setActiveSessionKey,
+      setSessionPreferences,
+      setOutboxQueue,
+      setGatewayEventState,
+      setChatTurns,
+      setLocalStateReady,
+    },
+    lifecycleInput: {
+      localStateReady,
+      settingsReady,
+      gatewayUrl,
+      connectionState,
+      startupAutoConnectAttemptedRef,
+      startupAutoConnectAttemptRef,
+      connectGateway,
+      isUnmountingRef,
+      invalidateRefreshEpoch,
+      expectedSpeechStopRef,
+      holdStartTimerRef,
+      historySyncTimerRef,
+      historySyncRequestRef,
+      historyNoticeTimerRef,
+      bottomCompletePulseTimerRef,
+      authTokenMaskTimerRef,
+      outboxRetryTimerRef,
+      startupAutoConnectRetryTimerRef,
+      finalResponseRecoveryTimerRef,
+      missingResponseRecoveryTimerRef,
+      missingResponseRecoveryRequestRef,
+      settingsFocusScrollTimerRef,
+      quickTextTooltipTimerRef,
+      quickTextLongPressResetTimerRef,
+      quickTextLongPressSideRef,
+      disconnectGateway,
+    },
   });
 
   const {
