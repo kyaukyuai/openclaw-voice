@@ -27,6 +27,20 @@ Runtime note:
 
 - iOS now uses a single runtime path (legacy fallback toggle removed).
 
+## iOS runtime wiring map (where to debug)
+
+- Screen-level wiring: `src/ios-runtime/useAppScreenWiring.ts`
+- Runtime orchestration wiring: `src/ios-runtime/useAppRuntimeWiring.ts`
+- Runtime input builders (pure mapping): `src/ios-runtime/app-runtime-wiring-inputs-logic.ts`
+- Runtime side effects: `src/ios-runtime/useAppRuntimeSideEffects.ts`
+- Presentation-only wiring: `src/ios-runtime/useAppPresentationWiring.ts`
+
+Quick triage:
+
+- Connect / send / refresh state issues: start from `useAppRuntimeWiring.ts` and `app-runtime-wiring-inputs-logic.ts`
+- `Sending...` / `Refreshing...` not clearing: inspect `runtime-state.ts` transitions and runtime side-effects
+- Layout-only issues (cards, spacing, keyboard insets): inspect `useAppPresentationWiring.ts` and `src/ui/history-layout.ts`
+
 ## `Cannot find native module 'ExpoSecureStore'`
 
 ```bash

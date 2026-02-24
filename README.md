@@ -332,11 +332,17 @@ Recent iOS stability work introduces:
 - Unified settings persistence in `SettingsContext` (single source of truth)
 - History refresh in-flight guard + 20s timeout fail-close behavior
 - Shared history bottom-scroll scheduler (`requestAnimationFrame` x2) for safer tail visibility
+- `App.tsx` wiring split: `useAppScreenWiring` -> `useAppRuntimeWiring` + `useAppPresentationWiring`
+- Pure runtime input builders in `src/ios-runtime/app-runtime-wiring-inputs-logic.ts` (orchestrator/side-effects assembly)
 - iOS runtime is now a single path (legacy fallback path removed)
 
 Primary files:
 
 - `/Users/kyaukyuai/src/github.com/kyaukyuai/openclaw-voice/src/ios-runtime/runtime-state.ts`
+- `/Users/kyaukyuai/src/github.com/kyaukyuai/openclaw-voice/src/ios-runtime/useAppScreenWiring.ts`
+- `/Users/kyaukyuai/src/github.com/kyaukyuai/openclaw-voice/src/ios-runtime/useAppRuntimeWiring.ts`
+- `/Users/kyaukyuai/src/github.com/kyaukyuai/openclaw-voice/src/ios-runtime/useAppPresentationWiring.ts`
+- `/Users/kyaukyuai/src/github.com/kyaukyuai/openclaw-voice/src/ios-runtime/app-runtime-wiring-inputs-logic.ts`
 - `/Users/kyaukyuai/src/github.com/kyaukyuai/openclaw-voice/src/ios-runtime/useGatewayRuntime.ts`
 - `/Users/kyaukyuai/src/github.com/kyaukyuai/openclaw-voice/src/ios-runtime/useHistoryRuntime.ts`
 - `/Users/kyaukyuai/src/github.com/kyaukyuai/openclaw-voice/src/ui/history-layout.ts`
