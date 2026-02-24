@@ -373,6 +373,26 @@ Manual iOS device checks:
 5. Open keyboard and ensure latest history line is fully visible (no bottom clipping).
 6. Switch sessions and ensure draft/quick text behavior still works.
 
+### iOS Debug Decision Matrix
+
+When a regression appears, use this quick mapping before digging into code:
+
+1. `Sending...` does not end:
+- Check `src/ios-runtime/runtime-state.ts` terminal transitions.
+- Then check `src/ios-runtime/useAppRuntimeEffects.ts` send/recovery side effects.
+
+2. `Refreshing...` does not end:
+- Check history timeout and in-flight reset in `src/ios-runtime/useHistoryRuntime.ts`.
+- Then confirm refresh notice flow in `src/ios-runtime/useHomeUiHandlers.ts`.
+
+3. Latest history line is clipped:
+- Check bottom inset math in `src/ui/history-layout.ts`.
+- Then check auto-scroll triggers in `src/ios-runtime/useAppRuntimeEffects.ts` and `src/ios-runtime/useHomeUiHandlers.ts`.
+
+4. Session/quick-text UI state mismatch:
+- Check computed selectors in `src/ios-runtime/home-ui-state-logic.ts`.
+- Then check action handlers in `src/ios-runtime/home-ui-handlers-logic.ts`.
+
 ## Connection Defaults
 
 - `clientId: openclaw-ios`

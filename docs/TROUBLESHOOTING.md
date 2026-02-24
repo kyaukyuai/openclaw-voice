@@ -41,6 +41,24 @@ Quick triage:
 - `Sending...` / `Refreshing...` not clearing: inspect `runtime-state.ts` transitions and runtime side-effects
 - Layout-only issues (cards, spacing, keyboard insets): inspect `useAppPresentationWiring.ts` and `src/ui/history-layout.ts`
 
+Decision matrix:
+
+1. `Sending...` stuck:
+- `src/ios-runtime/runtime-state.ts` (terminal reducer transition)
+- `src/ios-runtime/useAppRuntimeEffects.ts` (send/recovery side effects)
+
+2. `Refreshing...` stuck:
+- `src/ios-runtime/useHistoryRuntime.ts` (timeout + in-flight reset)
+- `src/ios-runtime/useHomeUiHandlers.ts` (manual refresh handler/notice)
+
+3. Bottom clipping with keyboard open:
+- `src/ui/history-layout.ts` (inset math)
+- `src/ios-runtime/useAppRuntimeEffects.ts` and `src/ios-runtime/useHomeUiHandlers.ts` (auto-scroll trigger path)
+
+4. Session/quick-text UI mismatch:
+- `src/ios-runtime/home-ui-state-logic.ts` (derived selectors)
+- `src/ios-runtime/home-ui-handlers-logic.ts` (input/interaction helper logic)
+
 ## iOS runtime stability regression checks
 
 Run:

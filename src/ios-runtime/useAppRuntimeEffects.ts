@@ -8,6 +8,12 @@ import type {
 } from '../types';
 import { BOTTOM_STATUS_COMPLETE_HOLD_MS } from '../utils';
 import { isIncompleteAssistantContent, shouldAttemptFinalRecovery } from '../ui/runtime-logic';
+import {
+  buildOutboxQueuedTurnsBySession,
+  resolveRestoredActiveSessionKey,
+  sanitizeGatewaySessionsForUi,
+  shouldHoldBottomCompletePulse,
+} from './runtime-effects-helpers';
 
 type UseRuntimeUiEffectsInput = {
   shouldShowSettingsScreen: boolean;
@@ -112,23 +118,12 @@ export function useRuntimeUiEffects(input: UseRuntimeUiEffectsInput) {
   }, [input.outboxQueue, input.outboxQueueRef]);
 
   useEffect(() => {
-    if (input.connectionState !== 'connected') {
-      input.setSessions([]);
-      return;
-    }
-    const fetched = Array.isArray(input.gatewaySessions)
-      ? input.gatewaySessions.filter(
-          (session): session is SessionEntry =>
-            typeof session?.key === 'string' && session.key.trim().length > 0,
-        )
-      : [];
-    const activeKey = input.activeSessionKeyRef.current;
-    const merged = [...fetched];
-    if (!merged.some((session) => session.key === activeKey)) {
-      merged.unshift({ key: activeKey, displayName: activeKey });
-    }
-    merged.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
-    input.setSessions(merged);
+    const mergedSessions = sanitizeGatewaySessionsForUi({
+      connectionState: input.connectionState,
+      gatewaySessions: input.gatewaySessions,
+      activeSessionKey: input.activeSessionKeyRef.current,
+    });
+    input.setSessions(mergedSessions);
   }, [
     input.connectionState,
     input.gatewaySessions,
@@ -148,10 +143,11 @@ export function useRuntimeUiEffects(input: UseRuntimeUiEffectsInput) {
   }, [input.gatewayEventState, input.gatewayEventStateRef]);
 
   useEffect(() => {
-    const shouldHoldComplete =
-      input.connectionState === 'connected' &&
-      !input.isSending &&
-      input.gatewayEventState === 'complete';
+    const shouldHoldComplete = shouldHoldBottomCompletePulse({
+      connectionState: input.connectionState,
+      isSending: input.isSending,
+      gatewayEventState: input.gatewayEventState,
+    });
 
     if (!shouldHoldComplete) {
       input.setIsBottomCompletePulse(false);
@@ -278,29 +274,16 @@ export function useRuntimePersistenceEffects(input: UseRuntimePersistenceEffects
           input.setOutboxQueue(restoredOutbox);
           input.setGatewayEventState('queued');
 
-          const turnsBySession = new Map<string, ChatTurn[]>();
-          restoredOutbox.forEach((item) => {
-            const turns = turnsBySession.get(item.sessionKey) ?? [];
-            turns.push({
-              id: item.turnId,
-              userText: item.message,
-              assistantText: item.lastError
-                ? `Retrying automatically... (${item.lastError})`
-                : 'Waiting for connection...',
-              state: 'queued',
-              createdAt: item.createdAt,
-            });
-            turnsBySession.set(item.sessionKey, turns);
-          });
-
+          const turnsBySession = buildOutboxQueuedTurnsBySession(restoredOutbox);
           turnsBySession.forEach((turns, sessionKey) => {
-            const ordered = [...turns].sort((a, b) => a.createdAt - b.createdAt);
-            input.sessionTurnsRef.current.set(sessionKey, ordered);
+            input.sessionTurnsRef.current.set(sessionKey, turns);
           });
 
-          const restoredActiveSessionKey =
-            (savedSessionKey?.trim() || input.activeSessionKeyRef.current).trim() ||
-            input.defaultSessionKey;
+          const restoredActiveSessionKey = resolveRestoredActiveSessionKey({
+            savedSessionKey,
+            activeSessionKeyRefValue: input.activeSessionKeyRef.current,
+            defaultSessionKey: input.defaultSessionKey,
+          });
           const restoredActiveTurns = turnsBySession.get(restoredActiveSessionKey);
           if (restoredActiveTurns?.length) {
             input.setChatTurns(

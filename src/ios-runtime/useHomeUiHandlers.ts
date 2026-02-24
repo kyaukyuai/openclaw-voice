@@ -15,6 +15,12 @@ import type {
   HistoryRefreshNotice,
   MissingResponseRecoveryNotice,
 } from '../types';
+import {
+  resolveDraftText,
+  resolveHistoryScrollState,
+  resolveTopBannerDismissTarget,
+  shouldStartHoldToTalk,
+} from './home-ui-handlers-logic';
 
 type ScheduleMissingResponseRecoveryOptions = {
   attempt?: number;
@@ -136,19 +142,20 @@ export function useHomeUiHandlers(input: UseHomeUiHandlersInput) {
   }, [input]);
 
   const handleDismissTopBanner = useCallback(() => {
-    if (input.topBannerKind === 'gateway') {
+    const dismissTarget = resolveTopBannerDismissTarget(input.topBannerKind);
+    if (dismissTarget === 'gateway') {
       input.setGatewayError(null);
       return;
     }
-    if (input.topBannerKind === 'recovery') {
+    if (dismissTarget === 'recovery') {
       input.setMissingResponseNotice(null);
       return;
     }
-    if (input.topBannerKind === 'history') {
+    if (dismissTarget === 'history') {
       input.setHistoryRefreshNotice(null);
       return;
     }
-    if (input.topBannerKind === 'speech') {
+    if (dismissTarget === 'speech') {
       input.setSpeechError(null);
     }
   }, [input]);
@@ -234,7 +241,7 @@ export function useHomeUiHandlers(input: UseHomeUiHandlersInput) {
 
   const handleSendKeyboardAction = useCallback(() => {
     if (!input.canSendFromKeyboardBar) return;
-    const text = input.transcript.trim() || input.interimTranscript.trim();
+    const text = resolveDraftText(input.transcript, input.interimTranscript);
     if (!text) return;
     Keyboard.dismiss();
     input.setFocusedField(null);
@@ -242,7 +249,7 @@ export function useHomeUiHandlers(input: UseHomeUiHandlersInput) {
   }, [input]);
 
   const handleSendDraftAction = useCallback(() => {
-    const text = input.transcript.trim() || input.interimTranscript.trim();
+    const text = resolveDraftText(input.transcript, input.interimTranscript);
     if (!text) return;
     Keyboard.dismiss();
     input.setFocusedField(null);
@@ -293,7 +300,13 @@ export function useHomeUiHandlers(input: UseHomeUiHandlersInput) {
   }, [input]);
 
   const handleHoldToTalkPressIn = useCallback(() => {
-    if (!input.speechRecognitionSupported || input.isRecognizing || input.isSending) {
+    if (
+      !shouldStartHoldToTalk({
+        speechRecognitionSupported: input.speechRecognitionSupported,
+        isRecognizing: input.isRecognizing,
+        isSending: input.isSending,
+      })
+    ) {
       return;
     }
     input.onButtonPressHaptic();
@@ -323,10 +336,10 @@ export function useHomeUiHandlers(input: UseHomeUiHandlersInput) {
 
   const handleHistoryScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-      const distanceFromBottom =
-        contentSize.height - (contentOffset.y + layoutMeasurement.height);
-      const isNearBottom = distanceFromBottom < input.historyBottomThresholdPx;
+      const { isNearBottom } = resolveHistoryScrollState(
+        event.nativeEvent,
+        input.historyBottomThresholdPx,
+      );
       input.historyAutoScrollRef.current = isNearBottom;
       input.setShowScrollToBottomButton(input.chatTurnsLength > 0 && !isNearBottom);
     },
