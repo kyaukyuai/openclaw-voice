@@ -79,7 +79,7 @@ import {
 import { useGatewayRuntime } from './src/ios-runtime/useGatewayRuntime';
 import { useHistoryRuntime } from './src/ios-runtime/useHistoryRuntime';
 import { useComposerRuntime } from './src/ios-runtime/useComposerRuntime';
-import { useHomeUiHandlers } from './src/ios-runtime/useHomeUiHandlers';
+import { useHomeUiWiring } from './src/ios-runtime/useHomeUiWiring';
 import { useHomeUiState } from './src/ios-runtime/useHomeUiState';
 import { useGatewayEventBridge } from './src/ios-runtime/useGatewayEventBridge';
 import { useSessionRuntime } from './src/ios-runtime/useSessionRuntime';
@@ -805,10 +805,6 @@ function AppContent() {
     getHistoryDayLabel,
     quickTextTooltipSide,
   });
-  const handleButtonPressHaptic = useCallback(() => {
-    void triggerHaptic('button-press');
-  }, []);
-
   const {
     handleReconnectFromError,
     handleRetryFromError,
@@ -837,8 +833,7 @@ function AppContent() {
     handleHistoryLayoutAutoScroll,
     handleBottomDockHeightChange,
     handleBottomDockActionPressHaptic,
-  } = useHomeUiHandlers({
-    onButtonPressHaptic: handleButtonPressHaptic,
+  } = useHomeUiWiring({
     canReconnectFromError,
     canRetryFromError,
     latestRetryText,

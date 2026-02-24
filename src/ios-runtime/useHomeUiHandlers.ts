@@ -21,7 +21,7 @@ type ScheduleMissingResponseRecoveryOptions = {
   delayMs?: number;
 };
 
-type UseHomeUiHandlersInput = {
+export type UseHomeUiHandlersInput = {
   onButtonPressHaptic: () => void;
 
   canReconnectFromError: boolean;
