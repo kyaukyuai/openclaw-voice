@@ -65,6 +65,7 @@ import { useHistoryRuntime } from './src/ios-runtime/useHistoryRuntime';
 import { useComposerRuntime } from './src/ios-runtime/useComposerRuntime';
 import { useAppRuntimeState } from './src/ios-runtime/useAppRuntimeState';
 import { useGatewayActionHandlers } from './src/ios-runtime/useGatewayActionHandlers';
+import { useAppViewModel } from './src/ios-runtime/useAppViewModel';
 import { useHomeUiState } from './src/ios-runtime/useHomeUiState';
 import { useGatewayEventBridge } from './src/ios-runtime/useGatewayEventBridge';
 import { useSessionRuntime } from './src/ios-runtime/useSessionRuntime';
@@ -892,6 +893,210 @@ function AppContent() {
     setIsKeyboardBarMounted,
   });
 
+  const {
+    connectionHeaderProps,
+    settingsScreenModalProps,
+    settingsPanelContentProps,
+    sessionsScreenModalProps,
+    sessionsPanelContentProps,
+    homeMainLayoutProps,
+  } = useAppViewModel({
+    styles,
+    isDarkTheme,
+    maxTextScale: MAX_TEXT_SCALE,
+    maxTextScaleTight: MAX_TEXT_SCALE_TIGHT,
+    placeholderColor,
+    connectionHeader: {
+      connectionLabel: connectionStatusLabel,
+      isGatewayConnected,
+      isGatewayConnecting,
+      isSessionPanelOpen,
+      isSettingsPanelOpen,
+      canToggleSettingsPanel,
+      onToggleSessionPanel: handleToggleSessionPanel,
+      onToggleSettingsPanel: handleToggleSettingsPanel,
+    },
+    settingsScreenModal: {
+      visible: shouldShowSettingsScreen,
+      canDismissSettingsScreen,
+      isSettingsStatusPending,
+      isSettingsStatusError,
+      settingsStatusText,
+      isKeyboardVisible,
+      settingsScrollRef,
+      onClose: handleCloseSettingsPanel,
+    },
+    settingsPanelContent: {
+      showOnboardingGuide,
+      isQuickTextSettingsEditMode,
+      sectionIconColor,
+      currentBadgeIconColor,
+      optionIconColor,
+      actionIconColor,
+      isOnboardingGatewayConfigured,
+      isOnboardingConnectDone,
+      isOnboardingResponseDone,
+      isOnboardingWaitingForResponse,
+      canRunOnboardingConnectTest,
+      canRunOnboardingSampleSend,
+      isGatewayConnecting,
+      onboardingSampleButtonLabel,
+      onOnboardingConnectTest: handleOnboardingConnectTest,
+      onOnboardingSendSample: handleOnboardingSendSample,
+      onCompleteOnboarding: handleCompleteOnboarding,
+      focusedField,
+      setFocusedField,
+      gatewayUrl,
+      setGatewayUrl,
+      authToken,
+      setAuthToken,
+      isAuthTokenMasked,
+      toggleAuthTokenVisibility,
+      settingsReady,
+      connectGateway,
+      isStartupAutoConnecting,
+      showGatewayDiagnostic,
+      gatewayDiagnosticIconName,
+      gatewayConnectDiagnostic,
+      theme,
+      setTheme,
+      speechLang,
+      setSpeechLang,
+      quickTextInputRefs,
+      quickTextLeft,
+      setQuickTextLeft,
+      quickTextRight,
+      setQuickTextRight,
+      quickTextLeftIcon,
+      setQuickTextLeftIcon,
+      quickTextRightIcon,
+      setQuickTextRightIcon,
+      ensureSettingsFieldVisible,
+      enableDebugWarnings: ENABLE_DEBUG_WARNINGS,
+      connectionState,
+      gatewayEventState,
+      activeSessionKey,
+      activeRunId,
+      historyLastSyncedAt,
+      startupAutoConnectAttempt: startupAutoConnectAttemptRef.current,
+    },
+    sessionsScreenModal: {
+      visible: isGatewayConnected && isSessionPanelOpen,
+      isSessionsLoading,
+      hasSessionsError: Boolean(sessionsError),
+      sessionPanelStatusText,
+      onClose: handleCloseSessionPanel,
+    },
+    sessionsPanelContent: {
+      sectionIconColor,
+      actionIconColor,
+      currentBadgeIconColor,
+      pinnedBadgeIconColor,
+      isGatewayConnected,
+      canRefreshSessions,
+      canCreateSession,
+      canSwitchSession,
+      canRenameSession,
+      canPinSession,
+      activeSessionKey,
+      visibleSessions,
+      sessionRenameTargetKey,
+      isSessionRenameOpen,
+      sessionRenameDraft,
+      setSessionRenameDraft,
+      isSessionOperationPending,
+      sessionsError,
+      sessionListHintText,
+      refreshSessions,
+      createAndSwitchSession,
+      switchSession,
+      isSessionPinned,
+      getSessionTitle,
+      formatSessionUpdatedAt,
+      startSessionRename,
+      toggleSessionPinned,
+      submitSessionRename,
+      setIsSessionRenameOpen,
+      setSessionRenameTargetKey,
+    },
+    homeMainLayout: {
+      topBannerKind,
+      topBannerMessage: topBannerMessage ?? null,
+      topBannerIconName,
+      canReconnectFromError,
+      canRetryFromError,
+      canRetryMissingResponse,
+      isMissingResponseRecoveryInFlight,
+      isGatewayConnected,
+      onReconnectFromError: handleReconnectFromError,
+      onRetryFromError: handleRetryFromError,
+      onRetryMissingResponse: handleRetryMissingResponse,
+      onDismissTopBanner: handleDismissTopBanner,
+      showHistoryCard,
+      showHistoryRefreshButton,
+      isSessionHistoryLoading,
+      onRefreshHistory: handleRefreshHistory,
+      showHistoryUpdatedMeta,
+      historyUpdatedLabel,
+      historyScrollRef,
+      historyItems,
+      historyListBottomPadding,
+      showScrollToBottomButton,
+      showHistoryScrollButton,
+      isHomeComposingMode,
+      showHistoryDateDivider,
+      onHistoryScroll: handleHistoryScroll,
+      onHistoryAutoScroll: handleHistoryAutoScroll,
+      onHistoryLayoutAutoScroll: handleHistoryLayoutAutoScroll,
+      onScrollHistoryToBottom: handleScrollHistoryToBottom,
+      isRecognizing,
+      isTranscriptEditingWithKeyboard,
+      shouldUseCompactTranscriptCard,
+      focusedField,
+      transcript,
+      transcriptPlaceholder,
+      interimTranscript,
+      onTranscriptChange: handleTranscriptChange,
+      onFocusTranscript: handleTranscriptFocus,
+      onBlurTranscript: handleTranscriptBlur,
+      isTranscriptFocused,
+      isKeyboardVisible,
+      onBottomDockHeightChange: handleBottomDockHeightChange,
+      isKeyboardBarMounted,
+      keyboardBarAnim,
+      showDoneOnlyAction,
+      showClearInKeyboardBar,
+      canClearFromKeyboardBar,
+      canSendFromKeyboardBar,
+      onDoneKeyboardAction: handleDoneKeyboardAction,
+      onClearKeyboardAction: handleClearKeyboardAction,
+      onSendKeyboardAction: handleSendKeyboardAction,
+      showQuickTextLeftTooltip,
+      showQuickTextRightTooltip,
+      quickTextLeftLabel,
+      quickTextRightLabel,
+      quickTextLeftIcon,
+      quickTextRightIcon,
+      canUseQuickTextLeft,
+      canUseQuickTextRight,
+      onQuickTextPress: handleQuickTextPress,
+      onQuickTextLongPress: handleQuickTextLongPress,
+      onQuickTextPressOut: handleQuickTextPressOut,
+      canSendDraft,
+      isSending,
+      speechRecognitionSupported,
+      settingsReady,
+      onSendDraftAction: handleSendDraftAction,
+      onMicPressIn: handleHoldToTalkPressIn,
+      onMicPressOut: handleHoldToTalkPressOut,
+      onActionPressHaptic: handleBottomDockActionPressHaptic,
+      showBottomStatus,
+      bottomActionStatus,
+      bottomActionLabel: bottomActionStatusLabel,
+      bottomActionDetailText,
+    },
+  });
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar style={isDarkTheme ? 'light' : 'dark'} />
@@ -899,221 +1104,15 @@ function AppContent() {
         style={styles.keyboardWrap}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <ConnectionHeader
-          styles={styles}
-          isDarkTheme={isDarkTheme}
-          connectionLabel={connectionStatusLabel}
-          isGatewayConnected={isGatewayConnected}
-          isGatewayConnecting={isGatewayConnecting}
-          isSessionPanelOpen={isSessionPanelOpen}
-          isSettingsPanelOpen={isSettingsPanelOpen}
-          canToggleSettingsPanel={canToggleSettingsPanel}
-          onToggleSessionPanel={handleToggleSessionPanel}
-          onToggleSettingsPanel={handleToggleSettingsPanel}
-          maxTextScaleTight={MAX_TEXT_SCALE_TIGHT}
-        />
+        <ConnectionHeader {...connectionHeaderProps} />
 
-        <SettingsScreenModal
-          visible={shouldShowSettingsScreen}
-          styles={styles}
-          isDarkTheme={isDarkTheme}
-          canDismissSettingsScreen={canDismissSettingsScreen}
-          isSettingsStatusPending={isSettingsStatusPending}
-          isSettingsStatusError={isSettingsStatusError}
-          settingsStatusText={settingsStatusText}
-          isKeyboardVisible={isKeyboardVisible}
-          settingsScrollRef={settingsScrollRef}
-          onClose={handleCloseSettingsPanel}
-          maxTextScaleTight={MAX_TEXT_SCALE_TIGHT}
-        >
-          <SettingsPanelContent
-            styles={styles}
-            maxTextScale={MAX_TEXT_SCALE}
-            maxTextScaleTight={MAX_TEXT_SCALE_TIGHT}
-            showOnboardingGuide={showOnboardingGuide}
-            isQuickTextSettingsEditMode={isQuickTextSettingsEditMode}
-            sectionIconColor={sectionIconColor}
-            currentBadgeIconColor={currentBadgeIconColor}
-            optionIconColor={optionIconColor}
-            actionIconColor={actionIconColor}
-            isOnboardingGatewayConfigured={isOnboardingGatewayConfigured}
-            isOnboardingConnectDone={isOnboardingConnectDone}
-            isOnboardingResponseDone={isOnboardingResponseDone}
-            isOnboardingWaitingForResponse={isOnboardingWaitingForResponse}
-            canRunOnboardingConnectTest={canRunOnboardingConnectTest}
-            canRunOnboardingSampleSend={canRunOnboardingSampleSend}
-            isGatewayConnecting={isGatewayConnecting}
-            onboardingSampleButtonLabel={onboardingSampleButtonLabel}
-            onOnboardingConnectTest={handleOnboardingConnectTest}
-            onOnboardingSendSample={handleOnboardingSendSample}
-            onCompleteOnboarding={handleCompleteOnboarding}
-            focusedField={focusedField}
-            setFocusedField={setFocusedField}
-            gatewayUrl={gatewayUrl}
-            setGatewayUrl={setGatewayUrl}
-            authToken={authToken}
-            setAuthToken={setAuthToken}
-            placeholderColor={placeholderColor}
-            isAuthTokenMasked={isAuthTokenMasked}
-            toggleAuthTokenVisibility={toggleAuthTokenVisibility}
-            settingsReady={settingsReady}
-            connectGateway={connectGateway}
-            isStartupAutoConnecting={isStartupAutoConnecting}
-            isDarkTheme={isDarkTheme}
-            showGatewayDiagnostic={showGatewayDiagnostic}
-            gatewayDiagnosticIconName={gatewayDiagnosticIconName}
-            gatewayConnectDiagnostic={gatewayConnectDiagnostic}
-            theme={theme}
-            setTheme={setTheme}
-            speechLang={speechLang}
-            setSpeechLang={setSpeechLang}
-            quickTextInputRefs={quickTextInputRefs}
-            quickTextLeft={quickTextLeft}
-            setQuickTextLeft={setQuickTextLeft}
-            quickTextRight={quickTextRight}
-            setQuickTextRight={setQuickTextRight}
-            quickTextLeftIcon={quickTextLeftIcon}
-            setQuickTextLeftIcon={setQuickTextLeftIcon}
-            quickTextRightIcon={quickTextRightIcon}
-            setQuickTextRightIcon={setQuickTextRightIcon}
-            ensureSettingsFieldVisible={ensureSettingsFieldVisible}
-            enableDebugWarnings={ENABLE_DEBUG_WARNINGS}
-            connectionState={connectionState}
-            gatewayEventState={gatewayEventState}
-            activeSessionKey={activeSessionKey}
-            activeRunId={activeRunId}
-            historyLastSyncedAt={historyLastSyncedAt}
-            startupAutoConnectAttempt={startupAutoConnectAttemptRef.current}
-          />
+        <SettingsScreenModal {...settingsScreenModalProps}>
+          <SettingsPanelContent {...settingsPanelContentProps} />
         </SettingsScreenModal>
-      <SessionsScreenModal
-        visible={isGatewayConnected && isSessionPanelOpen}
-        styles={styles}
-        isDarkTheme={isDarkTheme}
-        isSessionsLoading={isSessionsLoading}
-        hasSessionsError={Boolean(sessionsError)}
-        sessionPanelStatusText={sessionPanelStatusText}
-        onClose={handleCloseSessionPanel}
-        maxTextScaleTight={MAX_TEXT_SCALE_TIGHT}
-      >
-        <SessionsPanelContent
-          styles={styles}
-          sectionIconColor={sectionIconColor}
-          actionIconColor={actionIconColor}
-          currentBadgeIconColor={currentBadgeIconColor}
-          pinnedBadgeIconColor={pinnedBadgeIconColor}
-          isGatewayConnected={isGatewayConnected}
-          canRefreshSessions={canRefreshSessions}
-          canCreateSession={canCreateSession}
-          canSwitchSession={canSwitchSession}
-          canRenameSession={canRenameSession}
-          canPinSession={canPinSession}
-          activeSessionKey={activeSessionKey}
-          visibleSessions={visibleSessions}
-          sessionRenameTargetKey={sessionRenameTargetKey}
-          isSessionRenameOpen={isSessionRenameOpen}
-          sessionRenameDraft={sessionRenameDraft}
-          setSessionRenameDraft={setSessionRenameDraft}
-          placeholderColor={placeholderColor}
-          isSessionOperationPending={isSessionOperationPending}
-          sessionsError={sessionsError}
-          sessionListHintText={sessionListHintText}
-          maxTextScale={MAX_TEXT_SCALE}
-          maxTextScaleTight={MAX_TEXT_SCALE_TIGHT}
-          refreshSessions={refreshSessions}
-          createAndSwitchSession={createAndSwitchSession}
-          switchSession={switchSession}
-          isSessionPinned={isSessionPinned}
-          getSessionTitle={getSessionTitle}
-          formatSessionUpdatedAt={formatSessionUpdatedAt}
-          startSessionRename={startSessionRename}
-          toggleSessionPinned={toggleSessionPinned}
-          submitSessionRename={submitSessionRename}
-          setIsSessionRenameOpen={setIsSessionRenameOpen}
-          setSessionRenameTargetKey={setSessionRenameTargetKey}
-        />
-      </SessionsScreenModal>
-        <HomeMainLayout
-          styles={styles}
-          isDarkTheme={isDarkTheme}
-          topBannerKind={topBannerKind}
-          topBannerMessage={topBannerMessage ?? null}
-          topBannerIconName={topBannerIconName}
-          canReconnectFromError={canReconnectFromError}
-          canRetryFromError={canRetryFromError}
-          canRetryMissingResponse={canRetryMissingResponse}
-          isMissingResponseRecoveryInFlight={isMissingResponseRecoveryInFlight}
-          isGatewayConnected={isGatewayConnected}
-          onReconnectFromError={handleReconnectFromError}
-          onRetryFromError={handleRetryFromError}
-          onRetryMissingResponse={handleRetryMissingResponse}
-          onDismissTopBanner={handleDismissTopBanner}
-          showHistoryCard={showHistoryCard}
-          showHistoryRefreshButton={showHistoryRefreshButton}
-          isSessionHistoryLoading={isSessionHistoryLoading}
-          onRefreshHistory={handleRefreshHistory}
-          showHistoryUpdatedMeta={showHistoryUpdatedMeta}
-          historyUpdatedLabel={historyUpdatedLabel}
-          historyScrollRef={historyScrollRef}
-          historyItems={historyItems}
-          historyListBottomPadding={historyListBottomPadding}
-          showScrollToBottomButton={showScrollToBottomButton}
-          showHistoryScrollButton={showHistoryScrollButton}
-          isHomeComposingMode={isHomeComposingMode}
-          showHistoryDateDivider={showHistoryDateDivider}
-          onHistoryScroll={handleHistoryScroll}
-          onHistoryAutoScroll={handleHistoryAutoScroll}
-          onHistoryLayoutAutoScroll={handleHistoryLayoutAutoScroll}
-          onScrollHistoryToBottom={handleScrollHistoryToBottom}
-          isRecognizing={isRecognizing}
-          isTranscriptEditingWithKeyboard={isTranscriptEditingWithKeyboard}
-          shouldUseCompactTranscriptCard={shouldUseCompactTranscriptCard}
-          focusedField={focusedField}
-          transcript={transcript}
-          transcriptPlaceholder={transcriptPlaceholder}
-          placeholderColor={placeholderColor}
-          interimTranscript={interimTranscript}
-          onTranscriptChange={handleTranscriptChange}
-          onFocusTranscript={handleTranscriptFocus}
-          onBlurTranscript={handleTranscriptBlur}
-          isTranscriptFocused={isTranscriptFocused}
-          isKeyboardVisible={isKeyboardVisible}
-          onBottomDockHeightChange={handleBottomDockHeightChange}
-          isKeyboardBarMounted={isKeyboardBarMounted}
-          keyboardBarAnim={keyboardBarAnim}
-          showDoneOnlyAction={showDoneOnlyAction}
-          showClearInKeyboardBar={showClearInKeyboardBar}
-          canClearFromKeyboardBar={canClearFromKeyboardBar}
-          canSendFromKeyboardBar={canSendFromKeyboardBar}
-          onDoneKeyboardAction={handleDoneKeyboardAction}
-          onClearKeyboardAction={handleClearKeyboardAction}
-          onSendKeyboardAction={handleSendKeyboardAction}
-          showQuickTextLeftTooltip={showQuickTextLeftTooltip}
-          showQuickTextRightTooltip={showQuickTextRightTooltip}
-          quickTextLeftLabel={quickTextLeftLabel}
-          quickTextRightLabel={quickTextRightLabel}
-          quickTextLeftIcon={quickTextLeftIcon}
-          quickTextRightIcon={quickTextRightIcon}
-          canUseQuickTextLeft={canUseQuickTextLeft}
-          canUseQuickTextRight={canUseQuickTextRight}
-          onQuickTextPress={handleQuickTextPress}
-          onQuickTextLongPress={handleQuickTextLongPress}
-          onQuickTextPressOut={handleQuickTextPressOut}
-          canSendDraft={canSendDraft}
-          isSending={isSending}
-          speechRecognitionSupported={speechRecognitionSupported}
-          settingsReady={settingsReady}
-          onSendDraftAction={handleSendDraftAction}
-          onMicPressIn={handleHoldToTalkPressIn}
-          onMicPressOut={handleHoldToTalkPressOut}
-          onActionPressHaptic={handleBottomDockActionPressHaptic}
-          showBottomStatus={showBottomStatus}
-          bottomActionStatus={bottomActionStatus}
-          bottomActionLabel={bottomActionStatusLabel}
-          bottomActionDetailText={bottomActionDetailText}
-          maxTextScale={MAX_TEXT_SCALE}
-          maxTextScaleTight={MAX_TEXT_SCALE_TIGHT}
-        />
+        <SessionsScreenModal {...sessionsScreenModalProps}>
+          <SessionsPanelContent {...sessionsPanelContentProps} />
+        </SessionsScreenModal>
+        <HomeMainLayout {...homeMainLayoutProps} />
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
