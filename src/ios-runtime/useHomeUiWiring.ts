@@ -5,7 +5,10 @@ import {
   type UseHomeUiHandlersInput,
 } from './useHomeUiHandlers';
 
-type UseHomeUiWiringInput = Omit<UseHomeUiHandlersInput, 'onButtonPressHaptic'>;
+export type UseHomeUiWiringInput = Omit<
+  UseHomeUiHandlersInput,
+  'onButtonPressHaptic'
+>;
 
 export function useHomeUiWiring(input: UseHomeUiWiringInput) {
   const onButtonPressHaptic = useCallback(() => {

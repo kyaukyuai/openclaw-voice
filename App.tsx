@@ -55,7 +55,6 @@ import {
 
 // Import extracted helpers
 import {
-  triggerHaptic,
   dedupeLines,
   getTextOverlapSize,
   isMacDesktopRuntime,
@@ -65,7 +64,7 @@ import { useGatewayRuntime } from './src/ios-runtime/useGatewayRuntime';
 import { useHistoryRuntime } from './src/ios-runtime/useHistoryRuntime';
 import { useComposerRuntime } from './src/ios-runtime/useComposerRuntime';
 import { useAppRuntimeState } from './src/ios-runtime/useAppRuntimeState';
-import { useHomeUiWiring } from './src/ios-runtime/useHomeUiWiring';
+import { useGatewayActionHandlers } from './src/ios-runtime/useGatewayActionHandlers';
 import { useHomeUiState } from './src/ios-runtime/useHomeUiState';
 import { useGatewayEventBridge } from './src/ios-runtime/useGatewayEventBridge';
 import { useSessionRuntime } from './src/ios-runtime/useSessionRuntime';
@@ -76,7 +75,6 @@ import { useSessionActionsRuntime } from './src/ios-runtime/useSessionActionsRun
 import { useSpeechRuntime } from './src/ios-runtime/useSpeechRuntime';
 import { useAppLifecycleRuntime } from './src/ios-runtime/useAppLifecycleRuntime';
 import { useSettingsUiRuntime } from './src/ios-runtime/useSettingsUiRuntime';
-import { useQuickTextRuntime } from './src/ios-runtime/useQuickTextRuntime';
 import { useKeyboardUiRuntime } from './src/ios-runtime/useKeyboardUiRuntime';
 import {
   useRuntimePersistenceEffects,
@@ -641,31 +639,6 @@ function AppContent() {
     setInterimTranscript,
   });
 
-  const clearTranscriptDraft = useCallback(() => {
-    transcriptRef.current = '';
-    interimTranscriptRef.current = '';
-    setTranscript('');
-    setInterimTranscript('');
-    setSpeechError(null);
-    void triggerHaptic('button-press');
-  }, []);
-
-  const {
-    handleQuickTextLongPress,
-    handleQuickTextPress,
-    handleQuickTextPressOut,
-  } = useQuickTextRuntime({
-    isRecognizing,
-    setTranscript,
-    setInterimTranscript,
-    setQuickTextTooltipSide,
-    clearQuickTextLongPressResetTimer,
-    scheduleQuickTextTooltipHide,
-    hideQuickTextTooltip,
-    quickTextLongPressSideRef,
-    quickTextLongPressResetTimerRef,
-  });
-
   const {
     scheduleSessionHistorySync,
     scheduleMissingResponseRecovery,
@@ -829,65 +802,85 @@ function AppContent() {
     handleHistoryLayoutAutoScroll,
     handleBottomDockHeightChange,
     handleBottomDockActionPressHaptic,
-  } = useHomeUiWiring({
-    canReconnectFromError,
-    canRetryFromError,
-    latestRetryText,
-    connectGateway,
-    sendToGateway,
-    setFocusedField,
-    activeMissingResponseNotice,
-    isMissingResponseRecoveryInFlight,
-    isGatewayConnected,
-    setGatewayError,
-    scheduleMissingResponseRecovery,
-    topBannerKind,
-    setMissingResponseNotice,
-    setHistoryRefreshNotice,
-    setSpeechError,
-    setIsOnboardingWaitingForResponse,
-    setIsOnboardingCompleted,
-    canRunOnboardingConnectTest,
-    canRunOnboardingSampleSend,
-    onboardingSampleMessage: ONBOARDING_SAMPLE_MESSAGE,
-    forceMaskAuthToken,
-    isSessionPanelOpen,
-    refreshSessions,
-    setIsSettingsPanelOpen,
-    setIsSessionPanelOpen,
-    setIsSessionRenameOpen,
-    setSessionRenameTargetKey,
-    setSessionRenameDraft,
-    canToggleSettingsPanel,
-    canDismissSettingsScreen,
-    canClearFromKeyboardBar,
-    clearTranscriptDraft,
-    canSendFromKeyboardBar,
-    transcript,
-    interimTranscript,
+    handleQuickTextLongPress,
+    handleQuickTextPress,
+    handleQuickTextPressOut,
+  } = useGatewayActionHandlers({
+    homeUiInput: {
+      canReconnectFromError,
+      canRetryFromError,
+      latestRetryText,
+      connectGateway,
+      sendToGateway,
+      setFocusedField,
+      activeMissingResponseNotice,
+      isMissingResponseRecoveryInFlight,
+      isGatewayConnected,
+      setGatewayError,
+      scheduleMissingResponseRecovery,
+      topBannerKind,
+      setMissingResponseNotice,
+      setHistoryRefreshNotice,
+      setSpeechError,
+      setIsOnboardingWaitingForResponse,
+      setIsOnboardingCompleted,
+      canRunOnboardingConnectTest,
+      canRunOnboardingSampleSend,
+      onboardingSampleMessage: ONBOARDING_SAMPLE_MESSAGE,
+      forceMaskAuthToken,
+      isSessionPanelOpen,
+      refreshSessions,
+      setIsSettingsPanelOpen,
+      setIsSessionPanelOpen,
+      setIsSessionRenameOpen,
+      setSessionRenameTargetKey,
+      setSessionRenameDraft,
+      canToggleSettingsPanel,
+      canDismissSettingsScreen,
+      canClearFromKeyboardBar,
+      canSendFromKeyboardBar,
+      transcript,
+      interimTranscript,
+      setTranscript,
+      setInterimTranscript,
+      isSessionHistoryLoading,
+      clearHistoryNoticeTimer,
+      activeSessionKeyRef,
+      loadSessionHistory,
+      setHistoryLastSyncedAt,
+      showHistoryRefreshNotice,
+      formatClockLabel,
+      scrollHistoryToBottom,
+      historyAutoScrollRef,
+      setShowScrollToBottomButton,
+      chatTurnsLength: chatTurns.length,
+      historyBottomThresholdPx: HISTORY_BOTTOM_THRESHOLD_PX,
+      speechRecognitionSupported,
+      isRecognizing,
+      isSending,
+      holdActivatedRef,
+      holdStartTimerRef,
+      startRecognition,
+      stopRecognition,
+      composerHeight,
+      setComposerHeight,
+    },
+    quickTextInput: {
+      isRecognizing,
+      setTranscript,
+      setInterimTranscript,
+      setQuickTextTooltipSide,
+      clearQuickTextLongPressResetTimer,
+      scheduleQuickTextTooltipHide,
+      hideQuickTextTooltip,
+      quickTextLongPressSideRef,
+      quickTextLongPressResetTimerRef,
+    },
+    transcriptRef,
+    interimTranscriptRef,
     setTranscript,
     setInterimTranscript,
-    isSessionHistoryLoading,
-    clearHistoryNoticeTimer,
-    activeSessionKeyRef,
-    loadSessionHistory,
-    setHistoryLastSyncedAt,
-    showHistoryRefreshNotice,
-    formatClockLabel,
-    scrollHistoryToBottom,
-    historyAutoScrollRef,
-    setShowScrollToBottomButton,
-    chatTurnsLength: chatTurns.length,
-    historyBottomThresholdPx: HISTORY_BOTTOM_THRESHOLD_PX,
-    speechRecognitionSupported,
-    isRecognizing,
-    isSending,
-    holdActivatedRef,
-    holdStartTimerRef,
-    startRecognition,
-    stopRecognition,
-    composerHeight,
-    setComposerHeight,
+    setSpeechError,
   });
 
   const styles = useMemo(() => createStyles(isDarkTheme), [isDarkTheme]);
