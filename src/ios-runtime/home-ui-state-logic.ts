@@ -8,7 +8,6 @@ import type {
   SessionPreferences,
   GatewayConnectDiagnostic,
   HomeDisplayMode,
-  BottomActionStatus,
   QuickTextIcon,
 } from '../types';
 import {
@@ -18,6 +17,21 @@ import {
   supportsSpeechRecognitionOnCurrentPlatform,
 } from '../utils';
 import { isIncompleteAssistantContent } from '../ui/runtime-logic';
+import {
+  resolveSectionIconColors,
+  resolveSessionPanelSelectors,
+  resolveSettingsStatusSelectors,
+} from './home-ui-session-selectors';
+import {
+  resolveHistoryRefreshErrorMessage,
+  resolveHistoryUiSelectors,
+  resolveHistoryUpdatedLabel,
+} from './home-ui-history-selectors';
+import {
+  resolveActiveMissingResponseNotice,
+  resolveTopBannerSelectors,
+} from './home-ui-banner-selectors';
+import { resolveBottomStatusSelectors } from './home-ui-bottom-status-selectors';
 
 export type HomeUiStateLogicInput = {
   transcript: string;
@@ -237,51 +251,44 @@ export function buildHomeUiStateSnapshot(
   const shouldUseCompactTranscriptCard =
     isHomeIdleMode && !hasDraft && !isTranscriptExpanded;
 
-  const canSwitchSession = !input.isSending && !input.isSessionOperationPending;
-  const canRefreshSessions =
-    input.isGatewayConnected &&
-    !input.isSessionsLoading &&
-    !input.isSessionOperationPending;
-  const canCreateSession = canSwitchSession;
-  const canRenameSession = canSwitchSession;
-  const canPinSession = !input.isSessionOperationPending;
+  const {
+    canSwitchSession,
+    canRefreshSessions,
+    canCreateSession,
+    canRenameSession,
+    canPinSession,
+    sessionPanelStatusText,
+    sessionListHintText,
+  } = resolveSessionPanelSelectors({
+    isSending: input.isSending,
+    isSessionOperationPending: input.isSessionOperationPending,
+    isGatewayConnected: input.isGatewayConnected,
+    isSessionsLoading: input.isSessionsLoading,
+    sessionsError: input.sessionsError,
+    sessionsCount: input.sessions.length,
+    visibleSessionsCount: visibleSessions.length,
+  });
 
-  const hasGatewaySessions = input.sessions.length > 0;
-  const sessionPanelStatusText = input.sessionsError
-    ? 'Error'
-    : input.isSessionsLoading
-      ? 'Loading sessions...'
-      : hasGatewaySessions
-        ? `${visibleSessions.length} sessions`
-        : 'Local session only';
+  const {
+    settingsStatusText,
+    isSettingsStatusError,
+    isSettingsStatusPending,
+  } = resolveSettingsStatusSelectors({
+    settingsReady: input.settingsReady,
+    isSettingsSaving: input.isSettingsSaving,
+    settingsPendingSaveCount: input.settingsPendingSaveCount,
+    settingsSaveError: input.settingsSaveError,
+    settingsLastSavedAt: input.settingsLastSavedAt,
+    formatClockLabel: input.formatClockLabel,
+  });
 
-  const sessionListHintText = input.sessionsError
-    ? 'Sync failed. Tap Refresh.'
-    : !hasGatewaySessions
-      ? 'No sessions yet. Tap New.'
-      : input.isSending || input.isSessionOperationPending
-        ? 'Busy now. Try again in a moment.'
-        : null;
-
-  const settingsStatusText = !input.settingsReady
-    ? 'Loading settings...'
-    : input.isSettingsSaving || input.settingsPendingSaveCount > 0
-      ? 'Syncing...'
-      : input.settingsSaveError
-        ? input.settingsSaveError
-        : input.settingsLastSavedAt
-          ? `Saved ${input.formatClockLabel(input.settingsLastSavedAt)}`
-          : 'Saved';
-
-  const isSettingsStatusError = Boolean(input.settingsSaveError);
-  const isSettingsStatusPending =
-    input.isSettingsSaving || input.settingsPendingSaveCount > 0;
-
-  const sectionIconColor = input.isDarkTheme ? '#9eb1d2' : '#70706A';
-  const actionIconColor = input.isDarkTheme ? '#b8c9e6' : '#5C5C5C';
-  const currentBadgeIconColor = input.isDarkTheme ? '#9ec0ff' : '#1D4ED8';
-  const pinnedBadgeIconColor = input.isDarkTheme ? '#dbe7ff' : '#4B5563';
-  const optionIconColor = input.isDarkTheme ? '#b8c9e6' : '#5C5C5C';
+  const {
+    sectionIconColor,
+    actionIconColor,
+    currentBadgeIconColor,
+    pinnedBadgeIconColor,
+    optionIconColor,
+  } = resolveSectionIconColors(input.isDarkTheme);
 
   const showOnboardingGuide = input.settingsReady && !input.isOnboardingCompleted;
   const isOnboardingGatewayConfigured = input.gatewayUrl.trim().length > 0;
@@ -308,132 +315,81 @@ export function buildHomeUiStateSnapshot(
     input.gatewayConnectDiagnostic,
   );
 
-  const activeMissingResponseNotice =
-    input.missingResponseNotice?.sessionKey === input.activeSessionKey
-      ? input.missingResponseNotice
-      : null;
+  const activeMissingResponseNotice = resolveActiveMissingResponseNotice(
+    input.missingResponseNotice,
+    input.activeSessionKey,
+  );
 
   const canRetryMissingResponse =
     Boolean(activeMissingResponseNotice) &&
     input.isGatewayConnected &&
     !input.isMissingResponseRecoveryInFlight;
 
-  const historyRefreshErrorMessage =
-    input.historyRefreshNotice?.kind === 'error'
-      ? input.historyRefreshNotice.message
-      : null;
-
-  const historyUpdatedLabel =
-    input.historyLastSyncedAt != null
-      ? `Updated ${input.formatClockLabel(input.historyLastSyncedAt)}`
-      : null;
-
-  const showHistoryUpdatedMeta =
-    showHistoryCard && showHistorySecondaryUi && Boolean(historyUpdatedLabel);
-
-  const historyListBottomPadding = Math.max(
-    12,
-    input.historyBottomInset + (input.showScrollToBottomButton ? 28 : 0),
+  const historyRefreshErrorMessage = resolveHistoryRefreshErrorMessage(
+    input.historyRefreshNotice,
   );
 
-  const hasRetryingState =
-    Boolean(activeMissingResponseNotice) ||
-    (input.outboxQueueLength > 0 && input.connectionState === 'connected');
+  const historyUpdatedLabel = resolveHistoryUpdatedLabel(
+    input.historyLastSyncedAt,
+    input.formatClockLabel,
+  );
 
-  const hasErrorState =
-    Boolean(input.gatewayError) ||
-    Boolean(input.speechError) ||
-    Boolean(historyRefreshErrorMessage);
+  const {
+    showHistoryUpdatedMeta,
+    historyListBottomPadding,
+    showHistoryDateDivider,
+    showHistoryScrollButton,
+  } = resolveHistoryUiSelectors({
+    showHistoryCard,
+    showHistorySecondaryUi,
+    historyUpdatedLabel,
+    historyBottomInset: input.historyBottomInset,
+    showScrollToBottomButton: input.showScrollToBottomButton,
+    isHomeComposingMode,
+  });
 
   const isStreamingGatewayEvent =
     input.gatewayEventState === 'delta' || input.gatewayEventState === 'streaming';
 
-  const bottomActionStatus: BottomActionStatus = input.isRecognizing
-    ? 'recording'
-    : input.isSending
-      ? 'sending'
-      : hasRetryingState
-        ? 'retrying'
-        : hasErrorState
-          ? 'error'
-          : !input.isGatewayConnected
-            ? input.isGatewayConnecting || input.isStartupAutoConnecting
-              ? 'connecting'
-              : 'disconnected'
-            : input.isBottomCompletePulse
-              ? 'complete'
-              : 'ready';
-
-  const bottomActionDetailText =
-    bottomActionStatus === 'recording'
-      ? 'Release to stop'
-      : bottomActionStatus === 'sending'
-        ? isStreamingGatewayEvent
-          ? 'Streaming response'
-          : 'Waiting response'
-        : bottomActionStatus === 'retrying'
-          ? activeMissingResponseNotice
-            ? input.isMissingResponseRecoveryInFlight
-              ? 'Fetching final output'
-              : 'Retry available'
-            : `Queued ${input.outboxQueueLength}`
-          : bottomActionStatus === 'complete'
-            ? 'Sent successfully'
-            : bottomActionStatus === 'connecting'
-              ? input.outboxQueueLength > 0
-                ? `Queued ${input.outboxQueueLength}`
-                : 'Please wait'
-              : bottomActionStatus === 'disconnected'
-                ? input.outboxQueueLength > 0
-                  ? `Queued ${input.outboxQueueLength}`
-                  : 'Connect Gateway'
-                : bottomActionStatus === 'error'
-                  ? 'Check top banner'
-                  : canSendDraft
-                    ? 'Tap send'
-                    : speechRecognitionSupported
-                      ? 'Hold to record'
-                      : resolveSpeechUnsupportedMessage();
-
-  const showBottomStatus = !input.isKeyboardBarMounted && !isHomeComposingMode;
-  const bottomActionStatusLabel = BOTTOM_ACTION_STATUS_LABELS[bottomActionStatus];
-  const connectionStatusLabel = CONNECTION_LABELS[input.connectionState];
-  const showHistoryDateDivider = showHistorySecondaryUi;
-  const showHistoryScrollButton =
-    input.showScrollToBottomButton && !isHomeComposingMode;
-
+  const {
+    bottomActionStatus,
+    bottomActionDetailText,
+    showBottomStatus,
+    bottomActionStatusLabel,
+    connectionStatusLabel,
+  } = resolveBottomStatusSelectors({
+    isRecognizing: input.isRecognizing,
+    isSending: input.isSending,
+    activeMissingResponseNotice,
+    outboxQueueLength: input.outboxQueueLength,
+    connectionState: input.connectionState,
+    gatewayError: input.gatewayError,
+    speechError: input.speechError,
+    historyRefreshErrorMessage,
+    isGatewayConnected: input.isGatewayConnected,
+    isGatewayConnecting: input.isGatewayConnecting,
+    isStartupAutoConnecting: input.isStartupAutoConnecting,
+    isBottomCompletePulse: input.isBottomCompletePulse,
+    isStreamingGatewayEvent,
+    isMissingResponseRecoveryInFlight: input.isMissingResponseRecoveryInFlight,
+    canSendDraft,
+    speechRecognitionSupported,
+    speechUnsupportedMessage: resolveSpeechUnsupportedMessage(),
+    isKeyboardBarMounted: input.isKeyboardBarMounted,
+    isHomeComposingMode,
+    bottomActionStatusLabels: BOTTOM_ACTION_STATUS_LABELS,
+    connectionLabels: CONNECTION_LABELS,
+  });
   const canReconnectFromError = input.settingsReady && !input.isGatewayConnecting;
   const canRetryFromError = Boolean(latestRetryText) && !input.isSending;
 
-  const topBannerKind: 'gateway' | 'recovery' | 'history' | 'speech' | null =
-    input.gatewayError
-      ? 'gateway'
-      : activeMissingResponseNotice
-        ? 'recovery'
-        : historyRefreshErrorMessage
-          ? 'history'
-          : input.speechError
-            ? 'speech'
-            : null;
-
-  const topBannerMessage =
-    input.gatewayError ??
-    activeMissingResponseNotice?.message ??
-    historyRefreshErrorMessage ??
-    input.speechError;
-
-  const topBannerIconName:
-    | 'cloud-offline-outline'
-    | 'time-outline'
-    | 'refresh-outline'
-    | 'mic-off-outline' =
-    topBannerKind === 'gateway'
-      ? 'cloud-offline-outline'
-      : topBannerKind === 'recovery'
-        ? 'time-outline'
-        : topBannerKind === 'history'
-          ? 'refresh-outline'
-          : 'mic-off-outline';
+  const { topBannerKind, topBannerMessage, topBannerIconName } =
+    resolveTopBannerSelectors({
+      gatewayError: input.gatewayError,
+      activeMissingResponseNotice,
+      historyRefreshErrorMessage,
+      speechError: input.speechError,
+    });
 
   return {
     canSendDraft,
