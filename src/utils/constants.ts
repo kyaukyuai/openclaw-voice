@@ -2,7 +2,6 @@
  * Application constants for OpenClaw Voice
  */
 
-import { Platform } from 'react-native';
 import type { ConnectionState } from '../openclaw';
 import type {
   AppTheme,
@@ -10,6 +9,28 @@ import type {
   QuickTextIcon,
   SpeechLang,
 } from '../types';
+
+type PlatformLike = {
+  OS: string;
+  constants?: { interfaceIdiom?: string };
+};
+
+function resolvePlatform(): PlatformLike {
+  try {
+    const dynamicRequire = Function(
+      'return typeof require === "function" ? require : null;',
+    )() as ((id: string) => { Platform?: PlatformLike } | undefined) | null;
+    const platform = dynamicRequire?.('react-native')?.Platform;
+    if (platform && typeof platform.OS === 'string') {
+      return platform;
+    }
+  } catch {
+    // Keep Node-based tests independent from react-native runtime.
+  }
+  return { OS: 'web', constants: {} };
+}
+
+const PLATFORM = resolvePlatform();
 
 // ============================================================================
 // Environment & Client Configuration
@@ -28,7 +49,7 @@ export const ENABLE_DEBUG_WARNINGS = /^(1|true|yes|on)$/i.test(
 );
 
 export const GATEWAY_PLATFORM: 'ios' | 'android' | 'web' =
-  Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'web';
+  PLATFORM.OS === 'ios' ? 'ios' : PLATFORM.OS === 'android' ? 'android' : 'web';
 
 // ============================================================================
 // Default Values

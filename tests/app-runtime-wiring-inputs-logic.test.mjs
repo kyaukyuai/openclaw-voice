@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import test from 'node:test';
 
-const require = createRequire(import.meta.url);
+import __srcModule0 from '../src/ios-runtime/app-runtime-wiring-inputs-logic.ts';
 const {
   buildRuntimeUiHelpersInput,
   buildRuntimeOrchestratorInput,
   buildRuntimeSideEffectsInput,
-} = require('../src/ios-runtime/app-runtime-wiring-inputs-logic.js');
+} = __srcModule0;
 
 function createRuntimeDeps(overrides = {}) {
   const noop = () => {};

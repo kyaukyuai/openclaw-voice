@@ -1,12 +1,11 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import test from 'node:test';
 
-const require = createRequire(import.meta.url);
+import __srcModule0 from '../src/ios-runtime/gateway-event-bridge-logic.ts';
 const {
   shouldEndSendingForGatewayState,
   resolveUnboundGatewayEventDecision,
-} = require('../src/ios-runtime/gateway-event-bridge-logic.js');
+} = __srcModule0;
 
 test('shouldEndSendingForGatewayState treats complete/error/aborted as terminal', () => {
   assert.equal(shouldEndSendingForGatewayState('complete'), true);

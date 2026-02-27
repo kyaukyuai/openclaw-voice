@@ -1,32 +1,34 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import test from 'node:test';
 
-const require = createRequire(import.meta.url);
-
+import __srcModule0 from '../src/ios-runtime/app-lifecycle-runtime-logic.ts';
 const {
   shouldTriggerLifecycleAutoConnect,
   clearLifecycleCleanupState,
-} = require('../src/ios-runtime/app-lifecycle-runtime-logic.js');
+} = __srcModule0;
+import __srcModule1 from '../src/ios-runtime/speech-runtime-logic.ts';
 const {
   getSpeechUnsupportedMessage,
   shouldIgnoreSpeechError,
   appendFinalSpeechTranscript,
-} = require('../src/ios-runtime/speech-runtime-logic.js');
+} = __srcModule1;
+import __srcModule2 from '../src/ios-runtime/quick-text-runtime-logic.ts';
 const {
   normalizeQuickText,
   shouldInsertQuickText,
   appendQuickText,
   shouldConsumeQuickTextPress,
-} = require('../src/ios-runtime/quick-text-runtime-logic.js');
+} = __srcModule2;
+import __srcModule3 from '../src/ios-runtime/settings-ui-runtime-logic.ts';
 const {
   getSettingsKeyboardAdditionalOffset,
   getSettingsFieldVisibleDelayMs,
-} = require('../src/ios-runtime/settings-ui-runtime-logic.js');
+} = __srcModule3;
+import __srcModule4 from '../src/ios-runtime/keyboard-ui-runtime-logic.ts';
 const {
   resolveKeyboardEventNames,
   resolveKeyboardBarAnimation,
-} = require('../src/ios-runtime/keyboard-ui-runtime-logic.js');
+} = __srcModule4;
 
 function timerRef() {
   return { current: setTimeout(() => {}, 10_000) };

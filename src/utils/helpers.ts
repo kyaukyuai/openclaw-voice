@@ -2,7 +2,6 @@
  * Helper utilities for OpenClaw Voice
  */
 
-import { Vibration } from 'react-native';
 import type { ChatMessage, SessionEntry } from '../openclaw';
 import type { GatewayConnectDiagnostic, TextContentOptions } from '../types';
 import { TIMINGS } from './constants';
@@ -26,14 +25,39 @@ type HapticsModule = {
 
 let hapticsModuleCache: HapticsModule | null | undefined;
 
+function resolveDynamicRequire():
+  | ((id: string) => Record<string, unknown> | undefined)
+  | null {
+  try {
+    return Function(
+      'return typeof require === "function" ? require : null;',
+    )() as ((id: string) => Record<string, unknown> | undefined) | null;
+  } catch {
+    return null;
+  }
+}
+
 function getHapticsModule(): HapticsModule | null {
   if (hapticsModuleCache !== undefined) return hapticsModuleCache;
   try {
-    hapticsModuleCache = require('expo-haptics') as HapticsModule;
+    const dynamicRequire = resolveDynamicRequire();
+    hapticsModuleCache = dynamicRequire?.('expo-haptics') as HapticsModule;
   } catch {
     hapticsModuleCache = null;
   }
   return hapticsModuleCache;
+}
+
+function triggerLegacyVibration(durationMs: number): void {
+  try {
+    const dynamicRequire = resolveDynamicRequire();
+    const vibration = dynamicRequire?.('react-native')?.Vibration as
+      | { vibrate?: (duration: number) => void }
+      | undefined;
+    vibration?.vibrate?.(durationMs);
+  } catch {
+    // Ignore vibration fallback failures in non-RN runtimes.
+  }
 }
 
 export type HapticType =
@@ -73,9 +97,7 @@ export async function triggerHaptic(type: HapticType): Promise<void> {
       // fallback below
     }
   }
-  Vibration.vibrate(
-    type === 'send-error' ? 20 : type === 'button-press' ? 6 : 10,
-  );
+  triggerLegacyVibration(type === 'send-error' ? 20 : type === 'button-press' ? 6 : 10);
 }
 
 // ============================================================================

@@ -1,23 +1,25 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import test from 'node:test';
 
-const require = createRequire(import.meta.url);
+import __srcModule0 from '../src/ios-runtime/runtime-state.ts';
 const {
   gatewayRuntimeReducer,
   initialGatewayRuntimeState,
-} = require('../src/ios-runtime/runtime-state.js');
+} = __srcModule0;
+import __srcModule1 from '../src/ios-runtime/gateway-event-bridge-logic.ts';
 const {
   resolveUnboundGatewayEventDecision,
-} = require('../src/ios-runtime/gateway-event-bridge-logic.js');
+} = __srcModule1;
+import __srcModule2 from '../src/ios-runtime/history-runtime-logic.ts';
 const {
   beginHistoryRefreshRequest,
   clearHistoryRefreshInFlightIfCurrent,
   raceHistoryRefreshWithTimeout,
-} = require('../src/ios-runtime/history-runtime-logic.js');
+} = __srcModule2;
+import __srcModule3 from '../src/ios-runtime/gateway-connection-flow-logic.ts';
 const {
   applyDisconnectReset,
-} = require('../src/ios-runtime/gateway-connection-flow-logic.js');
+} = __srcModule3;
 
 test('integration: send flow always reaches terminal state from streaming/failure branches', () => {
   let state = { ...initialGatewayRuntimeState };

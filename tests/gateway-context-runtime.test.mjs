@@ -1,12 +1,11 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import test from 'node:test';
 
-const require = createRequire(import.meta.url);
+import __srcModule0 from '../src/contexts/gateway-runtime-state.ts';
 const {
   gatewayContextRuntimeReducer,
   initialGatewayContextRuntimeState,
-} = require('../src/contexts/gateway-runtime-state.js');
+} = __srcModule0;
 
 test('gateway context runtime handles connect success/failure and disconnect reset', () => {
   let state = { ...initialGatewayContextRuntimeState };

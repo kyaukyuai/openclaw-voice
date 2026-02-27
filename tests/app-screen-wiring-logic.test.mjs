@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import test from 'node:test';
 
-const require = createRequire(import.meta.url);
+import __srcModule0 from '../src/ios-runtime/app-screen-wiring-logic.ts';
 const {
   resolveGatewayUiFlags,
   resolveSettingsRuntimeMeta,
   resolveGatewayRuntimeMeta,
-} = require('../src/ios-runtime/app-screen-wiring-logic.js');
+} = __srcModule0;
 
 test('resolveGatewayUiFlags handles disconnected iOS path', () => {
   const flags = resolveGatewayUiFlags({

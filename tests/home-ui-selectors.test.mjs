@@ -1,32 +1,36 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import test from 'node:test';
 
-const require = createRequire(import.meta.url);
+import __srcModule0 from '../src/ios-runtime/home-ui-session-selectors.ts';
 const {
   resolveSessionPanelSelectors,
   resolveSettingsStatusSelectors,
   resolveSectionIconColors,
-} = require('../src/ios-runtime/home-ui-session-selectors.js');
+} = __srcModule0;
+import __srcModule1 from '../src/ios-runtime/home-ui-history-selectors.ts';
 const {
   resolveHistoryRefreshErrorMessage,
   resolveHistoryUpdatedLabel,
   resolveHistoryUiSelectors,
-} = require('../src/ios-runtime/home-ui-history-selectors.js');
+} = __srcModule1;
+import __srcModule2 from '../src/ios-runtime/home-ui-banner-selectors.ts';
 const {
   resolveActiveMissingResponseNotice,
   resolveTopBannerSelectors,
-} = require('../src/ios-runtime/home-ui-banner-selectors.js');
+} = __srcModule2;
+import __srcModule3 from '../src/ios-runtime/home-ui-bottom-status-selectors.ts';
 const {
   resolveBottomStatusSelectors,
-} = require('../src/ios-runtime/home-ui-bottom-status-selectors.js');
+} = __srcModule3;
+import __srcModule4 from '../src/ios-runtime/home-ui-composer-selectors.ts';
 const {
   resolveComposerDisplaySelectors,
-} = require('../src/ios-runtime/home-ui-composer-selectors.js');
+} = __srcModule4;
+import __srcModule5 from '../src/ios-runtime/home-ui-onboarding-selectors.ts';
 const {
   resolveGatewayDiagnosticIconName,
   resolveOnboardingDiagnosticSelectors,
-} = require('../src/ios-runtime/home-ui-onboarding-selectors.js');
+} = __srcModule5;
 
 test('session selectors map action availability and status text', () => {
   const result = resolveSessionPanelSelectors({

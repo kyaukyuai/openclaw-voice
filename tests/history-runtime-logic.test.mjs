@@ -1,15 +1,14 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import test from 'node:test';
 
-const require = createRequire(import.meta.url);
+import __srcModule0 from '../src/ios-runtime/history-runtime-logic.ts';
 const {
   beginHistoryRefreshRequest,
   invalidateHistoryRefreshState,
   isCurrentHistoryRefreshRequest,
   clearHistoryRefreshInFlightIfCurrent,
   raceHistoryRefreshWithTimeout,
-} = require('../src/ios-runtime/history-runtime-logic.js');
+} = __srcModule0;
 
 function createHistoryRefs() {
   return {

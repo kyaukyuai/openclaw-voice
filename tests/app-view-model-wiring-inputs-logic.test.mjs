@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import test from 'node:test';
 
-const require = createRequire(import.meta.url);
+import __srcModule0 from '../src/ios-runtime/app-view-model-wiring-inputs-logic.ts';
 const {
   buildUseAppViewModelInput,
-} = require('../src/ios-runtime/app-view-model-wiring-inputs-logic.js');
+} = __srcModule0;
 
 function createStateProxy(seed = {}) {
   const noop = () => {};

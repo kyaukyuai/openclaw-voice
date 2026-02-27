@@ -1,15 +1,14 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import test from 'node:test';
 
-const require = createRequire(import.meta.url);
+import __srcModule0 from '../src/ios-runtime/outbox-runtime-logic.ts';
 const {
   resolveOutboxSendAction,
   createQueuedOutboxPayload,
   applyOutboxHealthCheckFailure,
   applyOutboxSendFailure,
   applyOutboxSendSuccess,
-} = require('../src/ios-runtime/outbox-runtime-logic.js');
+} = __srcModule0;
 
 function createQueueItem(overrides = {}) {
   return {

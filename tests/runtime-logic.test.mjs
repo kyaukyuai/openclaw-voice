@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import test from 'node:test';
 
-const require = createRequire(import.meta.url);
+import __srcModule0 from '../src/ui/runtime-logic.js';
 const {
   buildHistoryRefreshNotice,
   computeAutoConnectRetryPlan,
@@ -12,7 +11,7 @@ const {
   resolveSendDispatch,
   shouldAttemptFinalRecovery,
   shouldStartStartupAutoConnect,
-} = require('../src/ui/runtime-logic.js');
+} = __srcModule0;
 
 test('resolveSendDispatch blocks rapid duplicate sends and reuses idempotency key', () => {
   const first = resolveSendDispatch(
@@ -120,7 +119,6 @@ test('computeAutoConnectRetryPlan returns retry plan until max attempts', () => 
     'Gateway auto-connect failed: timeout. Tap Connect to retry manually.',
   );
 });
-
 
 test('computeHistorySyncRetryPlan stops retrying after max attempts to avoid Refreshing lock', () => {
   const exhausted = computeHistorySyncRetryPlan({

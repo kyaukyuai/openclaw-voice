@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import test from 'node:test';
 
-const require = createRequire(import.meta.url);
+import __srcModule0 from '../src/ios-runtime/home-ui-state-logic.ts';
 const {
   buildVisibleSessions,
   buildHistoryItems,
   resolveLatestRetryText,
-  resolveGatewayDiagnosticIconName,
   buildHomeUiStateSnapshot,
-} = require('../src/ios-runtime/home-ui-state-logic.js');
+} = __srcModule0;
+import __srcModule1 from '../src/ios-runtime/home-ui-onboarding-selectors.ts';
+const { resolveGatewayDiagnosticIconName } = __srcModule1;
 
 function now(offset = 0) {
   return 1_700_000_000_000 + offset;

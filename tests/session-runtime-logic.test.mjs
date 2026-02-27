@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import test from 'node:test';
 
-const require = createRequire(import.meta.url);
+import __srcModule0 from '../src/ios-runtime/session-runtime-logic.ts';
 const {
   resolveTimerSchedule,
   shouldContinueMissingResponseRecovery,
   shouldContinueFinalResponseRecovery,
-} = require('../src/ios-runtime/session-runtime-logic.js');
+} = __srcModule0;
 
 test('resolveTimerSchedule computes initial, fixed retry, exponential retry, and override delays', () => {
   assert.deepEqual(

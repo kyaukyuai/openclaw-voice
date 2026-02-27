@@ -1,14 +1,13 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import test from 'node:test';
 
-const require = createRequire(import.meta.url);
+import __srcModule0 from '../src/ios-runtime/home-ui-handlers-logic.ts';
 const {
   resolveDraftText,
   resolveTopBannerDismissTarget,
   shouldStartHoldToTalk,
   resolveHistoryScrollState,
-} = require('../src/ios-runtime/home-ui-handlers-logic.js');
+} = __srcModule0;
 
 test('resolveDraftText returns trimmed transcript or interim fallback', () => {
   assert.equal(resolveDraftText(' hello ', ''), 'hello');

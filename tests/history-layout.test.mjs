@@ -1,12 +1,11 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import test from 'node:test';
 
-const require = createRequire(import.meta.url);
+import __srcModule0 from '../src/ui/history-layout.ts';
 const {
   clamp,
   computeHistoryBottomInset,
-} = require('../src/ui/history-layout.js');
+} = __srcModule0;
 
 test('clamp limits to min and max bounds', () => {
   assert.equal(clamp(5, 10, 20), 10);

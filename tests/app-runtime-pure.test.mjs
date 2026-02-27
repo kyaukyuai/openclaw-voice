@@ -1,15 +1,14 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import test from 'node:test';
 
-const require = createRequire(import.meta.url);
+import __srcModule0 from '../src/ios-runtime/app-runtime-pure.ts';
 const {
   buildTurnsFromHistory,
   normalizeQuickTextIcon,
   parseOutboxQueue,
   parseSessionPreferences,
   getHistoryDayLabel,
-} = require('../src/ios-runtime/app-runtime-pure.js');
+} = __srcModule0;
 
 const DEFAULT_QUICK_TEXT_LEFT_ICON = 'chatbubble-ellipses-outline';
 

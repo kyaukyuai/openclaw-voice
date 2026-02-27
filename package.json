@@ -46,13 +46,14 @@
     "web:check": "expo export --platform web --output-dir /tmp/openclaw-web-export-check",
     "typecheck": "tsc --noEmit",
     "lint": "node scripts/lint.mjs",
-    "test": "node --test tests/*.test.mjs",
+    "test": "tsx --test tests/*.test.mjs",
     "build:package": "tsc -p tsconfig.package.json",
     "smoke:pack-install": "node scripts/smoke-pack-install.mjs",
     "prepare:publish-manifest": "node scripts/switch-package-manifest.mjs prepare",
     "restore:publish-manifest": "node scripts/switch-package-manifest.mjs restore",
     "prepack": "npm run build:package && npm run prepare:publish-manifest",
-    "postpack": "npm run restore:publish-manifest"
+    "postpack": "npm run restore:publish-manifest",
+    "check:no-ts-js-mirror": "node scripts/check-no-ts-js-mirror.mjs"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
@@ -73,6 +74,7 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.0",
+    "tsx": "^4.21.0",
     "typescript": "~5.9.2"
   },
   "private": false

@@ -500,12 +500,19 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 GitHub Actions runs on push/PR:
 
 - Type check (`npm run typecheck`)
+- TS/JS mirror guard (`npm run check:no-ts-js-mirror`)
 - Web export check (`npm run web:check`)
 - Package dry-run (`npm pack --dry-run`)
 - Manifest restore check after pack (`package.json.main` stays `index.ts`)
 - Lint (`npm run lint`)
 - Tests (`npm test`)
 - Tarball install smoke test (`npm run smoke:pack-install`)
+
+`macos-native-checks` (macOS runner) also validates:
+
+- `npm --prefix apps/macos-native run lint`
+- `npm --prefix apps/macos-native run test -- --watch=false`
+- `npm --prefix apps/macos-native exec react-native start --help` (startup smoke)
 
 Issue/PR templates are in `.github/`.
 
