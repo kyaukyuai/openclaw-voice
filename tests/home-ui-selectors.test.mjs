@@ -20,6 +20,13 @@ const {
 const {
   resolveBottomStatusSelectors,
 } = require('../src/ios-runtime/home-ui-bottom-status-selectors.js');
+const {
+  resolveComposerDisplaySelectors,
+} = require('../src/ios-runtime/home-ui-composer-selectors.js');
+const {
+  resolveGatewayDiagnosticIconName,
+  resolveOnboardingDiagnosticSelectors,
+} = require('../src/ios-runtime/home-ui-onboarding-selectors.js');
 
 test('session selectors map action availability and status text', () => {
   const result = resolveSessionPanelSelectors({
@@ -146,4 +153,62 @@ test('bottom status selectors derive disconnected and sending details', () => {
   });
   assert.equal(sending.bottomActionStatus, 'sending');
   assert.equal(sending.bottomActionDetailText, 'Streaming response');
+});
+
+test('composer selectors compute keyboard and quick text ui flags', () => {
+  const result = resolveComposerDisplaySelectors({
+    transcript: ' draft ',
+    interimTranscript: '',
+    isRecognizing: false,
+    quickTextLeft: 'left',
+    quickTextRight: '',
+    focusedField: 'transcript',
+    shouldShowSettingsScreen: false,
+    isKeyboardVisible: true,
+    isSending: false,
+    settingsReady: true,
+    quickTextTooltipSide: 'left',
+    speechRecognitionSupported: true,
+  });
+
+  assert.equal(result.canSendDraft, true);
+  assert.equal(result.showKeyboardActionBar, true);
+  assert.equal(result.showHistoryCard, false);
+  assert.equal(result.canUseQuickTextLeft, true);
+  assert.equal(result.canUseQuickTextRight, false);
+  assert.equal(result.transcriptPlaceholder, 'Type your message.');
+});
+
+test('onboarding selectors compute readiness and diagnostic icon', () => {
+  assert.equal(
+    resolveGatewayDiagnosticIconName({ kind: 'auth' }),
+    'key-outline',
+  );
+
+  const result = resolveOnboardingDiagnosticSelectors({
+    settingsReady: true,
+    isOnboardingCompleted: false,
+    gatewayUrl: 'wss://example.com',
+    isGatewayConnected: false,
+    chatTurns: [
+      {
+        id: 't1',
+        createdAt: 1,
+        state: 'complete',
+        userText: 'hi',
+        assistantText: 'done',
+      },
+    ],
+    isGatewayConnecting: false,
+    isSending: false,
+    isOnboardingWaitingForResponse: false,
+    gatewayConnectDiagnostic: { kind: 'network' },
+  });
+
+  assert.equal(result.showOnboardingGuide, true);
+  assert.equal(result.isOnboardingGatewayConfigured, true);
+  assert.equal(result.canRunOnboardingConnectTest, true);
+  assert.equal(result.canRunOnboardingSampleSend, false);
+  assert.equal(result.showGatewayDiagnostic, true);
+  assert.equal(result.gatewayDiagnosticIconName, 'cloud-offline-outline');
 });

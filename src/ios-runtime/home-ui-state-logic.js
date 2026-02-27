@@ -1,4 +1,3 @@
-const { isIncompleteAssistantContent } = require('../ui/runtime-logic');
 const {
   resolveSessionPanelSelectors,
   resolveSettingsStatusSelectors,
@@ -14,6 +13,11 @@ const {
   resolveTopBannerSelectors,
 } = require('./home-ui-banner-selectors');
 const { resolveBottomStatusSelectors } = require('./home-ui-bottom-status-selectors');
+const { resolveComposerDisplaySelectors } = require('./home-ui-composer-selectors');
+const {
+  resolveGatewayDiagnosticIconName,
+  resolveOnboardingDiagnosticSelectors,
+} = require('./home-ui-onboarding-selectors');
 
 const CONNECTION_LABELS = {
   disconnected: 'Disconnected',
@@ -135,81 +139,46 @@ function resolveLatestRetryText(chatTurns, transcript, interimTranscript) {
   return '';
 }
 
-function resolveGatewayDiagnosticIconName(diagnostic) {
-  const kind = diagnostic?.kind;
-  if (kind === 'tls') return 'shield-checkmark-outline';
-  if (kind === 'auth') return 'key-outline';
-  if (kind === 'timeout') return 'time-outline';
-  if (kind === 'dns') return 'globe-outline';
-  if (kind === 'network') return 'cloud-offline-outline';
-  if (kind === 'server') return 'server-outline';
-  if (kind === 'pairing') return 'people-outline';
-  if (kind === 'invalid-url') return 'link-outline';
-  return 'alert-circle-outline';
-}
-
 function buildHomeUiStateSnapshot(input, computed) {
   const { visibleSessions, historyItems, latestRetryText } = computed;
 
-  const draftText = input.transcript.trim() || input.interimTranscript.trim();
-  const hasDraft = Boolean(draftText);
-  const canSendDraft = hasDraft && !input.isRecognizing;
-
-  const quickTextLeftLabel = input.quickTextLeft.trim();
-  const quickTextRightLabel = input.quickTextRight.trim();
-
-  const isTranscriptFocused = input.focusedField === 'transcript';
-  const isQuickTextFieldFocused =
-    input.focusedField === 'quick-text-left' ||
-    input.focusedField === 'quick-text-right';
-  const isQuickTextSettingsEditMode =
-    input.shouldShowSettingsScreen && isQuickTextFieldFocused;
-
-  const isGatewayFieldFocused =
-    input.focusedField === 'gateway-url' ||
-    input.focusedField === 'auth-token' ||
-    isQuickTextFieldFocused;
-
-  const showKeyboardActionBar =
-    input.isKeyboardVisible && (isTranscriptFocused || isGatewayFieldFocused);
-  const showDoneOnlyAction = showKeyboardActionBar && isGatewayFieldFocused;
-  const showClearInKeyboardBar = showKeyboardActionBar && isTranscriptFocused;
-  const canSendFromKeyboardBar = hasDraft && !input.isRecognizing && !input.isSending;
-  const canClearFromKeyboardBar =
-    input.transcript.length > 0 || input.interimTranscript.length > 0;
-
   const speechRecognitionSupported = supportsSpeechRecognitionOnCurrentPlatform();
-  const canUseQuickText = !input.isRecognizing && input.settingsReady;
-  const canUseQuickTextLeft = canUseQuickText && quickTextLeftLabel.length > 0;
-  const canUseQuickTextRight = canUseQuickText && quickTextRightLabel.length > 0;
-  const showQuickTextLeftTooltip =
-    input.quickTextTooltipSide === 'left' && canUseQuickTextLeft;
-  const showQuickTextRightTooltip =
-    input.quickTextTooltipSide === 'right' && canUseQuickTextRight;
-
-  const isTranscriptEditingWithKeyboard =
-    input.isKeyboardVisible && isTranscriptFocused;
-  const isTranscriptExpanded = isTranscriptFocused || input.isRecognizing;
-
-  const homeDisplayMode = input.isSending
-    ? 'sending'
-    : isTranscriptFocused || input.isRecognizing
-      ? 'composing'
-      : 'idle';
-
-  const isHomeIdleMode = homeDisplayMode === 'idle';
-  const isHomeComposingMode = homeDisplayMode === 'composing';
-  const showHistorySecondaryUi = !isHomeComposingMode;
-  const showHistoryCard = !isTranscriptEditingWithKeyboard;
-  const showHistoryRefreshButton =
-    showHistoryCard && showHistorySecondaryUi && !input.isSending;
-
-  const transcriptPlaceholder = isTranscriptFocused
-    ? 'Type your message.'
-    : 'Tap to type or hold mic.';
-
-  const shouldUseCompactTranscriptCard =
-    isHomeIdleMode && !hasDraft && !isTranscriptExpanded;
+  const {
+    canSendDraft,
+    quickTextLeftLabel,
+    quickTextRightLabel,
+    isTranscriptFocused,
+    isQuickTextSettingsEditMode,
+    showKeyboardActionBar,
+    showDoneOnlyAction,
+    showClearInKeyboardBar,
+    canSendFromKeyboardBar,
+    canClearFromKeyboardBar,
+    canUseQuickTextLeft,
+    canUseQuickTextRight,
+    showQuickTextLeftTooltip,
+    showQuickTextRightTooltip,
+    isTranscriptEditingWithKeyboard,
+    isHomeComposingMode,
+    showHistorySecondaryUi,
+    showHistoryCard,
+    showHistoryRefreshButton,
+    transcriptPlaceholder,
+    shouldUseCompactTranscriptCard,
+  } = resolveComposerDisplaySelectors({
+    transcript: input.transcript,
+    interimTranscript: input.interimTranscript,
+    isRecognizing: input.isRecognizing,
+    quickTextLeft: input.quickTextLeft,
+    quickTextRight: input.quickTextRight,
+    focusedField: input.focusedField,
+    shouldShowSettingsScreen: input.shouldShowSettingsScreen,
+    isKeyboardVisible: input.isKeyboardVisible,
+    isSending: input.isSending,
+    settingsReady: input.settingsReady,
+    quickTextTooltipSide: input.quickTextTooltipSide,
+    speechRecognitionSupported,
+  });
 
   const {
     canSwitchSession,
@@ -250,30 +219,27 @@ function buildHomeUiStateSnapshot(input, computed) {
     optionIconColor,
   } = resolveSectionIconColors(input.isDarkTheme);
 
-  const showOnboardingGuide = input.settingsReady && !input.isOnboardingCompleted;
-  const isOnboardingGatewayConfigured = input.gatewayUrl.trim().length > 0;
-  const isOnboardingConnectDone = input.isGatewayConnected;
-  const isOnboardingResponseDone = input.chatTurns.some(
-    (turn) =>
-      turn.state === 'complete' && !isIncompleteAssistantContent(turn.assistantText),
-  );
-
-  const canRunOnboardingConnectTest =
-    input.settingsReady && !input.isGatewayConnecting;
-  const canRunOnboardingSampleSend =
-    input.isGatewayConnected &&
-    !input.isSending &&
-    !input.isOnboardingWaitingForResponse;
-
-  const onboardingSampleButtonLabel = input.isOnboardingWaitingForResponse
-    ? 'Waiting reply...'
-    : 'Send Sample';
-
-  const showGatewayDiagnostic =
-    !input.isGatewayConnected && input.gatewayConnectDiagnostic != null;
-  const gatewayDiagnosticIconName = resolveGatewayDiagnosticIconName(
-    input.gatewayConnectDiagnostic,
-  );
+  const {
+    showOnboardingGuide,
+    isOnboardingGatewayConfigured,
+    isOnboardingConnectDone,
+    isOnboardingResponseDone,
+    canRunOnboardingConnectTest,
+    canRunOnboardingSampleSend,
+    onboardingSampleButtonLabel,
+    showGatewayDiagnostic,
+    gatewayDiagnosticIconName,
+  } = resolveOnboardingDiagnosticSelectors({
+    settingsReady: input.settingsReady,
+    isOnboardingCompleted: input.isOnboardingCompleted,
+    gatewayUrl: input.gatewayUrl,
+    isGatewayConnected: input.isGatewayConnected,
+    chatTurns: input.chatTurns,
+    isGatewayConnecting: input.isGatewayConnecting,
+    isSending: input.isSending,
+    isOnboardingWaitingForResponse: input.isOnboardingWaitingForResponse,
+    gatewayConnectDiagnostic: input.gatewayConnectDiagnostic,
+  });
 
   const activeMissingResponseNotice = resolveActiveMissingResponseNotice(
     input.missingResponseNotice,
