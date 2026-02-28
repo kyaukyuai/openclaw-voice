@@ -12,7 +12,8 @@
     "start": "react-native start",
     "start:macos": "react-native start --reset-cache",
     "test": "jest --passWithNoTests",
-    "test:smoke": "jest tests/app-ui-operations.test.js --runInBand --watch=false -t \"smoke flow: connect -> send -> sync -> reconnect actions remain available\""
+    "test:smoke": "jest tests/app-ui-operations.test.js --runInBand --watch=false -t \"smoke flow: connect -> send -> sync -> reconnect actions remain available\"",
+    "test:e2e": "jest tests/runtime-e2e.test.js --runInBand --watch=false"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",

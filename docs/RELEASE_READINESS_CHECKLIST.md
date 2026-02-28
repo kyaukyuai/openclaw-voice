@@ -19,6 +19,7 @@ Run it in order from top to bottom.
 - [ ] `npm --prefix apps/macos-native run lint`
 - [ ] `npm --prefix apps/macos-native run lint:baseline`
 - [ ] `npm --prefix apps/macos-native run test -- --watch=false`
+- [ ] `npm --prefix apps/macos-native run test:e2e`
 - [ ] `npm run web:check`
 - [ ] `npm run smoke:pack-install`
 
@@ -70,6 +71,7 @@ Run it in order from top to bottom.
 - [ ] `npm run doctor:release`
 - [ ] `npm run check:release-docs`
 - [ ] `.github/workflows/release.yml` trigger/permissions are valid.
+- [ ] Branch protection for `main` requires status check `Release / verify`.
 
 ### 3.2 Documentation readiness
 
@@ -100,6 +102,7 @@ npm run lint --if-present
 npm test -- --watch=false
 npm --prefix apps/macos-native run lint
 npm --prefix apps/macos-native run test -- --watch=false
+npm --prefix apps/macos-native run test:e2e
 npm run web:check
 npm run smoke:pack-install
 npm version patch -m "chore(release): %s"

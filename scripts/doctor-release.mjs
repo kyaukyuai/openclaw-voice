@@ -58,8 +58,16 @@ if (!fs.existsSync(releaseWorkflowPath)) {
   const workflow = fs.readFileSync(releaseWorkflowPath, 'utf8');
   const hasTagTrigger = /tags:\s*[\r\n]+\s*-\s*["']v\*["']/.test(workflow);
   const hasDispatch = /workflow_dispatch:/.test(workflow);
+  const hasPullRequestMainTrigger = /pull_request:[\s\S]*branches:\s*[\r\n]+\s*-\s*main/.test(workflow);
   add(hasTagTrigger ? 'ok' : 'error', 'Tag trigger', hasTagTrigger ? 'Release workflow listens to v* tags.' : 'Release workflow is missing v* tag trigger.');
   add(hasDispatch ? 'ok' : 'error', 'Dispatch trigger', hasDispatch ? 'workflow_dispatch is enabled.' : 'workflow_dispatch is missing.');
+  add(
+    hasPullRequestMainTrigger ? 'ok' : 'error',
+    'PR trigger',
+    hasPullRequestMainTrigger
+      ? 'Release workflow verify gate runs on pull requests to main.'
+      : 'Release workflow is missing pull_request trigger for main branch.',
+  );
 }
 
 const releaseDocs = run('node scripts/check-release-docs.mjs');
@@ -110,6 +118,35 @@ if (ghVersion.ok && repoSlug) {
       const value = workflowPerm.output.trim();
       add(value === 'write' ? 'ok' : 'error', 'Actions permission', `default_workflow_permissions=${value}`);
     }
+
+    let requiredChecks = run(
+      `gh api repos/${repoSlug}/branches/main/protection/required_status_checks --jq '.checks[].context'`,
+    );
+    if (!requiredChecks.ok) {
+      requiredChecks = run(
+        `gh api repos/${repoSlug}/branches/main/protection/required_status_checks --jq '.contexts[]'`,
+      );
+    }
+    if (!requiredChecks.ok) {
+      add(
+        'warn',
+        'Required checks',
+        'Could not read branch protection required checks. Ensure "Release / verify" is required on main.',
+      );
+    } else {
+      const contexts = requiredChecks.output
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const hasReleaseVerify = contexts.includes('Release / verify');
+      add(
+        hasReleaseVerify ? 'ok' : 'error',
+        'Required checks',
+        hasReleaseVerify
+          ? '"Release / verify" is required on main.'
+          : 'Missing required check "Release / verify" on main branch protection.',
+      );
+    }
   }
 }
 
@@ -122,6 +159,7 @@ for (const r of results) {
 
 console.log('');
 console.log('Tip: run `gh workflow run release.yml` to execute preflight verify job via workflow_dispatch.');
+console.log('Tip: in branch protection, require status check `Release / verify`.');
 
 const hasError = results.some((r) => r.level === 'error');
 if (hasError) {

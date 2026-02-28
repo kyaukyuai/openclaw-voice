@@ -80,5 +80,8 @@ jobs:
       - name: E2E smoke (macOS native UI wiring)
         run: npm --prefix apps/macos-native run test:smoke
 
+      - name: Runtime E2E (macOS native gateway flow)
+        run: npm --prefix apps/macos-native run test:e2e
+
       - name: React Native CLI smoke check (macOS)
         run: cd apps/macos-native && npx react-native start --help

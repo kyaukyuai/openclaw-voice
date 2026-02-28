@@ -517,6 +517,7 @@ GitHub Actions runs on push/PR:
 - `npm --prefix apps/macos-native run lint`
 - `npm --prefix apps/macos-native run lint:baseline` (`no-shadow` / `no-unused-vars` enforced)
 - `npm --prefix apps/macos-native run test -- --watch=false`
+- `npm --prefix apps/macos-native run test:e2e` (runtime flow: connect -> send -> response -> refresh)
 - `npm --prefix apps/macos-native exec react-native start --help` (startup smoke)
 
 Issue/PR templates are in `.github/`.
@@ -550,11 +551,15 @@ git push
 git push --tags
 ```
 
-4. GitHub Actions `Release` workflow runs on `v*` tag:
+4. GitHub Actions `Release` workflow verify gate also runs on PRs to `main`:
+- Status check context: `Release / verify` (set this as a required check in branch protection)
+
+5. On `v*` tag, `Release` workflow continues through publish/release:
 - `gitleaks detect --source . --redact` (secret scan gate)
 - `npm audit --omit=dev` (production dependency audit gate)
 - Version/tag consistency check
 - `typecheck`, `lint`, `test`, `smoke:pack-install`
+- `npm --prefix apps/macos-native run test:e2e` (connect -> send -> response -> refresh)
 - `npm publish --access public --provenance` (skips if version is already published)
 - GitHub Release auto-created with generated notes
 
