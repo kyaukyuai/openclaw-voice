@@ -204,6 +204,15 @@ async function pressByA11yLabel(renderer, label) {
   });
 }
 
+function findComposerInput(renderer) {
+  return renderer.root.find(
+    (node) =>
+      typeof node.props?.onKeyDown === 'function' &&
+      typeof node.props?.onChangeText === 'function' &&
+      typeof node.props?.placeholder === 'string',
+  );
+}
+
 describe('macOS App UI operations', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -238,5 +247,92 @@ describe('macOS App UI operations', () => {
     await pressByA11yLabel(renderer, 'Attach file or image');
     expect(runtime.setAttachmentPickerGatewayId).toHaveBeenCalledWith('gateway-alpha');
     expect(runtime.setFocusedGatewayId).toHaveBeenCalledWith('gateway-alpha');
+  });
+
+  test('composer Enter sends message when IME is not composing', async () => {
+    const { runtime, renderer } = await renderWithRuntime();
+    const composer = findComposerInput(renderer);
+    const event = {
+      nativeEvent: {
+        key: 'Enter',
+        keyCode: 13,
+        metaKey: false,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+        isComposing: false,
+      },
+      preventDefault: jest.fn(),
+      stopPropagation: jest.fn(),
+    };
+
+    await ReactTestRenderer.act(async () => {
+      composer.props.onKeyDown(event);
+    });
+
+    expect(runtime.sendMessage).toHaveBeenCalledWith('gateway-alpha');
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.stopPropagation).toHaveBeenCalled();
+  });
+
+  test('composer Shift+Enter keeps newline path and does not send', async () => {
+    const { runtime, renderer } = await renderWithRuntime();
+    const composer = findComposerInput(renderer);
+    const event = {
+      nativeEvent: {
+        key: 'Enter',
+        keyCode: 13,
+        metaKey: false,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: true,
+        isComposing: false,
+      },
+      preventDefault: jest.fn(),
+      stopPropagation: jest.fn(),
+    };
+
+    await ReactTestRenderer.act(async () => {
+      composer.props.onKeyDown(event);
+    });
+
+    expect(runtime.sendMessage).not.toHaveBeenCalled();
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
+
+  test('send button is disabled when gateway is disconnected', async () => {
+    const disconnectedState = {
+      connectionState: 'disconnected',
+      isSyncing: false,
+      isSending: false,
+      lastUpdatedAt: Date.now(),
+      turns: [],
+      banner: null,
+      syncError: null,
+    };
+    const { renderer } = await renderWithRuntime({
+      gatewayRuntimeById: {
+        'gateway-alpha': {
+          ...createHookReturn().gatewayRuntimeById['gateway-alpha'],
+          controllerState: disconnectedState,
+        },
+      },
+    });
+
+    const sendUnavailable = renderer.root.find(
+      (node) => node.props?.accessibilityLabel === 'Send unavailable',
+    );
+    expect(sendUnavailable.props.disabled).toBe(true);
+    expect(sendUnavailable.props.accessibilityHint).toContain('Connect to send messages');
+  });
+
+  test('quick menu inserts left quick text and closes menu', async () => {
+    const { runtime, renderer } = await renderWithRuntime({
+      quickMenuOpenByGatewayId: { 'gateway-alpha': true },
+    });
+    await pressByA11yLabel(renderer, 'Insert left quick text');
+    expect(runtime.insertQuickText).toHaveBeenCalledWith('gateway-alpha', 'left');
+    expect(runtime.setQuickMenuOpenForGateway).toHaveBeenCalledWith('gateway-alpha', false);
+    expect(runtime.focusComposerForGateway).toHaveBeenCalledWith('gateway-alpha');
   });
 });

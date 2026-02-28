@@ -865,6 +865,8 @@ export default function App() {
                     { backgroundColor: themeTokens.card },
                   ]}
                   disabled={!canInsertLeftQuick || controllerState.isSending}
+                  accessibilityLabel="Insert left quick text"
+                  accessibilityHint="Inserts the left quick text at the current cursor position."
                   onPress={() => {
                     insertQuickText(profile.id, leftQuickTextValue);
                     setQuickMenuOpenForGateway(profile.id, false);
@@ -907,6 +909,8 @@ export default function App() {
                     { backgroundColor: themeTokens.card },
                   ]}
                   disabled={!canInsertRightQuick || controllerState.isSending}
+                  accessibilityLabel="Insert right quick text"
+                  accessibilityHint="Inserts the right quick text at the current cursor position."
                   onPress={() => {
                     insertQuickText(profile.id, rightQuickTextValue);
                     setQuickMenuOpenForGateway(profile.id, false);
