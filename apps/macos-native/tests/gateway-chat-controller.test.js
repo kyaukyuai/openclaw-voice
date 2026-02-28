@@ -207,6 +207,73 @@ describe('GatewayChatController refreshHistory hardening', () => {
   });
 });
 
+describe('GatewayChatController end-to-end smoke flow', () => {
+  beforeEach(() => {
+    MockGatewayClient.reset();
+  });
+
+  test('connect -> send -> refresh -> reconnect stays consistent', async () => {
+    const controller = createController();
+    const now = Date.now();
+
+    MockGatewayClient.setChatHistoryImpl(async (sessionKey) => {
+      if (sessionKey === 'secondary') {
+        return {
+          messages: [
+            { role: 'user', content: 'secondary user', timestamp: now + 10 },
+            { role: 'assistant', content: 'secondary assistant', timestamp: now + 11 },
+          ],
+        };
+      }
+      return {
+        messages: [
+          { role: 'user', content: 'main user', timestamp: now + 1 },
+          { role: 'assistant', content: 'main assistant', timestamp: now + 2 },
+        ],
+      };
+    });
+
+    await controller.connect({ url: 'wss://example.test', sessionKey: 'main' });
+    expect(controller.getState().connectionState).toBe('connected');
+    expect(controller.getState().sessionKey).toBe('main');
+    expect(controller.getState().turns).toHaveLength(1);
+
+    MockGatewayClient.setChatSendImpl(async () => ({ runId: 'run-smoke', status: 'ok' }));
+    await controller.sendMessage('smoke message');
+    expect(controller.getState().isSending).toBe(true);
+
+    controller.handleChatEvent({
+      runId: 'run-smoke',
+      sessionKey: 'main',
+      state: 'streaming',
+      message: { text: 'streaming response' },
+    });
+    controller.handleChatEvent({
+      runId: 'run-smoke',
+      sessionKey: 'main',
+      state: 'complete',
+      output: { text: 'final response' },
+    });
+
+    const completedState = controller.getState();
+    expect(completedState.isSending).toBe(false);
+    expect(completedState.turns.some((turn) => turn.assistantText === 'final response')).toBe(true);
+
+    await controller.refreshHistory();
+    const refreshedState = controller.getState();
+    expect(refreshedState.isSyncing).toBe(false);
+    expect(refreshedState.syncError).toBeNull();
+
+    await controller.connect({ url: 'wss://example.test', sessionKey: 'secondary' });
+    const reconnectedState = controller.getState();
+    expect(reconnectedState.connectionState).toBe('connected');
+    expect(reconnectedState.sessionKey).toBe('secondary');
+    expect(reconnectedState.turns).toHaveLength(1);
+    expect(reconnectedState.turns[0].userText).toContain('secondary user');
+    expect(reconnectedState.turns[0].assistantText).toContain('secondary assistant');
+  });
+});
+
 describe('GatewayChatController final response resolution', () => {
   beforeEach(() => {
     MockGatewayClient.reset();

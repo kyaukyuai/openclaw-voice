@@ -1,90 +1,81 @@
-import { useCallback, useRef, useState } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import {
-  insertQuickTextAtSelection,
-} from '../../../src/shared';
-import { setStorage } from '../../../src/openclaw/storage';
-import {
-  DEFAULT_GATEWAY_PROFILE,
-  DEFAULTS,
-  SETTINGS_KEY,
-  THEMES,
-} from '../logic/app-constants';
-import {
-  createGatewayRuntime,
-  estimateComposerHeightFromText,
-  normalizeComposerSelection,
-  normalizeSessionKey,
-} from '../logic/app-logic';
+import { useCallback } from 'react';
+import { normalizeSessionKey } from '../logic/app-logic';
 import useMacosAttachmentRuntime from './useMacosAttachmentRuntime';
 import useMacosAppEffects from './useMacosAppEffects';
 import useMacosAppLifecycle from './useMacosAppLifecycle';
 import useMacosAppUiWiring from './useMacosAppUiWiring';
+import useMacosComposerRuntime from './useMacosComposerRuntime';
+import useMacosGatewayControllerRuntime from './useMacosGatewayControllerRuntime';
 import useMacosGatewayProfileActions from './useMacosGatewayProfileActions';
 import useMacosHistoryScrollRuntime from './useMacosHistoryScrollRuntime';
 import useMacosNotificationRuntime from './useMacosNotificationRuntime';
-import useMacosGatewayControllerRuntime from './useMacosGatewayControllerRuntime';
-
-const identityCache = new Map();
-
-setStorage({
-  getString(key) {
-    return identityCache.get(key);
-  },
-  set(key, value) {
-    identityCache.set(key, value);
-    AsyncStorage.setItem(key, value).catch(() => {
-      // Best-effort persistence.
-    });
-  },
-});
+import useMacosRuntimeState from './useMacosRuntimeState';
 
 export default function useMacosAppRuntime() {
-  const [booting, setBooting] = useState(true);
-  const [identityReady, setIdentityReady] = useState(false);
-  const [identityPersistWarning, setIdentityPersistWarning] = useState(null);
+  const {
+    activeGatewayId,
+    activeGatewayIdRef,
+    activeNav,
+    activeNavRef,
+    activeSessionKeyRef,
+    authToken,
+    authTokenInputRef,
+    booting,
+    collapsedGatewayIds,
+    composerFocusTimerRef,
+    composerInputRefs,
+    focusedGatewayId,
+    focusedSettingsInput,
+    forcedSelectionByGatewayId,
+    forcedSelectionByGatewayIdRef,
+    gatewayName,
+    gatewayProfiles,
+    gatewayProfilesRef,
+    gatewayRuntimeById,
+    gatewayRuntimeByIdRef,
+    gatewayUrl,
+    identityCache,
+    identityPersistWarning,
+    identityReady,
+    initialAutoNavigationHandledRef,
+    isAuthTokenVisible,
+    isImeComposingByGatewayIdRef,
+    lastAutoConnectSignatureByIdRef,
+    lastHandledNotificationRouteSignatureRef,
+    manualDisconnectByIdRef,
+    pendingNotificationRouteRef,
+    persistSettings,
+    quickMenuOpenByGatewayId,
+    quickTextLeft,
+    quickTextRight,
+    rootRef,
+    sessionKey,
+    setActiveGatewayId,
+    setActiveNav,
+    setAuthToken,
+    setBooting,
+    setCollapsedGatewayIds,
+    setFocusedGatewayId,
+    setFocusedSettingsInput,
+    setForcedSelectionByGatewayId,
+    setGatewayName,
+    setGatewayProfiles,
+    setGatewayRuntimeById,
+    setGatewayUrl,
+    setIdentityPersistWarning,
+    setIdentityReady,
+    setIsAuthTokenVisible,
+    setQuickMenuOpenByGatewayId,
+    setQuickTextLeft,
+    setQuickTextRight,
+    setSessionKey,
+    setTheme,
+    skipSubmitEditingByGatewayIdRef,
+    theme,
+    themeTokens,
+    updateGatewayRuntime,
+  } = useMacosRuntimeState();
 
-  const [gatewayName, setGatewayName] = useState(DEFAULT_GATEWAY_PROFILE.name);
-  const [gatewayUrl, setGatewayUrl] = useState(DEFAULT_GATEWAY_PROFILE.gatewayUrl);
-  const [authToken, setAuthToken] = useState(DEFAULT_GATEWAY_PROFILE.authToken);
-  const [sessionKey, setSessionKey] = useState(DEFAULT_GATEWAY_PROFILE.sessionKey);
-  const [gatewayProfiles, setGatewayProfiles] = useState([DEFAULT_GATEWAY_PROFILE]);
-  const [activeGatewayId, setActiveGatewayId] = useState(DEFAULT_GATEWAY_PROFILE.id);
-
-  const [quickTextLeft, setQuickTextLeft] = useState(DEFAULTS.quickTextLeft);
-  const [quickTextRight, setQuickTextRight] = useState(DEFAULTS.quickTextRight);
-  const [theme, setTheme] = useState(DEFAULTS.theme);
-  const [isAuthTokenVisible, setIsAuthTokenVisible] = useState(false);
-  const [activeNav, setActiveNav] = useState('settings');
-  const [focusedSettingsInput, setFocusedSettingsInput] = useState(null);
-  const [focusedGatewayId, setFocusedGatewayId] = useState(null);
-  const [collapsedGatewayIds, setCollapsedGatewayIds] = useState({});
-  const [quickMenuOpenByGatewayId, setQuickMenuOpenByGatewayId] = useState({});
-  const [forcedSelectionByGatewayId, setForcedSelectionByGatewayId] = useState({});
-
-  const [gatewayRuntimeById, setGatewayRuntimeById] = useState(() => ({
-    [DEFAULT_GATEWAY_PROFILE.id]: createGatewayRuntime(),
-  }));
-
-  const gatewayRuntimeByIdRef = useRef(gatewayRuntimeById);
-  const composerInputRefs = useRef(new Map());
-  const composerFocusTimerRef = useRef(null);
-  const isImeComposingByGatewayIdRef = useRef({});
-  const skipSubmitEditingByGatewayIdRef = useRef({});
-  const forcedSelectionByGatewayIdRef = useRef({});
-  const authTokenInputRef = useRef(null);
-  const rootRef = useRef(null);
-  const lastAutoConnectSignatureByIdRef = useRef({});
-  const manualDisconnectByIdRef = useRef({});
-  const initialAutoNavigationHandledRef = useRef(false);
-  const activeNavRef = useRef(activeNav);
-  const activeGatewayIdRef = useRef(activeGatewayId);
-  const activeSessionKeyRef = useRef(sessionKey);
-  const gatewayProfilesRef = useRef(gatewayProfiles);
-  const lastHandledNotificationRouteSignatureRef = useRef('');
-  const pendingNotificationRouteRef = useRef(null);
-
-  const themeTokens = theme === 'dark' ? THEMES.dark : THEMES.light;
   const {
     clearUnreadForSession,
     copiedMessageByKey,
@@ -107,6 +98,7 @@ export default function useMacosAppRuntime() {
     gatewayProfiles,
     gatewayProfilesRef,
   });
+
   const {
     clearGatewayHistoryRuntime,
     composerHeightByGatewayIdRef,
@@ -124,96 +116,32 @@ export default function useMacosAppRuntime() {
     gatewayRuntimeByIdRef,
   });
 
-  const updateGatewayRuntime = useCallback((gatewayId, updater) => {
-    setGatewayRuntimeById((previous) => {
-      const current = previous[gatewayId] ?? createGatewayRuntime();
-      const next = typeof updater === 'function' ? updater(current) : { ...current, ...updater };
-      if (next === current) return previous;
-      return { ...previous, [gatewayId]: next };
-    });
-  }, []);
+  const {
+    closeAllQuickMenus,
+    currentSessionKeyForGateway,
+    focusComposerForGateway,
+    insertQuickText,
+    setComposerFocusedForGateway,
+    setComposerSelectionForGateway,
+    setComposerTextForGateway,
+    setForcedSelectionForGateway,
+    setImeComposingForGateway,
+    setQuickMenuOpenForGateway,
+  } = useMacosComposerRuntime({
+    activeGatewayId,
+    composerFocusTimerRef,
+    composerInputRefs,
+    forcedSelectionByGatewayIdRef,
+    gatewayProfiles,
+    gatewayRuntimeById,
+    isImeComposingByGatewayIdRef,
+    sessionKey,
+    setFocusedGatewayId,
+    setForcedSelectionByGatewayId,
+    setQuickMenuOpenByGatewayId,
+    updateGatewayRuntime,
+  });
 
-  const currentSessionKeyForGateway = useCallback(
-    (gatewayId) => {
-      if (gatewayId === activeGatewayId) {
-        return normalizeSessionKey(sessionKey);
-      }
-      const profile = gatewayProfiles.find((entry) => entry.id === gatewayId);
-      return normalizeSessionKey(profile?.sessionKey);
-    },
-    [activeGatewayId, gatewayProfiles, sessionKey],
-  );
-
-  const setQuickMenuOpenForGateway = useCallback((gatewayId, isOpen) => {
-    if (!gatewayId) return;
-    setQuickMenuOpenByGatewayId((previous) => {
-      if (!isOpen) {
-        if (!previous[gatewayId]) return previous;
-        const next = { ...previous };
-        delete next[gatewayId];
-        return next;
-      }
-      if (previous[gatewayId]) return previous;
-      return { ...previous, [gatewayId]: true };
-    });
-  }, []);
-
-  const closeAllQuickMenus = useCallback(() => {
-    setQuickMenuOpenByGatewayId((previous) =>
-      Object.keys(previous).length === 0 ? previous : {},
-    );
-  }, []);
-
-  const setImeComposingForGateway = useCallback((gatewayId, isComposing) => {
-    if (!gatewayId) return;
-    if (isComposing) {
-      isImeComposingByGatewayIdRef.current[gatewayId] = true;
-      return;
-    }
-    delete isImeComposingByGatewayIdRef.current[gatewayId];
-  }, []);
-
-  const setForcedSelectionForGateway = useCallback((gatewayId, selection) => {
-    if (!gatewayId) return;
-
-    if (!selection) {
-      delete forcedSelectionByGatewayIdRef.current[gatewayId];
-      setForcedSelectionByGatewayId((previous) => {
-        if (!(gatewayId in previous)) return previous;
-        const next = { ...previous };
-        delete next[gatewayId];
-        return next;
-      });
-      return;
-    }
-
-    const normalized = {
-      start: Number.isFinite(selection.start) ? selection.start : 0,
-      end: Number.isFinite(selection.end) ? selection.end : Number.isFinite(selection.start) ? selection.start : 0,
-    };
-
-    forcedSelectionByGatewayIdRef.current[gatewayId] = normalized;
-    setForcedSelectionByGatewayId((previous) => {
-      const current = previous[gatewayId];
-      if (current && current.start === normalized.start && current.end === normalized.end) {
-        return previous;
-      }
-      return { ...previous, [gatewayId]: normalized };
-    });
-  }, []);
-
-  const focusComposerForGateway = useCallback((gatewayId) => {
-    if (!gatewayId) return;
-    if (composerFocusTimerRef.current) {
-      clearTimeout(composerFocusTimerRef.current);
-    }
-    composerFocusTimerRef.current = setTimeout(() => {
-      composerFocusTimerRef.current = null;
-      const input = composerInputRefs.current.get(gatewayId);
-      input?.focus?.();
-      setFocusedGatewayId(gatewayId);
-    }, 0);
-  }, []);
   const {
     attachmentNoticeByGatewayId,
     attachmentPickerGatewayId,
@@ -270,14 +198,6 @@ export default function useMacosAppRuntime() {
     updateGatewayRuntime,
   });
 
-  const persistSettings = useCallback(async (next) => {
-    try {
-      await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
-    } catch {
-      // Keep running with in-memory values.
-    }
-  }, []);
-
   const applyGatewayProfileToEditor = useCallback((profile) => {
     if (!profile) return;
     setGatewayName(profile.name);
@@ -286,95 +206,7 @@ export default function useMacosAppRuntime() {
     setSessionKey(normalizeSessionKey(profile.sessionKey));
     setIsAuthTokenVisible(false);
     setFocusedSettingsInput(null);
-  }, []);
-
-  const insertQuickText = useCallback(
-    (gatewayId, snippet) => {
-      if (!gatewayId) return;
-      const runtime = gatewayRuntimeById[gatewayId] ?? createGatewayRuntime();
-      const baseText = String(runtime.composerText ?? '');
-      const baseSelection = normalizeComposerSelection(runtime.composerSelection, baseText);
-      const result = insertQuickTextAtSelection({
-        sourceText: baseText,
-        insertText: snippet,
-        selectionStart: baseSelection.start,
-        selectionEnd: baseSelection.end,
-      });
-      const activeSessionKeyForGateway = currentSessionKeyForGateway(gatewayId);
-      updateGatewayRuntime(gatewayId, (current) => ({
-        ...current,
-        composerText: result.nextText,
-        composerSelection: result.selection,
-        composerHeight: estimateComposerHeightFromText(result.nextText),
-        composerBySession: {
-          ...(current.composerBySession ?? {}),
-          [activeSessionKeyForGateway]: {
-            text: result.nextText,
-            selection: result.selection,
-          },
-        },
-      }));
-      setForcedSelectionForGateway(gatewayId, result.selection);
-      setImeComposingForGateway(gatewayId, false);
-    },
-    [
-      currentSessionKeyForGateway,
-      gatewayRuntimeById,
-      setForcedSelectionForGateway,
-      setImeComposingForGateway,
-      updateGatewayRuntime,
-    ],
-  );
-
-  const setComposerTextForGateway = useCallback(
-    (gatewayId, text) => {
-      const activeSessionKeyForGateway = currentSessionKeyForGateway(gatewayId);
-      updateGatewayRuntime(gatewayId, (current) => ({
-        ...current,
-        composerText: text,
-        composerHeight: estimateComposerHeightFromText(text),
-        composerBySession: {
-          ...(current.composerBySession ?? {}),
-          [activeSessionKeyForGateway]: {
-            text,
-            selection: normalizeComposerSelection(current.composerSelection, text),
-          },
-        },
-      }));
-    },
-    [currentSessionKeyForGateway, updateGatewayRuntime],
-  );
-
-  const setComposerSelectionForGateway = useCallback(
-    (gatewayId, selection) => {
-      const activeSessionKeyForGateway = currentSessionKeyForGateway(gatewayId);
-      updateGatewayRuntime(gatewayId, (current) => ({
-        ...current,
-        composerSelection: selection,
-        composerBySession: {
-          ...(current.composerBySession ?? {}),
-          [activeSessionKeyForGateway]: {
-            text: current.composerText,
-            selection,
-          },
-        },
-      }));
-    },
-    [currentSessionKeyForGateway, updateGatewayRuntime],
-  );
-
-  const setComposerFocusedForGateway = useCallback(
-    (gatewayId, focused) => {
-      updateGatewayRuntime(gatewayId, (current) => ({
-        ...current,
-        isComposerFocused: focused,
-      }));
-      if (focused) {
-        setFocusedGatewayId(gatewayId);
-      }
-    },
-    [updateGatewayRuntime],
-  );
+  }, [setAuthToken, setGatewayName, setGatewayUrl, setIsAuthTokenVisible, setSessionKey, setFocusedSettingsInput]);
 
   const {
     handleCreateGatewayProfile,
@@ -413,7 +245,8 @@ export default function useMacosAppRuntime() {
       ...previous,
       [gatewayId]: !previous[gatewayId],
     }));
-  }, []);
+  }, [setCollapsedGatewayIds]);
+
   const {
     activeProfile,
     handleRootKeyDown,
@@ -510,7 +343,6 @@ export default function useMacosAppRuntime() {
     theme,
     updateGatewayRuntime,
   });
-
 
   return {
     activeGatewayId,
