@@ -75,6 +75,7 @@ export default function FileAttachmentPickerSheet({ visible, themeTokens, onPick
   const [pickerReady, setPickerReady] = useState(false);
 
   const html = useMemo(() => buildPickerHtml(), []);
+  const chooseButtonOpacityStyle = pickerReady ? null : styles.buttonDisabled;
 
   const handleMessage = useCallback(
     (event) => {
@@ -151,8 +152,8 @@ export default function FileAttachmentPickerSheet({ visible, themeTokens, onPick
               styles.chooseButton,
               {
                 borderColor: themeTokens?.inputBorderFocus ?? '#2563EB',
-                opacity: pickerReady ? 1 : 0.6,
               },
+              chooseButtonOpacityStyle,
             ]}
             disabled={!pickerReady}
             onPress={handleChooseFile}
@@ -248,6 +249,9 @@ const styles = StyleSheet.create({
   chooseButtonText: {
     fontSize: 13,
     fontWeight: '700',
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
   hiddenWebView: {
     position: 'absolute',

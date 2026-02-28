@@ -36,8 +36,10 @@ import {
   normalizeText,
 } from '../logic/app-logic';
 import useMacosAttachmentRuntime from './useMacosAttachmentRuntime';
+import useMacosGatewayProfileActions from './useMacosGatewayProfileActions';
 import useMacosHistoryScrollRuntime from './useMacosHistoryScrollRuntime';
 import useMacosNotificationRuntime from './useMacosNotificationRuntime';
+import useMacosRootKeyHandler from './useMacosRootKeyHandler';
 
 const identityCache = new Map();
 
@@ -932,206 +934,36 @@ export default function useMacosAppRuntime() {
     [updateGatewayRuntime],
   );
 
-  const handleSelectGatewayProfile = useCallback(
-    (gatewayId, nextNav = 'settings') => {
-      if (!gatewayId) return;
-      const profile = gatewayProfiles.find((entry) => entry.id === gatewayId);
-      if (!profile) return;
-      setAttachmentPickerGatewayId(null);
-
-      if (gatewayId !== activeGatewayId) {
-        setActiveGatewayId(profile.id);
-        setCollapsedGatewayIds((previous) => ({
-          ...previous,
-          [profile.id]: false,
-        }));
-      }
-      setQuickMenuOpenForGateway(profile.id, false);
-      applyGatewayProfileToEditor(profile);
-      setActiveNav(nextNav);
-      if (nextNav === 'chat') {
-        clearUnreadForSession(profile.id, normalizeSessionKey(profile.sessionKey));
-        focusComposerForGateway(profile.id);
-      }
-    },
-    [
-      activeGatewayId,
-      applyGatewayProfileToEditor,
-      clearUnreadForSession,
-      focusComposerForGateway,
-      gatewayProfiles,
-      setAttachmentPickerGatewayId,
-      setQuickMenuOpenForGateway,
-    ],
-  );
-
-  const handleCreateGatewayProfile = useCallback(() => {
-    const nextProfile = createGatewayProfile(
-      {
-        name: `Gateway ${gatewayProfiles.length + 1}`,
-        sessionKey: DEFAULTS.sessionKey,
-        sessions: [DEFAULTS.sessionKey],
-      },
-      gatewayProfiles.length + 1,
-    );
-
-    setGatewayProfiles((previous) => [...previous, nextProfile]);
-    setActiveGatewayId(nextProfile.id);
-    setCollapsedGatewayIds((previous) => ({
-      ...previous,
-      [nextProfile.id]: false,
-    }));
-    applyGatewayProfileToEditor(nextProfile);
-    setFocusedGatewayId(nextProfile.id);
-    setActiveNav('settings');
-  }, [applyGatewayProfileToEditor, gatewayProfiles.length]);
-
-  const handleDeleteActiveGatewayProfile = useCallback(() => {
-    if (gatewayProfiles.length <= 1) return;
-
-    const nextProfiles = gatewayProfiles.filter((entry) => entry.id !== activeGatewayId);
-    const removedProfile = gatewayProfiles.find((entry) => entry.id === activeGatewayId);
-    const nextActiveProfile = nextProfiles[0];
-
-    if (!nextActiveProfile) return;
-
-    if (removedProfile) {
-      disconnectGateway(removedProfile.id, { manual: false });
-      disconnectAndRemoveController(removedProfile.id);
-    }
-
-    setGatewayProfiles(nextProfiles);
-    setAttachmentPickerGatewayId(null);
-    setGatewayRuntimeById((previous) => buildRuntimeMap(nextProfiles, previous));
-    setCollapsedGatewayIds((previous) => {
-      const next = { ...previous };
-      delete next[activeGatewayId];
-      return next;
-    });
-    setActiveGatewayId(nextActiveProfile.id);
-    applyGatewayProfileToEditor(nextActiveProfile);
-
-    if (focusedGatewayId === activeGatewayId) {
-      setFocusedGatewayId(nextActiveProfile.id);
-    }
-  }, [
+  const {
+    handleCreateGatewayProfile,
+    handleCreateSession,
+    handleDeleteActiveGatewayProfile,
+    handleSelectGatewayProfile,
+    handleSelectSession,
+  } = useMacosGatewayProfileActions({
     activeGatewayId,
     applyGatewayProfileToEditor,
+    clearUnreadForSession,
+    connectGateway,
     disconnectAndRemoveController,
     disconnectGateway,
+    focusComposerForGateway,
     focusedGatewayId,
     gatewayProfiles,
+    gatewayRuntimeById,
+    setActiveGatewayId,
+    setActiveNav,
     setAttachmentPickerGatewayId,
-  ]);
-
-  const handleSelectSession = useCallback(
-    (gatewayId, nextSessionKey) => {
-      const normalizedSessionKey = normalizeSessionKey(nextSessionKey);
-      const profile = gatewayProfiles.find((entry) => entry.id === gatewayId);
-      const currentSessionForGateway = normalizeSessionKey(profile?.sessionKey);
-
-      updateGatewayRuntime(gatewayId, (current) => {
-        const composerBySession = {
-          ...(current.composerBySession ?? {}),
-          [currentSessionForGateway]: {
-            text: current.composerText,
-            selection: normalizeComposerSelection(current.composerSelection, current.composerText),
-          },
-        };
-        const attachmentsBySession = {
-          ...(current.attachmentsBySession ?? {}),
-          [currentSessionForGateway]: Array.isArray(current.pendingAttachments)
-            ? current.pendingAttachments
-            : [],
-        };
-        const nextDraft = composerBySession[normalizedSessionKey] ?? {
-          text: '',
-          selection: { start: 0, end: 0 },
-        };
-        const nextAttachments = Array.isArray(attachmentsBySession[normalizedSessionKey])
-          ? attachmentsBySession[normalizedSessionKey]
-          : [];
-        const nextSelection = normalizeComposerSelection(nextDraft.selection, nextDraft.text);
-
-        return {
-          ...current,
-          composerBySession: {
-            ...composerBySession,
-            [normalizedSessionKey]: {
-              text: nextDraft.text,
-              selection: nextSelection,
-            },
-          },
-          attachmentsBySession: {
-            ...attachmentsBySession,
-            [normalizedSessionKey]: nextAttachments,
-          },
-          composerText: nextDraft.text,
-          composerSelection: nextSelection,
-          composerHeight: estimateComposerHeightFromText(nextDraft.text),
-          pendingAttachments: nextAttachments,
-        };
-      });
-
-      setGatewayProfiles((previous) =>
-        previous.map((entry) => {
-          if (entry.id !== gatewayId) return entry;
-          return {
-            ...entry,
-            sessionKey: normalizedSessionKey,
-            sessions: mergeSessionKeys([normalizedSessionKey], entry.sessions),
-          };
-        }),
-      );
-
-      if (gatewayId !== activeGatewayId) {
-        setActiveGatewayId(gatewayId);
-      }
-      setSessionKey(normalizedSessionKey);
-      setActiveNav('chat');
-      setFocusedGatewayId(gatewayId);
-      setAttachmentPickerGatewayId(null);
-      setQuickMenuOpenForGateway(gatewayId, false);
-      setForcedSelectionForGateway(gatewayId, null);
-      setImeComposingForGateway(gatewayId, false);
-      clearUnreadForSession(gatewayId, normalizedSessionKey);
-      focusComposerForGateway(gatewayId);
-
-      const runtime = gatewayRuntimeById[gatewayId];
-      const connectionState = runtime?.controllerState?.connectionState ?? 'disconnected';
-
-      if (
-        connectionState === 'connected' ||
-        connectionState === 'connecting' ||
-        connectionState === 'reconnecting'
-      ) {
-        connectGateway(gatewayId, normalizedSessionKey).catch(() => {
-          // Surface via controller banner state.
-        });
-      }
-    },
-    [
-      activeGatewayId,
-      clearUnreadForSession,
-      connectGateway,
-      focusComposerForGateway,
-      gatewayProfiles,
-      gatewayRuntimeById,
-      setAttachmentPickerGatewayId,
-      setForcedSelectionForGateway,
-      setImeComposingForGateway,
-      setQuickMenuOpenForGateway,
-      updateGatewayRuntime,
-    ],
-  );
-
-  const handleCreateSession = useCallback(
-    (gatewayId) => {
-      const nextSessionKey = `session-${Date.now().toString(36)}`;
-      handleSelectSession(gatewayId, nextSessionKey);
-    },
-    [handleSelectSession],
-  );
+    setCollapsedGatewayIds,
+    setFocusedGatewayId,
+    setForcedSelectionForGateway,
+    setGatewayProfiles,
+    setGatewayRuntimeById,
+    setImeComposingForGateway,
+    setQuickMenuOpenForGateway,
+    setSessionKey,
+    updateGatewayRuntime,
+  });
 
   const applyNotificationRoute = useCallback(
     (route) => {
@@ -1444,78 +1276,20 @@ export default function useMacosAppRuntime() {
     return { label: 'Disconnected', color: '#6b7280', bg: 'rgba(107,114,128,0.12)' };
   }, [connectedGatewayIds.length, gatewayProfiles, gatewayRuntimeById]);
 
-  const handleRootKeyDown = useCallback(
-    (event) => {
-      const nativeEvent = event?.nativeEvent ?? {};
-      const key = String(nativeEvent.key ?? '');
-      const hasMeta = Boolean(nativeEvent.metaKey);
-      const hasFocusedGateway =
-        focusedGatewayId && gatewayProfiles.some((profile) => profile.id === focusedGatewayId);
-      const fallbackGatewayId = activeNav === 'chat' ? activeGatewayId : null;
-      const focusedTargetGatewayId = hasFocusedGateway ? focusedGatewayId : fallbackGatewayId;
-
-      if (key === 'Escape') {
-        if (!focusedTargetGatewayId) return;
-        if (quickMenuOpenByGatewayId[focusedTargetGatewayId]) {
-          setQuickMenuOpenForGateway(focusedTargetGatewayId, false);
-          return;
-        }
-        const runtime = gatewayRuntimeById[focusedTargetGatewayId];
-        const bannerMessage = runtime?.controllerState?.banner?.message;
-
-        if (bannerMessage) {
-          const controller = getController(focusedTargetGatewayId);
-          controller?.clearBanner();
-          return;
-        }
-
-        const activeSessionForGateway = currentSessionKeyForGateway(focusedTargetGatewayId);
-        updateGatewayRuntime(focusedTargetGatewayId, (current) => ({
-          ...current,
-          composerText: '',
-          composerSelection: { start: 0, end: 0 },
-          composerHeight: COMPOSER_MIN_HEIGHT,
-          pendingAttachments: [],
-          attachmentsBySession: {
-            ...(current.attachmentsBySession ?? {}),
-            [activeSessionForGateway]: [],
-          },
-        }));
-        return;
-      }
-
-      if (hasMeta && key.toLowerCase() === 'r') {
-        event?.preventDefault?.();
-
-        if (focusedTargetGatewayId) {
-          refreshHistory(focusedTargetGatewayId).catch(() => {
-            // surfaced via banner
-          });
-          return;
-        }
-
-        connectedGatewayIds.forEach((gatewayId) => {
-          refreshHistory(gatewayId).catch(() => {
-            // surfaced via banner
-          });
-        });
-      }
-    },
-    [
-      activeGatewayId,
-      activeNav,
-      connectedGatewayIds,
-      currentSessionKeyForGateway,
-      focusedGatewayId,
-      gatewayProfiles,
-      gatewayRuntimeById,
-      getController,
-      quickMenuOpenByGatewayId,
-      refreshHistory,
-      setQuickMenuOpenForGateway,
-      updateGatewayRuntime,
-    ],
-  );
+  const handleRootKeyDown = useMacosRootKeyHandler({
+    activeGatewayId,
+    activeNav,
+    connectedGatewayIds,
+    currentSessionKeyForGateway,
+    focusedGatewayId,
+    gatewayProfiles,
+    gatewayRuntimeById,
+    getController,
+    quickMenuOpenByGatewayId,
+    refreshHistory,
+    setQuickMenuOpenForGateway,
+    updateGatewayRuntime,
+  });
 
 
   return {

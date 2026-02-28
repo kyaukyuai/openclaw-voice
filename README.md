@@ -454,6 +454,10 @@ If your environment cannot access npm network during smoke test:
 OPENCLAW_SMOKE_SKIP_INSTALL=1 npm run smoke:pack-install
 ```
 
+Before release/public rollout, run:
+
+- [Release Readiness Checklist](docs/RELEASE_READINESS_CHECKLIST.md)
+
 ## Security Notes
 
 - Do not commit private gateway tokens.
@@ -523,6 +527,10 @@ This repo uses two entry contexts:
 
 - App runtime: `package.json.main = index.ts`
 - npm package tarball: `main = ./dist/package.js` (switched automatically during pack/publish)
+
+Release gate:
+
+- [Release Readiness Checklist](docs/RELEASE_READINESS_CHECKLIST.md)
 
 Recommended release flow (automated):
 

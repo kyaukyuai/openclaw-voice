@@ -8,6 +8,14 @@ jest.mock('../components/FileAttachmentPickerSheet', () => () => null);
 jest.mock('../src/components/TurnRow', () => () => null);
 jest.mock('../src/components/DateRow', () => () => null);
 jest.mock('../src/components/SettingsView', () => () => null);
+jest.mock('react-native-safe-area-context', () => {
+  const ReactLocal = require('react');
+  const { View } = require('react-native');
+  return {
+    SafeAreaProvider: ({ children }) => ReactLocal.createElement(View, null, children),
+    SafeAreaView: ({ children, ...props }) => ReactLocal.createElement(View, props, children),
+  };
+});
 jest.mock('../../../src/shared', () => ({
   formatUpdatedAtLabel: jest.fn(() => 'Updated now'),
   groupTurnsByDate: jest.fn(() => []),

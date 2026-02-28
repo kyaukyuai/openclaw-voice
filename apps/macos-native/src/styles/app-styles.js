@@ -100,6 +100,24 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
   },
+  opacityHalf: {
+    opacity: 0.5,
+  },
+  opacitySoft: {
+    opacity: 0.65,
+  },
+  opacityMuted: {
+    opacity: 0.7,
+  },
+  fontWeight500: {
+    fontWeight: '500',
+  },
+  fontWeight600: {
+    fontWeight: '600',
+  },
+  fontWeight700: {
+    fontWeight: '700',
+  },
   unreadBadge: {
     minWidth: 20,
     height: 18,
@@ -502,6 +520,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: COMPOSER_LINE_HEIGHT,
     textAlignVertical: 'top',
+    fontStyle: 'normal',
   },
   actionCircle: {
     width: 36,
@@ -719,6 +738,9 @@ const styles = StyleSheet.create({
     borderWidth: 1.25,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  insertActionTransparent: {
+    backgroundColor: 'transparent',
   },
   insertActionText: {
     fontSize: 12,

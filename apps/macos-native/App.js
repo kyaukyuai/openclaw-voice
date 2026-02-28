@@ -4,12 +4,12 @@ import {
   FlatList,
   Image,
   Pressable,
-  SafeAreaView,
   ScrollView,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { formatUpdatedAtLabel, groupTurnsByDate } from '../../src/shared';
 import DateRow from './src/components/DateRow';
 import SettingsView from './src/components/SettingsView';
@@ -171,6 +171,9 @@ export default function App() {
       const rightQuickTextValue = normalizeText(quickTextRight);
       const canInsertLeftQuick = leftQuickTextValue.length > 0;
       const canInsertRightQuick = rightQuickTextValue.length > 0;
+      const connectActionOpacityStyle = !identityReady || isConnecting ? styles.opacityHalf : null;
+      const disconnectActionOpacityStyle = canDisconnectGateway ? null : styles.opacitySoft;
+      const attachmentActionOpacityStyle = controllerState.isSending ? styles.opacitySoft : null;
       const sendDisabledReason =
         controllerState.connectionState !== 'connected'
           ? isReconnecting
@@ -343,8 +346,8 @@ export default function App() {
                 styles.inlinePrimary,
                 {
                   backgroundColor: SEMANTIC.blue,
-                  opacity: !identityReady || isConnecting ? 0.5 : 1,
                 },
+                connectActionOpacityStyle,
               ]}
               disabled={!identityReady || isConnecting}
               accessibilityRole="button"
@@ -372,8 +375,8 @@ export default function App() {
                 {
                   backgroundColor: themeTokens.card,
                   borderColor: themeTokens.inputBorder,
-                  opacity: canDisconnectGateway ? 1 : 0.65,
                 },
+                disconnectActionOpacityStyle,
               ]}
               disabled={!canDisconnectGateway}
               accessibilityRole="button"
@@ -680,7 +683,6 @@ export default function App() {
                     : themeTokens.inputBorder,
                   color: themeTokens.textPrimary,
                   height: composerHeight,
-                  fontStyle: 'normal',
                 },
               ]}
               value={runtime.composerText}
@@ -813,8 +815,8 @@ export default function App() {
                 {
                   backgroundColor: themeTokens.card,
                   borderColor: themeTokens.inputBorder,
-                  opacity: controllerState.isSending ? 0.65 : 1,
                 },
+                attachmentActionOpacityStyle,
               ]}
               disabled={controllerState.isSending}
               onPress={() => {
@@ -991,7 +993,6 @@ export default function App() {
                 styles.attachmentStatusText,
                 {
                   color: composerStatusColor,
-                  opacity: 1,
                 },
               ]}
             >
@@ -1081,19 +1082,17 @@ export default function App() {
     );
   }, [activeProfile, renderGatewayCard, scheduleHistoryBottomSync, themeTokens]);
 
-  if (booting) {
-    return (
-      <SafeAreaView style={[styles.bootScreen, { backgroundColor: themeTokens.bg }]}>
-        <Text style={[styles.bootText, { color: themeTokens.textSecondary }]}>Booting macOS workspace...</Text>
-      </SafeAreaView>
-    );
-  }
-
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: themeTokens.bg }]}> 
-      <View ref={rootRef} style={styles.outer} focusable onKeyDown={handleRootKeyDown}>
-        <View style={[styles.window, { backgroundColor: themeTokens.bg }]}> 
-          <View style={styles.windowBody}>
+    <SafeAreaProvider>
+      {booting ? (
+        <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={[styles.bootScreen, { backgroundColor: themeTokens.bg }]}>
+          <Text style={[styles.bootText, { color: themeTokens.textSecondary }]}>Booting macOS workspace...</Text>
+        </SafeAreaView>
+      ) : (
+        <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={[styles.safeArea, { backgroundColor: themeTokens.bg }]}> 
+          <View ref={rootRef} style={styles.outer} focusable onKeyDown={handleRootKeyDown}>
+            <View style={[styles.window, { backgroundColor: themeTokens.bg }]}> 
+              <View style={styles.windowBody}>
             <View
               style={[
                 styles.sidebar,
@@ -1121,6 +1120,17 @@ export default function App() {
                   }, 0);
                   const isActiveGateway = profile.id === activeGatewayId;
                   const isCollapsed = collapsedGatewayIds[profile.id] === true;
+                  const gatewayHeaderItemStyle = isActiveGateway
+                    ? { backgroundColor: themeTokens.sideActiveBg }
+                    : null;
+                  const gatewayHeaderLabelStyle = [
+                    {
+                      color: isActiveGateway
+                        ? themeTokens.sideActiveInk
+                        : themeTokens.textSecondary,
+                    },
+                    isActiveGateway ? styles.fontWeight700 : styles.fontWeight600,
+                  ];
 
                   return (
                     <View key={profile.id} style={styles.gatewayGroup}>
@@ -1130,11 +1140,7 @@ export default function App() {
                           style={[
                             styles.sideItem,
                             styles.gatewayHeaderMain,
-                            {
-                              backgroundColor: isActiveGateway
-                                ? themeTokens.sideActiveBg
-                                : 'transparent',
-                            },
+                            gatewayHeaderItemStyle,
                           ]}
                         >
                           <View
@@ -1149,12 +1155,7 @@ export default function App() {
                             numberOfLines={1}
                             style={[
                               styles.sideItemLabel,
-                              {
-                                color: isActiveGateway
-                                  ? themeTokens.sideActiveInk
-                                  : themeTokens.textSecondary,
-                                fontWeight: isActiveGateway ? '700' : '600',
-                              },
+                              ...gatewayHeaderLabelStyle,
                             ]}
                           >
                             {profile.name}
@@ -1204,17 +1205,24 @@ export default function App() {
                           const isActiveSession =
                             isActiveGateway && knownSessionKey === profile.sessionKey;
                           const unreadCount = Number(unreadBySession[knownSessionKey] ?? 0);
+                          const sessionItemStyle = isActiveSession
+                            ? { backgroundColor: themeTokens.sideActiveBg }
+                            : null;
+                          const sessionTextStyle = [
+                            {
+                              color: isActiveSession
+                                ? themeTokens.sideActiveInk
+                                : themeTokens.textMuted,
+                            },
+                            isActiveSession ? styles.fontWeight700 : styles.fontWeight500,
+                          ];
 
                           return (
                             <Pressable
                               key={`${profile.id}:${knownSessionKey}`}
                               style={[
                                 styles.gatewaySessionItem,
-                                {
-                                  backgroundColor: isActiveSession
-                                    ? themeTokens.sideActiveBg
-                                    : 'transparent',
-                                },
+                                sessionItemStyle,
                               ]}
                               accessibilityRole="button"
                               accessibilityLabel={`Select session ${knownSessionKey}`}
@@ -1226,12 +1234,7 @@ export default function App() {
                                 numberOfLines={1}
                                 style={[
                                   styles.gatewaySessionItemText,
-                                  {
-                                    color: isActiveSession
-                                      ? themeTokens.sideActiveInk
-                                      : themeTokens.textMuted,
-                                    fontWeight: isActiveSession ? '700' : '500',
-                                  },
+                                  ...sessionTextStyle,
                                 ]}
                               >
                                 {knownSessionKey}
@@ -1285,8 +1288,8 @@ export default function App() {
                               styles.gatewaySessionItemText,
                               {
                                 color: themeTokens.textSecondary,
-                                fontWeight: '600',
                               },
+                              styles.fontWeight600,
                             ]}
                           >
                             + New Session
@@ -1304,9 +1307,7 @@ export default function App() {
                 style={[
                   styles.sideItem,
                   styles.settingsNavItem,
-                  {
-                    backgroundColor: activeNav === 'settings' ? themeTokens.sideActiveBg : 'transparent',
-                  },
+                  activeNav === 'settings' ? { backgroundColor: themeTokens.sideActiveBg } : null,
                 ]}
                 onPress={() => setActiveNav('settings')}
               >
@@ -1315,8 +1316,8 @@ export default function App() {
                     styles.sideItemLabel,
                     {
                       color: activeNav === 'settings' ? themeTokens.sideActiveInk : themeTokens.textSecondary,
-                      fontWeight: activeNav === 'settings' ? '700' : '600',
                     },
+                    activeNav === 'settings' ? styles.fontWeight700 : styles.fontWeight600,
                   ]}
                 >
                   Settings
@@ -1381,15 +1382,17 @@ export default function App() {
                 renderSelectedSession()
               )}
             </View>
+              </View>
+            </View>
           </View>
-        </View>
-      </View>
-      <FileAttachmentPickerSheet
-        visible={Boolean(attachmentPickerGatewayId)}
-        themeTokens={themeTokens}
-        onClose={() => setAttachmentPickerGatewayId(null)}
-        onPick={handleAttachmentPick}
-      />
-    </SafeAreaView>
+          <FileAttachmentPickerSheet
+            visible={Boolean(attachmentPickerGatewayId)}
+            themeTokens={themeTokens}
+            onClose={() => setAttachmentPickerGatewayId(null)}
+            onPick={handleAttachmentPick}
+          />
+        </SafeAreaView>
+      )}
+    </SafeAreaProvider>
   );
 }

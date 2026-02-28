@@ -72,6 +72,40 @@ export default function SettingsView({
     const settingsShadowStyle = null;
 
     const maskedAuthTokenPreview = authToken.length > 0 ? '●'.repeat(authToken.length) : '';
+    const removeGatewayActionStyle = {
+      borderColor: canDeleteGatewayProfile ? 'rgba(220,38,38,0.35)' : themeTokens.inputBorder,
+      backgroundColor: themeTokens.card,
+    };
+    const removeGatewayActionOpacityStyle = canDeleteGatewayProfile ? null : styles.opacitySoft;
+    const removeGatewayTextColorStyle = {
+      color: canDeleteGatewayProfile ? '#B91C1C' : themeTokens.textDisabled,
+    };
+    const gatewayConnectedHintStyle = {
+      backgroundColor: isReconnecting ? SEMANTIC.amberSoft : SEMANTIC.greenSoft,
+      borderColor: isReconnecting ? 'rgba(217,119,6,0.20)' : 'rgba(5,150,105,0.18)',
+    };
+    const gatewayConnectActionOpacityStyle = !identityReady || isConnecting ? styles.opacityHalf : null;
+    const gatewayDisconnectActionOpacityStyle = canDisconnectGateway ? null : styles.opacitySoft;
+    const muteForegroundRowOpacityStyle = notificationSettings.enabled ? null : styles.opacityMuted;
+    const muteForegroundTrackOpacityStyle = notificationSettings.enabled ? null : styles.opacityMuted;
+    const muteForegroundThumbStyle = {
+      backgroundColor:
+        notificationSettings.enabled && notificationSettings.muteForeground
+          ? '#ffffff'
+          : themeTokens.textDisabled,
+      transform: [
+        {
+          translateX:
+            notificationSettings.enabled && notificationSettings.muteForeground
+              ? 14
+              : 0,
+        },
+      ],
+    };
+    const enableNotificationThumbStyle = {
+      backgroundColor: notificationSettings.enabled ? '#ffffff' : themeTokens.textDisabled,
+      transform: [{ translateX: notificationSettings.enabled ? 14 : 0 }],
+    };
 
     return (
       <ScrollView
@@ -144,11 +178,8 @@ export default function SettingsView({
             <Pressable
               style={[
                 styles.secondaryAction,
-                {
-                  borderColor: canDeleteGatewayProfile ? 'rgba(220,38,38,0.35)' : themeTokens.inputBorder,
-                  backgroundColor: themeTokens.card,
-                  opacity: canDeleteGatewayProfile ? 1 : 0.65,
-                },
+                removeGatewayActionStyle,
+                removeGatewayActionOpacityStyle,
               ]}
               disabled={!canDeleteGatewayProfile}
               onPress={handleDeleteActiveGatewayProfile}
@@ -156,9 +187,7 @@ export default function SettingsView({
               <Text
                 style={[
                   styles.secondaryActionText,
-                  {
-                    color: canDeleteGatewayProfile ? '#B91C1C' : themeTokens.textDisabled,
-                  },
+                  removeGatewayTextColorStyle,
                 ]}
               >
                 Remove Active
@@ -180,10 +209,7 @@ export default function SettingsView({
             <View
               style={[
                 styles.gatewayConnectedHint,
-                {
-                  backgroundColor: isReconnecting ? SEMANTIC.amberSoft : SEMANTIC.greenSoft,
-                  borderColor: isReconnecting ? 'rgba(217,119,6,0.20)' : 'rgba(5,150,105,0.18)',
-                },
+                gatewayConnectedHintStyle,
               ]}
             >
               <View
@@ -386,8 +412,8 @@ export default function SettingsView({
                 styles.primaryAction,
                 {
                   backgroundColor: SEMANTIC.blue,
-                  opacity: !identityReady || isConnecting ? 0.5 : 1,
                 },
+                gatewayConnectActionOpacityStyle,
               ]}
               disabled={!identityReady || isConnecting}
               accessibilityRole="button"
@@ -410,8 +436,8 @@ export default function SettingsView({
                 {
                   borderColor: themeTokens.inputBorder,
                   backgroundColor: themeTokens.card,
-                  opacity: canDisconnectGateway ? 1 : 0.65,
                 },
+                gatewayDisconnectActionOpacityStyle,
               ]}
               disabled={!canDisconnectGateway}
               accessibilityRole="button"
@@ -471,10 +497,7 @@ export default function SettingsView({
               <View
                 style={[
                   styles.notificationToggleThumb,
-                  {
-                    backgroundColor: notificationSettings.enabled ? '#ffffff' : themeTokens.textDisabled,
-                    transform: [{ translateX: notificationSettings.enabled ? 14 : 0 }],
-                  },
+                  enableNotificationThumbStyle,
                 ]}
               />
             </View>
@@ -486,8 +509,8 @@ export default function SettingsView({
               {
                 borderColor: themeTokens.inputBorder,
                 backgroundColor: themeTokens.input,
-                opacity: notificationSettings.enabled ? 1 : 0.7,
               },
+              muteForegroundRowOpacityStyle,
             ]}
             onPress={toggleMuteForegroundNotifications}
             disabled={!notificationSettings.enabled}
@@ -527,27 +550,14 @@ export default function SettingsView({
                       ? SEMANTIC.green
                       : themeTokens.card,
                   borderColor: themeTokens.inputBorder,
-                  opacity: notificationSettings.enabled ? 1 : 0.7,
                 },
+                muteForegroundTrackOpacityStyle,
               ]}
             >
               <View
                 style={[
                   styles.notificationToggleThumb,
-                  {
-                    backgroundColor:
-                      notificationSettings.enabled && notificationSettings.muteForeground
-                        ? '#ffffff'
-                        : themeTokens.textDisabled,
-                    transform: [
-                      {
-                        translateX:
-                          notificationSettings.enabled && notificationSettings.muteForeground
-                            ? 14
-                            : 0,
-                      },
-                    ],
-                  },
+                  muteForegroundThumbStyle,
                 ]}
               />
             </View>
@@ -560,6 +570,15 @@ export default function SettingsView({
             {gatewayProfiles.map((profile) => {
               const enabledForGateway = isGatewayNotificationEnabled(profile.id);
               const enabledForToggle = notificationSettings.enabled;
+              const gatewayRowOpacityStyle = enabledForToggle ? null : styles.opacityMuted;
+              const gatewayToggleTrackOpacityStyle = enabledForToggle ? null : styles.opacityMuted;
+              const gatewayToggleThumbStyle = {
+                backgroundColor:
+                  enabledForToggle && enabledForGateway
+                    ? '#ffffff'
+                    : themeTokens.textDisabled,
+                transform: [{ translateX: enabledForToggle && enabledForGateway ? 14 : 0 }],
+              };
               return (
                 <Pressable
                   key={`notification:${profile.id}`}
@@ -568,8 +587,8 @@ export default function SettingsView({
                     {
                       borderColor: themeTokens.inputBorder,
                       backgroundColor: themeTokens.input,
-                      opacity: enabledForToggle ? 1 : 0.7,
                     },
+                    gatewayRowOpacityStyle,
                   ]}
                   disabled={!enabledForToggle}
                   onPress={() => toggleGatewayNotifications(profile.id)}
@@ -605,27 +624,21 @@ export default function SettingsView({
                   <View
                     style={[
                       styles.notificationToggleTrack,
-                      {
-                        backgroundColor:
-                          enabledForToggle && enabledForGateway ? SEMANTIC.green : themeTokens.card,
-                        borderColor: themeTokens.inputBorder,
-                        opacity: enabledForToggle ? 1 : 0.7,
-                      },
+                    {
+                      backgroundColor:
+                        enabledForToggle && enabledForGateway ? SEMANTIC.green : themeTokens.card,
+                      borderColor: themeTokens.inputBorder,
+                    },
+                    gatewayToggleTrackOpacityStyle,
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.notificationToggleThumb,
+                      gatewayToggleThumbStyle,
                     ]}
-                  >
-                    <View
-                      style={[
-                        styles.notificationToggleThumb,
-                        {
-                          backgroundColor:
-                            enabledForToggle && enabledForGateway
-                              ? '#ffffff'
-                              : themeTokens.textDisabled,
-                          transform: [{ translateX: enabledForToggle && enabledForGateway ? 14 : 0 }],
-                        },
-                      ]}
-                    />
-                  </View>
+                  />
+                </View>
                 </Pressable>
               );
             })}
@@ -697,11 +710,11 @@ export default function SettingsView({
             <Pressable
               style={[
                 styles.insertAction,
+                styles.insertActionTransparent,
                 {
                   borderColor: themeTokens.inputBorder,
-                  backgroundColor: 'transparent',
-                  opacity: canInsertQuickText ? 1 : 0.65,
                 },
+                canInsertQuickText ? null : styles.opacitySoft,
               ]}
               disabled={!canInsertQuickText}
               accessibilityState={{ disabled: !canInsertQuickText }}
@@ -722,11 +735,11 @@ export default function SettingsView({
             <Pressable
               style={[
                 styles.insertAction,
+                styles.insertActionTransparent,
                 {
                   borderColor: themeTokens.inputBorder,
-                  backgroundColor: 'transparent',
-                  opacity: canInsertQuickText ? 1 : 0.65,
                 },
+                canInsertQuickText ? null : styles.opacitySoft,
               ]}
               disabled={!canInsertQuickText}
               accessibilityState={{ disabled: !canInsertQuickText }}
