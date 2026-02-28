@@ -551,6 +551,8 @@ git push --tags
 ```
 
 4. GitHub Actions `Release` workflow runs on `v*` tag:
+- `gitleaks detect --source . --redact` (secret scan gate)
+- `npm audit --omit=dev` (production dependency audit gate)
 - Version/tag consistency check
 - `typecheck`, `lint`, `test`, `smoke:pack-install`
 - `npm publish --access public --provenance` (skips if version is already published)

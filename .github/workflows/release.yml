@@ -20,6 +20,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | sh -s -- -b /usr/local/bin v8.24.2
+
+      - name: Secret scan (gitleaks)
+        run: gitleaks detect --source . --redact
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -30,6 +39,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Dependency audit (prod only)
+        run: npm audit --omit=dev
 
       - name: Verify tag matches package version
         if: startsWith(github.ref, 'refs/tags/v')
