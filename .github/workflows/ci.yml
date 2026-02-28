@@ -71,6 +71,9 @@ jobs:
       - name: Lint macOS native app
         run: npm --prefix apps/macos-native run lint
 
+      - name: Enforce macOS lint baseline (no-shadow/no-unused-vars)
+        run: npm --prefix apps/macos-native run lint:baseline
+
       - name: Test macOS native app
         run: npm --prefix apps/macos-native run test -- --watch=false
 

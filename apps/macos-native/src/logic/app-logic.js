@@ -57,7 +57,7 @@ export function normalizeUnreadByGatewaySession(rawUnread, profiles = []) {
     const nextSessionMap = {};
     Object.entries(sessionMap).forEach(([session, count]) => {
       const normalizedSession = normalizeSessionKey(session);
-      const normalizedCount = Math.max(0, Number(count ?? 0) | 0);
+      const normalizedCount = Math.max(0, Math.trunc(Number(count ?? 0)));
       if (!normalizedSession || normalizedCount <= 0) return;
       nextSessionMap[normalizedSession] = normalizedCount;
     });
@@ -563,4 +563,3 @@ export function statusRowMeta(controllerState, identityPersistWarning, themeToke
     spinning: false,
   };
 }
-

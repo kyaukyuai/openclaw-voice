@@ -511,6 +511,7 @@ GitHub Actions runs on push/PR:
 `macos-native-checks` (macOS runner) also validates:
 
 - `npm --prefix apps/macos-native run lint`
+- `npm --prefix apps/macos-native run lint:baseline` (`no-shadow` / `no-unused-vars` enforced)
 - `npm --prefix apps/macos-native run test -- --watch=false`
 - `npm --prefix apps/macos-native exec react-native start --help` (startup smoke)
 

@@ -737,9 +737,9 @@ export default function App() {
                   tryImportFromClipboardShortcut(profile.id);
                 }
 
-                const imeComposing = isImeComposingByGatewayIdRef.current[profile.id] === true;
+                const isImeComposingNow = isImeComposingByGatewayIdRef.current[profile.id] === true;
 
-                if (!isEnter && imeComposing) {
+                if (!isEnter && isImeComposingNow) {
                   if (!hasShift && key !== 'Shift') {
                     setImeComposingForGateway(profile.id, false);
                   }
@@ -747,7 +747,7 @@ export default function App() {
                 }
 
                 if (isEnter && !hasModifier) {
-                  if (imeComposing) {
+                  if (isImeComposingNow) {
                     setImeComposingForGateway(profile.id, false);
                     return;
                   }
@@ -758,7 +758,7 @@ export default function App() {
                 }
 
                 if (isEnter && !hasAlt && !hasShift && (hasMeta || hasCtrl)) {
-                  if (imeComposing) {
+                  if (isImeComposingNow) {
                     setImeComposingForGateway(profile.id, false);
                     return;
                   }
@@ -1216,6 +1216,8 @@ export default function App() {
                                     : 'transparent',
                                 },
                               ]}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Select session ${knownSessionKey}`}
                               onPress={() => {
                                 handleSelectSession(profile.id, knownSessionKey);
                               }}

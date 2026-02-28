@@ -8,6 +8,7 @@
     "macos": "react-native run-macos",
     "bootstrap": "pod install --project-directory=macos",
     "lint": "eslint .",
+    "lint:baseline": "eslint . --quiet --rule \"no-shadow:error\" --rule \"no-unused-vars:error\"",
     "start": "react-native start",
     "start:macos": "react-native start --reset-cache",
     "test": "jest --passWithNoTests"
