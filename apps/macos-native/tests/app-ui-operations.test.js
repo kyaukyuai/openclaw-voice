@@ -335,4 +335,62 @@ describe('macOS App UI operations', () => {
     expect(runtime.setQuickMenuOpenForGateway).toHaveBeenCalledWith('gateway-alpha', false);
     expect(runtime.focusComposerForGateway).toHaveBeenCalledWith('gateway-alpha');
   });
+
+  test('smoke flow: connect -> send -> sync -> reconnect actions remain available', async () => {
+    const runtimeDisconnected = createHookReturn({
+      gatewayRuntimeById: {
+        'gateway-alpha': {
+          ...createHookReturn().gatewayRuntimeById['gateway-alpha'],
+          controllerState: {
+            connectionState: 'disconnected',
+            isSyncing: false,
+            isSending: false,
+            lastUpdatedAt: Date.now(),
+            turns: [],
+            banner: null,
+            syncError: null,
+          },
+        },
+      },
+    });
+    useMacosAppRuntime.mockReturnValue(runtimeDisconnected);
+    let renderer;
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(React.createElement(App));
+    });
+    await pressByA11yLabel(renderer, 'Connect gateway');
+    expect(runtimeDisconnected.connectGateway).toHaveBeenCalledWith('gateway-alpha');
+
+    const runtimeConnected = createHookReturn({
+      gatewayRuntimeById: {
+        'gateway-alpha': {
+          ...createHookReturn().gatewayRuntimeById['gateway-alpha'],
+          controllerState: {
+            connectionState: 'connected',
+            isSyncing: false,
+            isSending: false,
+            lastUpdatedAt: Date.now(),
+            turns: [],
+            banner: null,
+            syncError: null,
+          },
+          composerText: 'smoke message',
+          composerSelection: { start: 13, end: 13 },
+        },
+      },
+    });
+    useMacosAppRuntime.mockReturnValue(runtimeConnected);
+    await ReactTestRenderer.act(async () => {
+      renderer.update(React.createElement(App));
+    });
+
+    await pressByA11yLabel(renderer, 'Send message');
+    expect(runtimeConnected.sendMessage).toHaveBeenCalledWith('gateway-alpha');
+
+    await pressByA11yLabel(renderer, 'Sync history');
+    expect(runtimeConnected.refreshHistory).toHaveBeenCalledWith('gateway-alpha');
+
+    await pressByA11yLabel(renderer, 'Reconnect gateway');
+    expect(runtimeConnected.connectGateway).toHaveBeenCalledWith('gateway-alpha');
+  });
 });

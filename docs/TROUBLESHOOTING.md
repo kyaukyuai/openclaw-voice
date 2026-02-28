@@ -267,6 +267,21 @@ pkill -f "react-native start" || true
 pkill -f "expo start" || true
 ```
 
+## macOS native PoC: watchman `Recrawled this watch` warning
+
+If `npm --prefix apps/macos-native run test -- --watch=false` prints recurring watchman recrawl warnings, reset the watch roots:
+
+```bash
+watchman watch-del '/Users/kyaukyuai/src/github.com/kyaukyuai/openclaw-voice' || true
+watchman watch-project '/Users/kyaukyuai/src/github.com/kyaukyuai/openclaw-voice'
+```
+
+Then rerun tests:
+
+```bash
+npm --prefix apps/macos-native run test -- --watch=false
+```
+
 ## `Connecting to: iPhone` never finishes
 
 If Expo CLI keeps showing `Connecting to: iPhone` forever, installation may already be complete and only the CLI attach step is stuck.

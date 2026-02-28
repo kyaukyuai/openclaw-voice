@@ -11,7 +11,8 @@
     "lint:baseline": "eslint . --quiet --rule \"no-shadow:error\" --rule \"no-unused-vars:error\"",
     "start": "react-native start",
     "start:macos": "react-native start --reset-cache",
-    "test": "jest --passWithNoTests"
+    "test": "jest --passWithNoTests",
+    "test:smoke": "jest tests/app-ui-operations.test.js --runInBand --watch=false -t \"smoke flow: connect -> send -> sync -> reconnect actions remain available\""
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",
