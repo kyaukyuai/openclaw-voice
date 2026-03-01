@@ -28,7 +28,25 @@ jobs:
 
       - name: Install gitleaks
         run: |
-          curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | sh -s -- -b /usr/local/bin v8.24.2
+          set -euo pipefail
+          GITLEAKS_VERSION="8.24.2"
+          ARCH="$(uname -m)"
+          case "$ARCH" in
+            x86_64) PKG_ARCH="x64" ;;
+            aarch64|arm64) PKG_ARCH="arm64" ;;
+            *)
+              echo "Unsupported architecture: $ARCH"
+              exit 1
+              ;;
+          esac
+
+          URL="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${PKG_ARCH}.tar.gz"
+          curl -sSfL "$URL" -o /tmp/gitleaks.tar.gz
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf /tmp/gitleaks.tar.gz -C "$RUNNER_TEMP/bin" gitleaks
+          chmod +x "$RUNNER_TEMP/bin/gitleaks"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/bin/gitleaks" version
 
       - name: Secret scan (gitleaks)
         run: gitleaks detect --source . --redact
@@ -47,7 +65,7 @@ jobs:
         run: npm ci --prefix apps/macos-native
 
       - name: Dependency audit (prod only)
-        run: npm audit --omit=dev
+        run: npm audit --omit=dev --audit-level=high
 
       - name: Verify tag matches package version
         if: startsWith(github.ref, 'refs/tags/v')
