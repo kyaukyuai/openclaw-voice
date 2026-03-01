@@ -12,6 +12,18 @@ export default function NotificationsSettingsCard({
   toggleMuteForegroundNotifications,
   toggleNotificationsEnabled,
 }) {
+  const notificationsEnabled = notificationSettings.enabled;
+  const muteForegroundEnabled =
+    notificationsEnabled && notificationSettings.muteForeground;
+  const notificationsToggleThumbStyle = {
+    backgroundColor: notificationsEnabled ? '#ffffff' : themeTokens.textDisabled,
+    transform: [{ translateX: notificationsEnabled ? 14 : 0 }],
+  };
+  const muteForegroundToggleThumbStyle = {
+    backgroundColor: muteForegroundEnabled ? '#ffffff' : themeTokens.textDisabled,
+    transform: [{ translateX: muteForegroundEnabled ? 14 : 0 }],
+  };
+
   return (
     <View
       style={[
@@ -38,20 +50,12 @@ export default function NotificationsSettingsCard({
           style={[
             styles.notificationToggleTrack,
             {
-              backgroundColor: notificationSettings.enabled ? SEMANTIC.green : themeTokens.card,
+              backgroundColor: notificationsEnabled ? SEMANTIC.green : themeTokens.card,
               borderColor: themeTokens.inputBorder,
             },
           ]}
         >
-          <View
-            style={[
-              styles.notificationToggleThumb,
-              {
-                backgroundColor: notificationSettings.enabled ? '#ffffff' : themeTokens.textDisabled,
-                transform: [{ translateX: notificationSettings.enabled ? 14 : 0 }],
-              },
-            ]}
-          />
+          <View style={[styles.notificationToggleThumb, notificationsToggleThumbStyle]} />
         </View>
       </Pressable>
 
@@ -62,17 +66,17 @@ export default function NotificationsSettingsCard({
             borderColor: themeTokens.inputBorder,
             backgroundColor: themeTokens.input,
           },
-          notificationSettings.enabled ? null : styles.opacityMuted,
+          notificationsEnabled ? null : styles.opacityMuted,
         ]}
         onPress={toggleMuteForegroundNotifications}
-        disabled={!notificationSettings.enabled}
+        disabled={!notificationsEnabled}
       >
         <View style={styles.notificationRowTextWrap}>
           <Text
             style={[
               styles.notificationRowTitle,
               {
-                color: notificationSettings.enabled
+                color: notificationsEnabled
                   ? themeTokens.textPrimary
                   : themeTokens.textDisabled,
               },
@@ -84,7 +88,7 @@ export default function NotificationsSettingsCard({
             style={[
               styles.notificationRowDescription,
               {
-                color: notificationSettings.enabled
+                color: notificationsEnabled
                   ? themeTokens.textMuted
                   : themeTokens.textDisabled,
               },
@@ -97,33 +101,14 @@ export default function NotificationsSettingsCard({
           style={[
             styles.notificationToggleTrack,
             {
-              backgroundColor:
-                notificationSettings.enabled && notificationSettings.muteForeground
-                  ? SEMANTIC.green
-                  : themeTokens.card,
+              backgroundColor: muteForegroundEnabled ? SEMANTIC.green : themeTokens.card,
               borderColor: themeTokens.inputBorder,
             },
-            notificationSettings.enabled ? null : styles.opacityMuted,
+            notificationsEnabled ? null : styles.opacityMuted,
           ]}
         >
           <View
-            style={[
-              styles.notificationToggleThumb,
-              {
-                backgroundColor:
-                  notificationSettings.enabled && notificationSettings.muteForeground
-                    ? '#ffffff'
-                    : themeTokens.textDisabled,
-                transform: [
-                  {
-                    translateX:
-                      notificationSettings.enabled && notificationSettings.muteForeground
-                        ? 14
-                        : 0,
-                  },
-                ],
-              },
-            ]}
+            style={[styles.notificationToggleThumb, muteForegroundToggleThumbStyle]}
           />
         </View>
       </Pressable>
@@ -132,7 +117,14 @@ export default function NotificationsSettingsCard({
       <View style={styles.notificationGatewayList}>
         {gatewayProfiles.map((profile) => {
           const enabledForGateway = isGatewayNotificationEnabled(profile.id);
-          const enabledForToggle = notificationSettings.enabled;
+          const enabledForToggle = notificationsEnabled;
+          const gatewayToggleThumbStyle = {
+            backgroundColor:
+              enabledForToggle && enabledForGateway
+                ? '#ffffff'
+                : themeTokens.textDisabled,
+            transform: [{ translateX: enabledForToggle && enabledForGateway ? 14 : 0 }],
+          };
           return (
             <Pressable
               key={`notification:${profile.id}`}
@@ -186,18 +178,7 @@ export default function NotificationsSettingsCard({
                   enabledForToggle ? null : styles.opacityMuted,
                 ]}
               >
-                <View
-                  style={[
-                    styles.notificationToggleThumb,
-                    {
-                      backgroundColor:
-                        enabledForToggle && enabledForGateway
-                          ? '#ffffff'
-                          : themeTokens.textDisabled,
-                      transform: [{ translateX: enabledForToggle && enabledForGateway ? 14 : 0 }],
-                    },
-                  ]}
-                />
+                <View style={[styles.notificationToggleThumb, gatewayToggleThumbStyle]} />
               </View>
             </Pressable>
           );
