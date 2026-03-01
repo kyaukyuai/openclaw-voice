@@ -12,9 +12,9 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 import type { HistoryListItem } from '../../types';
+import { clampMarkdownSource } from './history-markdown';
 
 const WAITING_TURN_STATES = new Set(['sending', 'queued', 'delta', 'streaming']);
-const MAX_MARKDOWN_RENDER_CHARS = 20_000;
 
 function isTurnWaitingState(state: string): boolean {
   return WAITING_TURN_STATES.has(state);
@@ -22,11 +22,6 @@ function isTurnWaitingState(state: string): boolean {
 
 function isTurnErrorState(state: string): boolean {
   return state === 'error' || state === 'aborted';
-}
-
-function clampMarkdownSource(value: string): string {
-  if (value.length <= MAX_MARKDOWN_RENDER_CHARS) return value;
-  return `${value.slice(0, MAX_MARKDOWN_RENDER_CHARS)}\n\n…(message truncated for safe rendering)`;
 }
 
 type HistoryTimelineCardProps = {
