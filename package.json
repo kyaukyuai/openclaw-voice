@@ -17,6 +17,9 @@
   "publishConfig": {
     "access": "public"
   },
+  "overrides": {
+    "markdown-it": "^14.1.1"
+  },
   "scripts": {
     "setup": "bash scripts/setup.sh",
     "doctor:ios": "node scripts/doctor-ios.mjs",

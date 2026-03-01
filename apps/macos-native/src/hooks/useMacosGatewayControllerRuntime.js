@@ -38,6 +38,7 @@ export default function useMacosGatewayControllerRuntime(input) {
     setGatewayProfiles,
     setImeComposingForGateway,
     updateGatewayRuntime,
+    recordTelemetryEvent,
   } = input;
 
   const controllersRef = useRef(new Map());
@@ -194,11 +195,24 @@ export default function useMacosGatewayControllerRuntime(input) {
 
       manualDisconnectByIdRef.current[gatewayId] = false;
 
-      await controller.connect({
-        url: localDraftForActive.gatewayUrl,
-        token: localDraftForActive.authToken,
-        sessionKey: nextSessionKey,
-      });
+      const previousConnectionState =
+        gatewayRuntimeById[gatewayId]?.controllerState?.connectionState ?? 'disconnected';
+      if (previousConnectionState === 'connected' || previousConnectionState === 'reconnecting') {
+        recordTelemetryEvent?.(gatewayId, 'reconnectAttempts');
+      } else {
+        recordTelemetryEvent?.(gatewayId, 'connectAttempts');
+      }
+
+      try {
+        await controller.connect({
+          url: localDraftForActive.gatewayUrl,
+          token: localDraftForActive.authToken,
+          sessionKey: nextSessionKey,
+        });
+      } catch (error) {
+        recordTelemetryEvent?.(gatewayId, 'connectFailures');
+        throw error;
+      }
 
       await refreshKnownSessions(gatewayId);
     },
@@ -207,10 +221,12 @@ export default function useMacosGatewayControllerRuntime(input) {
       authToken,
       gatewayName,
       gatewayProfiles,
+      gatewayRuntimeById,
       gatewayUrl,
       getController,
       identityReady,
       manualDisconnectByIdRef,
+      recordTelemetryEvent,
       refreshKnownSessions,
       sessionKey,
       setGatewayProfiles,
@@ -235,10 +251,20 @@ export default function useMacosGatewayControllerRuntime(input) {
     async (gatewayId) => {
       const controller = getController(gatewayId);
       if (!controller) return;
-      await controller.refreshHistory();
+      recordTelemetryEvent?.(gatewayId, 'refreshAttempts');
+      try {
+        await controller.refreshHistory();
+      } catch (error) {
+        if (String(error?.code ?? '') === 'REFRESH_TIMEOUT') {
+          recordTelemetryEvent?.(gatewayId, 'refreshTimeouts');
+        } else {
+          recordTelemetryEvent?.(gatewayId, 'refreshFailures');
+        }
+        throw error;
+      }
       await refreshKnownSessions(gatewayId);
     },
-    [getController, refreshKnownSessions],
+    [getController, recordTelemetryEvent, refreshKnownSessions],
   );
 
   const sendMessage = useCallback(
@@ -266,6 +292,7 @@ export default function useMacosGatewayControllerRuntime(input) {
       ) {
         return;
       }
+      recordTelemetryEvent?.(gatewayId, 'sendAttempts');
 
       if (outgoingAttachments.length > 0) {
         setAttachmentNoticeForGateway(
@@ -327,6 +354,7 @@ export default function useMacosGatewayControllerRuntime(input) {
         focusComposerForGateway(gatewayId);
         scheduleHistoryBottomSync(gatewayId);
       } catch (error) {
+        recordTelemetryEvent?.(gatewayId, 'sendFailures');
         const restoredSelection = {
           start: outgoingMessage.length,
           end: outgoingMessage.length,
@@ -366,6 +394,7 @@ export default function useMacosGatewayControllerRuntime(input) {
       gatewayRuntimeById,
       getController,
       input.isImeComposingByGatewayIdRef,
+      recordTelemetryEvent,
       scheduleHistoryBottomSync,
       setAttachmentNoticeForGateway,
       setForcedSelectionForGateway,

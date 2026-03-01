@@ -1,21 +1,15 @@
 import React from 'react';
 import {
-  ActivityIndicator,
-  Image,
-  Pressable,
-  ScrollView,
   Text,
   View,
 } from 'react-native';
 import { formatUpdatedAtLabel, groupTurnsByDate } from '../../../../src/shared';
 import {
   INITIAL_CONTROLLER_STATE,
-  SEMANTIC,
   COMPOSER_MAX_HEIGHT,
+  SEMANTIC,
 } from '../logic/app-constants';
 import {
-  attachmentLabel,
-  bytesLabel,
   clampComposerHeight,
   connectionChipFromState,
   gatewayRecoveryHint,
@@ -27,6 +21,9 @@ import {
 import styles from '../styles/app-styles';
 import GatewayComposerPanel from './GatewayComposerPanel';
 import GatewayHistoryPanel from './GatewayHistoryPanel';
+import GatewayAttachmentSection from './gateway/GatewayAttachmentSection';
+import GatewayConnectionControls from './gateway/GatewayConnectionControls';
+import GatewayStatusRow from './gateway/GatewayStatusRow';
 
 export default function GatewayCard({
   attachmentNotice,
@@ -216,143 +213,30 @@ export default function GatewayCard({
           </Text>
         </View>
       </View>
+      <GatewayConnectionControls
+        canDisconnectGateway={canDisconnectGateway}
+        connectActionOpacityStyle={connectActionOpacityStyle}
+        connectGateway={connectGateway}
+        connectionState={controllerState.connectionState}
+        disconnectActionOpacityStyle={disconnectActionOpacityStyle}
+        disconnectGateway={disconnectGateway}
+        gatewayId={profile.id}
+        identityReady={identityReady}
+        isConnecting={isConnecting}
+        isGatewayConnected={isGatewayConnected}
+        isReconnecting={isReconnecting}
+        isSyncing={controllerState.isSyncing}
+        recoveryHint={recoveryHint}
+        refreshHistory={refreshHistory}
+        setQuickMenuOpenForGateway={setQuickMenuOpenForGateway}
+        themeTokens={themeTokens}
+      />
 
-      <View style={styles.gatewayCardActions}>
-        <Pressable
-          style={[
-            styles.inlineAction,
-            {
-              backgroundColor:
-                controllerState.connectionState === 'connected' && !controllerState.isSyncing
-                  ? themeTokens.card
-                  : themeTokens.input,
-              borderColor: themeTokens.inputBorder,
-            },
-          ]}
-          disabled={controllerState.connectionState !== 'connected' || controllerState.isSyncing}
-          accessibilityRole="button"
-          accessibilityLabel="Sync history"
-          accessibilityHint="Reloads messages for the current session without reconnecting."
-          onPress={() => {
-            setQuickMenuOpenForGateway(profile.id, false);
-            refreshHistory(profile.id).catch(() => {
-              // surfaced via banner
-            });
-          }}
-        >
-          <Text
-            numberOfLines={1}
-            style={[
-              styles.inlineActionText,
-              {
-                color:
-                  controllerState.connectionState === 'connected' && !controllerState.isSyncing
-                    ? themeTokens.textSecondary
-                    : themeTokens.textDisabled,
-              },
-            ]}
-          >
-            ↻ Sync
-          </Text>
-        </Pressable>
-
-        <Pressable
-          style={[
-            styles.inlinePrimary,
-            {
-              backgroundColor: SEMANTIC.blue,
-            },
-            connectActionOpacityStyle,
-          ]}
-          disabled={!identityReady || isConnecting}
-          accessibilityRole="button"
-          accessibilityLabel={isGatewayConnected || isReconnecting ? 'Reconnect gateway' : 'Connect gateway'}
-          accessibilityHint={
-            isGatewayConnected || isReconnecting
-              ? 'Restarts the gateway connection. Use this after changing URL, token, or session.'
-              : 'Starts a gateway connection with the current settings.'
-          }
-          onPress={() => {
-            setQuickMenuOpenForGateway(profile.id, false);
-            connectGateway(profile.id).catch(() => {
-              // surfaced via banner
-            });
-          }}
-        >
-          <Text style={styles.inlinePrimaryText} numberOfLines={1}>
-            {isGatewayConnected || isReconnecting ? '⇄ Reconnect' : '◎ Connect'}
-          </Text>
-        </Pressable>
-
-        <Pressable
-          style={[
-            styles.inlineAction,
-            {
-              backgroundColor: themeTokens.card,
-              borderColor: themeTokens.inputBorder,
-            },
-            disconnectActionOpacityStyle,
-          ]}
-          disabled={!canDisconnectGateway}
-          accessibilityRole="button"
-          accessibilityLabel="Disconnect gateway"
-          accessibilityHint="Stops the gateway connection immediately."
-          onPress={() => {
-            setQuickMenuOpenForGateway(profile.id, false);
-            disconnectGateway(profile.id);
-          }}
-        >
-          <Text
-            numberOfLines={1}
-            style={[
-              styles.inlineActionText,
-              { color: canDisconnectGateway ? themeTokens.textSecondary : themeTokens.textDisabled },
-            ]}
-          >
-            ⏻ Disconnect
-          </Text>
-        </Pressable>
-      </View>
-      <Text style={[styles.gatewayActionHint, { color: themeTokens.textMuted }]}>
-        Sync reloads history. Reconnect restarts the connection.
-      </Text>
-      {recoveryHint ? (
-        <Text
-          style={[
-            styles.gatewayRecoveryHint,
-            {
-              color:
-                controllerState.connectionState === 'reconnecting'
-                  ? SEMANTIC.amber
-                  : themeTokens.textSecondary,
-            },
-          ]}
-        >
-          {recoveryHint}
-        </Text>
-      ) : null}
-
-      <View style={styles.gatewayStatusRow}>
-        <View
-          style={[
-            styles.statusRow,
-            {
-              backgroundColor: statusMeta.tone.bg,
-              borderColor: statusMeta.tone.border,
-            },
-          ]}
-        >
-          {statusMeta.spinning ? (
-            <ActivityIndicator size="small" color={statusMeta.tone.color} />
-          ) : (
-            <View style={[styles.statusStaticDot, { backgroundColor: statusMeta.tone.color }]} />
-          )}
-          <Text style={[styles.statusRowText, { color: statusMeta.tone.color }]} numberOfLines={1}>
-            {statusMeta.message}
-          </Text>
-        </View>
-        <Text style={[styles.updatedText, { color: themeTokens.textMuted }]}>{updatedLabel || '-'}</Text>
-      </View>
+      <GatewayStatusRow
+        statusMeta={statusMeta}
+        themeTokens={themeTokens}
+        updatedLabel={updatedLabel}
+      />
 
       <GatewayHistoryPanel
         copiedMessageByKey={copiedMessageByKey}
@@ -376,74 +260,13 @@ export default function GatewayCard({
         themeTokens={themeTokens}
       />
 
-      {pendingAttachments.length > 0 ? (
-        <View style={styles.attachmentSection}>
-          <View style={styles.attachmentSectionHeader}>
-            <Text style={[styles.attachmentSectionTitle, { color: themeTokens.textMuted }]}>
-              {pendingAttachments.length} attachment{pendingAttachments.length > 1 ? 's' : ''}
-            </Text>
-            <Pressable
-              style={[styles.attachmentClearButton, { borderColor: themeTokens.inputBorder }]}
-              onPress={() => clearPendingAttachmentsForGateway(profile.id)}
-              accessibilityRole="button"
-              accessibilityLabel="Clear all attachments"
-            >
-              <Text style={[styles.attachmentClearButtonText, { color: themeTokens.textSecondary }]}>
-                Clear all
-              </Text>
-            </Pressable>
-          </View>
-          <ScrollView
-            horizontal
-            style={styles.attachmentList}
-            contentContainerStyle={styles.attachmentListContent}
-            showsHorizontalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            {pendingAttachments.map((attachment) => (
-              <View
-                key={attachment.id}
-                style={[
-                  styles.attachmentChip,
-                  {
-                    backgroundColor: themeTokens.card,
-                    borderColor: themeTokens.inputBorder,
-                  },
-                ]}
-              >
-                {attachment.type === 'image' ? (
-                  <Image
-                    source={{ uri: `data:${attachment.mimeType};base64,${attachment.content}` }}
-                    style={styles.attachmentChipPreview}
-                  />
-                ) : null}
-                <Text style={[styles.attachmentChipType, { color: themeTokens.textSecondary }]}>
-                  {attachment.type === 'image' ? 'IMG' : 'FILE'}
-                </Text>
-                <Text
-                  numberOfLines={1}
-                  style={[styles.attachmentChipName, { color: themeTokens.textSecondary }]}
-                >
-                  {attachment.fileName}
-                </Text>
-                <Text style={[styles.attachmentChipSize, { color: themeTokens.textMuted }]}>
-                  {bytesLabel(Number(attachment.size ?? 0))}
-                </Text>
-                <Pressable
-                  onPress={() => removePendingAttachmentForGateway(profile.id, attachment.id)}
-                  style={styles.attachmentChipRemove}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Remove ${attachmentLabel(attachment)}`}
-                >
-                  <Text style={[styles.attachmentChipRemoveText, { color: themeTokens.textMuted }]}>
-                    x
-                  </Text>
-                </Pressable>
-              </View>
-            ))}
-          </ScrollView>
-        </View>
-      ) : null}
+      <GatewayAttachmentSection
+        clearPendingAttachmentsForGateway={clearPendingAttachmentsForGateway}
+        gatewayId={profile.id}
+        pendingAttachments={pendingAttachments}
+        removePendingAttachmentForGateway={removePendingAttachmentForGateway}
+        themeTokens={themeTokens}
+      />
 
       <GatewayComposerPanel
         attachmentActionOpacityStyle={attachmentActionOpacityStyle}

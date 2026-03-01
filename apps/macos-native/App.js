@@ -31,6 +31,7 @@ export default function App() {
     composerHeightByGatewayIdRef,
     composerInputRefs,
     connectGateway,
+    copyTelemetryReport,
     copiedMessageByKey,
     disconnectGateway,
     dropActiveByGatewayId,
@@ -69,6 +70,7 @@ export default function App() {
     quickMenuOpenByGatewayId,
     quickTextLeft,
     quickTextRight,
+    resetTelemetry,
     recomputeHistoryBottomInsetForGateway,
     refreshHistory,
     removePendingAttachmentForGateway,
@@ -100,6 +102,7 @@ export default function App() {
     summaryChip,
     theme,
     themeTokens,
+    telemetry,
     toggleGatewayCollapse,
     toggleGatewayNotifications,
     toggleMuteForegroundNotifications,
@@ -516,8 +519,10 @@ export default function App() {
                       isAuthTokenVisible={isAuthTokenVisible}
                       isGatewayNotificationEnabled={isGatewayNotificationEnabled}
                       notificationSettings={notificationSettings}
+                      copyTelemetryReport={copyTelemetryReport}
                       quickTextLeft={quickTextLeft}
                       quickTextRight={quickTextRight}
+                      resetTelemetry={resetTelemetry}
                       sessionKey={sessionKey}
                       setAuthToken={setAuthToken}
                       setFocusedSettingsInput={setFocusedSettingsInput}
@@ -531,6 +536,7 @@ export default function App() {
                       toggleGatewayNotifications={toggleGatewayNotifications}
                       toggleMuteForegroundNotifications={toggleMuteForegroundNotifications}
                       toggleNotificationsEnabled={toggleNotificationsEnabled}
+                      telemetry={telemetry}
                     />
                   ) : (
                     renderSelectedSession()

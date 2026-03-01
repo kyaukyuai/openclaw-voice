@@ -14,6 +14,7 @@ import {
   extractNotificationRoute,
   normalizeNotificationSettings,
   normalizeSessionKey,
+  normalizeTelemetrySnapshot,
   normalizeText,
 } from '../logic/app-logic';
 
@@ -49,6 +50,7 @@ export default function useMacosAppLifecycle(input) {
     setQuickTextLeft,
     setQuickTextRight,
     setTheme,
+    setTelemetrySnapshot,
     syncControllersWithProfiles,
     activeGatewayIdRef,
     activeNavRef,
@@ -134,6 +136,7 @@ export default function useMacosAppLifecycle(input) {
           DEFAULT_NOTIFICATION_SETTINGS,
           nextProfiles,
         );
+        let nextTelemetry = normalizeTelemetrySnapshot(null, nextProfiles);
 
         if (savedSettingsRaw) {
           const parsed = JSON.parse(savedSettingsRaw);
@@ -190,6 +193,7 @@ export default function useMacosAppLifecycle(input) {
               parsed.notifications,
               nextProfiles,
             );
+            nextTelemetry = normalizeTelemetrySnapshot(parsed.telemetry, nextProfiles);
           }
         }
 
@@ -201,6 +205,7 @@ export default function useMacosAppLifecycle(input) {
         setQuickTextRight(nextQuickTextRight);
         setTheme(nextTheme);
         setNotificationSettings(nextNotificationSettings);
+        setTelemetrySnapshot(nextTelemetry);
 
         if (savedIdentity) {
           identityCache.set(OPENCLAW_IDENTITY_STORAGE_KEY, savedIdentity);
@@ -229,6 +234,7 @@ export default function useMacosAppLifecycle(input) {
     setQuickTextLeft,
     setQuickTextRight,
     setTheme,
+    setTelemetrySnapshot,
   ]);
 
   useEffect(() => {

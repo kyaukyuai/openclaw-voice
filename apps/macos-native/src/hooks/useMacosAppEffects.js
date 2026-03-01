@@ -31,6 +31,7 @@ export default function useMacosAppEffects(input) {
     persistSettings,
     quickTextLeft,
     quickTextRight,
+    telemetry,
     recomputeHistoryBottomInsetForGateway,
     refreshKnownSessions,
     scheduleHistoryBottomSync,
@@ -61,6 +62,7 @@ export default function useMacosAppEffects(input) {
       activeGatewayId,
       quickTextLeft,
       quickTextRight,
+      telemetry,
       theme,
       notifications: notificationSettings,
     }).catch(() => {
@@ -77,6 +79,7 @@ export default function useMacosAppEffects(input) {
     persistSettings,
     quickTextLeft,
     quickTextRight,
+    telemetry,
     sessionKey,
     theme,
   ]);

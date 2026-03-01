@@ -432,6 +432,8 @@ git push origin vX.Y.Z
 
 - Do not commit private gateway tokens.
 - Use secure `wss://` endpoints.
+- `markdown-it` is pinned via npm `overrides` to avoid vulnerable legacy transitive versions.
+- Extremely long assistant markdown is truncated during render for safe UI/resource usage.
 - Preferred exposure path: Tailscale/WireGuard -> Cloudflare Tunnel + access control -> hardened VPS reverse proxy.
 - Do not expose raw Gateway ports publicly.
 - Rotate credentials and keep TLS/server packages up to date.

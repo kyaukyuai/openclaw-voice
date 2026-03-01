@@ -10,6 +10,7 @@ import useMacosGatewayProfileActions from './useMacosGatewayProfileActions';
 import useMacosHistoryScrollRuntime from './useMacosHistoryScrollRuntime';
 import useMacosNotificationRuntime from './useMacosNotificationRuntime';
 import useMacosRuntimeState from './useMacosRuntimeState';
+import useMacosTelemetryRuntime from './useMacosTelemetryRuntime';
 
 export default function useMacosAppRuntime() {
   const {
@@ -68,13 +69,26 @@ export default function useMacosAppRuntime() {
     setQuickMenuOpenByGatewayId,
     setQuickTextLeft,
     setQuickTextRight,
+    setTelemetrySnapshot,
     setSessionKey,
     setTheme,
     skipSubmitEditingByGatewayIdRef,
+    telemetrySnapshot,
     theme,
     themeTokens,
     updateGatewayRuntime,
   } = useMacosRuntimeState();
+
+  const {
+    copyTelemetryReport,
+    recordTelemetryEvent,
+    resetTelemetry,
+    telemetry,
+  } = useMacosTelemetryRuntime({
+    gatewayProfiles,
+    setTelemetrySnapshot,
+    telemetrySnapshot,
+  });
 
   const {
     clearUnreadForSession,
@@ -97,6 +111,7 @@ export default function useMacosAppRuntime() {
     activeSessionKeyRef,
     gatewayProfiles,
     gatewayProfilesRef,
+    recordTelemetryEvent,
   });
 
   const {
@@ -196,6 +211,7 @@ export default function useMacosAppRuntime() {
     setGatewayProfiles,
     setImeComposingForGateway,
     updateGatewayRuntime,
+    recordTelemetryEvent,
   });
 
   const applyGatewayProfileToEditor = useCallback((profile) => {
@@ -298,6 +314,7 @@ export default function useMacosAppRuntime() {
     setNotificationSettings,
     setQuickTextLeft,
     setQuickTextRight,
+    setTelemetrySnapshot,
     setTheme,
     syncControllersWithProfiles,
   });
@@ -328,6 +345,7 @@ export default function useMacosAppRuntime() {
     persistSettings,
     quickTextLeft,
     quickTextRight,
+    telemetry,
     recomputeHistoryBottomInsetForGateway,
     refreshKnownSessions,
     scheduleHistoryBottomSync,
@@ -428,6 +446,8 @@ export default function useMacosAppRuntime() {
     summaryChip,
     theme,
     themeTokens,
+    copyTelemetryReport,
+    resetTelemetry,
     toggleGatewayCollapse,
     toggleGatewayNotifications,
     toggleMuteForegroundNotifications,
@@ -435,5 +455,6 @@ export default function useMacosAppRuntime() {
     tryImportFromClipboardShortcut,
     unreadByGatewaySession,
     updateGatewayRuntime,
+    telemetry,
   };
 }

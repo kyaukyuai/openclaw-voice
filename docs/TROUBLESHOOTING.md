@@ -74,6 +74,11 @@ Key integration coverage:
   - history timeout fail-close (`Refreshing...` stuck regression)
   - reconnecting -> disconnect reset safety
 
+## iOS: very long markdown response feels heavy
+
+- Long assistant markdown is truncated during render by design (safe rendering guard).
+- Full raw response is still kept in runtime/session data; only on-screen markdown rendering is bounded.
+
 ## `Cannot find native module 'ExpoSecureStore'`
 
 ```bash
