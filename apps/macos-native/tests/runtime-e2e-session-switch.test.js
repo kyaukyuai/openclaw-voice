@@ -112,9 +112,16 @@ describe('GatewayChatController execution e2e session switch flow', () => {
     expect(switchedState.turns[0].assistantText).toContain('project seed assistant');
     expect(switchedState.isSending).toBe(false);
 
-    MockGatewayClient.setChatSendImpl(async () => ({ runId: 'run-project-a', status: 'ok' }));
+    const chatSendCalls = [];
+    MockGatewayClient.setChatSendImpl(async (sessionKey, message, options) => {
+      chatSendCalls.push({ sessionKey, message, options });
+      return { runId: 'run-project-a', status: 'ok' };
+    });
     await controller.sendMessage('new project question');
     expect(controller.getState().isSending).toBe(true);
+    expect(chatSendCalls).toHaveLength(1);
+    expect(chatSendCalls[0].sessionKey).toBe('project-a');
+    expect(chatSendCalls[0].message).toBe('new project question');
 
     controller.handleChatEvent({
       runId: 'run-project-a',
