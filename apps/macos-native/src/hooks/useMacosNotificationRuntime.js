@@ -22,6 +22,7 @@ export default function useMacosNotificationRuntime({
   activeSessionKeyRef,
   gatewayProfiles,
   gatewayProfilesRef,
+  recordTelemetryEvent,
 }) {
   const [notificationSettings, setNotificationSettings] = useState(() =>
     normalizeNotificationSettings(DEFAULT_NOTIFICATION_SETTINGS, gatewayProfiles),
@@ -172,6 +173,7 @@ export default function useMacosNotificationRuntime({
       const nextSignature = assistantTurnSignature(nextAssistantTurn);
 
       if (!nextSignature || nextSignature === previousSignature) return;
+      recordTelemetryEvent?.(gatewayId, 'assistantReplies');
 
       const previousTurnCount = Array.isArray(previousState?.turns) ? previousState.turns.length : 0;
       const appearsToBeInitialHistoryLoad = previousTurnCount === 0 && !previousState?.isSending;
@@ -202,6 +204,7 @@ export default function useMacosNotificationRuntime({
       clearUnreadForSession,
       incrementUnreadForSession,
       notifyNewAssistantMessage,
+      recordTelemetryEvent,
       gatewayProfilesRef,
     ],
   );

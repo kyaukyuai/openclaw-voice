@@ -4,6 +4,7 @@ import GatewayProfilesCard from './settings/GatewayProfilesCard';
 import GatewaySettingsCard from './settings/GatewaySettingsCard';
 import NotificationsSettingsCard from './settings/NotificationsSettingsCard';
 import QuickTextSettingsCard from './settings/QuickTextSettingsCard';
+import RuntimeTelemetryCard from './settings/RuntimeTelemetryCard';
 import styles from '../styles/app-styles';
 
 export default function SettingsView({
@@ -26,8 +27,10 @@ export default function SettingsView({
   isAuthTokenVisible,
   isGatewayNotificationEnabled,
   notificationSettings,
+  copyTelemetryReport,
   quickTextLeft,
   quickTextRight,
+  resetTelemetry,
   sessionKey,
   setAuthToken,
   setFocusedSettingsInput,
@@ -41,6 +44,7 @@ export default function SettingsView({
   toggleGatewayNotifications,
   toggleMuteForegroundNotifications,
   toggleNotificationsEnabled,
+  telemetry,
 }) {
   return (
     <ScrollView
@@ -100,6 +104,14 @@ export default function SettingsView({
         setFocusedSettingsInput={setFocusedSettingsInput}
         setQuickTextLeft={setQuickTextLeft}
         setQuickTextRight={setQuickTextRight}
+        themeTokens={themeTokens}
+      />
+
+      <RuntimeTelemetryCard
+        copyTelemetryReport={copyTelemetryReport}
+        gatewayProfiles={gatewayProfiles}
+        resetTelemetry={resetTelemetry}
+        telemetry={telemetry}
         themeTokens={themeTokens}
       />
     </ScrollView>

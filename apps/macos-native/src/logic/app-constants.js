@@ -34,6 +34,24 @@ export const DEFAULT_NOTIFICATION_SETTINGS = {
   byGatewayId: {},
 };
 
+export const DEFAULT_TELEMETRY_COUNTERS = {
+  connectAttempts: 0,
+  connectFailures: 0,
+  reconnectAttempts: 0,
+  sendAttempts: 0,
+  sendFailures: 0,
+  refreshAttempts: 0,
+  refreshFailures: 0,
+  refreshTimeouts: 0,
+  assistantReplies: 0,
+};
+
+export const DEFAULT_TELEMETRY_SNAPSHOT = {
+  lastUpdatedAt: null,
+  totals: { ...DEFAULT_TELEMETRY_COUNTERS },
+  byGatewayId: {},
+};
+
 export const THEMES = {
   light: {
     bg: '#F7F8FA',

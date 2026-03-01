@@ -825,6 +825,46 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '500',
   },
+  telemetryMetricGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  telemetryMetricCard: {
+    width: '31%',
+    minWidth: 120,
+    borderWidth: 1.25,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 3,
+  },
+  telemetryMetricLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  telemetryMetricValue: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  telemetryGatewayList: {
+    gap: 6,
+  },
+  telemetryGatewayRow: {
+    borderWidth: 1.25,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 2,
+  },
+  telemetryGatewayName: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  telemetryGatewayInline: {
+    fontSize: 10,
+    fontWeight: '500',
+  },
   emptyWrap: {
     flex: 1,
     alignItems: 'center',

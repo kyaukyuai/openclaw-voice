@@ -4,6 +4,7 @@ import { setStorage } from '../../../src/openclaw/storage';
 import {
   DEFAULT_GATEWAY_PROFILE,
   DEFAULTS,
+  DEFAULT_TELEMETRY_SNAPSHOT,
   SETTINGS_KEY,
   THEMES,
 } from '../logic/app-constants';
@@ -37,6 +38,7 @@ export default function useMacosRuntimeState() {
 
   const [quickTextLeft, setQuickTextLeft] = useState(DEFAULTS.quickTextLeft);
   const [quickTextRight, setQuickTextRight] = useState(DEFAULTS.quickTextRight);
+  const [telemetrySnapshot, setTelemetrySnapshot] = useState(DEFAULT_TELEMETRY_SNAPSHOT);
   const [theme, setTheme] = useState(DEFAULTS.theme);
   const [isAuthTokenVisible, setIsAuthTokenVisible] = useState(false);
   const [activeNav, setActiveNav] = useState('settings');
@@ -143,9 +145,11 @@ export default function useMacosRuntimeState() {
     setQuickMenuOpenByGatewayId,
     setQuickTextLeft,
     setQuickTextRight,
+    setTelemetrySnapshot,
     setSessionKey,
     setTheme,
     skipSubmitEditingByGatewayIdRef,
+    telemetrySnapshot,
     theme,
     themeTokens,
     updateGatewayRuntime,

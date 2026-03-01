@@ -14,6 +14,7 @@ import {
 import type { HistoryListItem } from '../../types';
 
 const WAITING_TURN_STATES = new Set(['sending', 'queued', 'delta', 'streaming']);
+const MAX_MARKDOWN_RENDER_CHARS = 20_000;
 
 function isTurnWaitingState(state: string): boolean {
   return WAITING_TURN_STATES.has(state);
@@ -21,6 +22,11 @@ function isTurnWaitingState(state: string): boolean {
 
 function isTurnErrorState(state: string): boolean {
   return state === 'error' || state === 'aborted';
+}
+
+function clampMarkdownSource(value: string): string {
+  if (value.length <= MAX_MARKDOWN_RENDER_CHARS) return value;
+  return `${value.slice(0, MAX_MARKDOWN_RENDER_CHARS)}\n\n…(message truncated for safe rendering)`;
 }
 
 type HistoryTimelineCardProps = {
@@ -248,7 +254,8 @@ export default function HistoryTimelineCard({
       const turn = item.turn;
       const waiting = isTurnWaitingState(turn.state);
       const error = isTurnErrorState(turn.state);
-      const assistantText = turn.assistantText || (waiting ? 'Responding...' : 'No response');
+      const assistantTextRaw = turn.assistantText || (waiting ? 'Responding...' : 'No response');
+      const assistantText = clampMarkdownSource(assistantTextRaw);
       const turnTime = new Date(turn.createdAt).toLocaleTimeString('ja-JP', {
         hour: '2-digit',
         minute: '2-digit',

@@ -24,7 +24,6 @@
     "react-native": "0.81.5",
     "react-native-get-random-values": "^2.0.0",
     "react-native-macos": "^0.81.1",
-    "react-native-markdown-display": "^7.0.2",
     "react-native-safe-area-context": "^5.5.2",
     "react-native-webview": "^13.16.0"
   },
