@@ -281,6 +281,11 @@ watchman watch-del '/Users/kyaukyuai/src/github.com/kyaukyuai/openclaw-voice' ||
 watchman watch-project '/Users/kyaukyuai/src/github.com/kyaukyuai/openclaw-voice'
 ```
 
+Recommended timing:
+
+- Run this once after large merges / branch switches.
+- Run again if Metro/Jest file changes are not reflected.
+
 Then rerun tests:
 
 ```bash

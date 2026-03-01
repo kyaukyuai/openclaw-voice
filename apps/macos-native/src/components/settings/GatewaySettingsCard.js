@@ -46,6 +46,16 @@ export default function GatewaySettingsCard({
   );
 
   const maskedAuthTokenPreview = authToken.length > 0 ? '●'.repeat(authToken.length) : '';
+  const gatewayConnectedHintStyle = {
+    backgroundColor: isReconnecting ? SEMANTIC.amberSoft : SEMANTIC.greenSoft,
+    borderColor: isReconnecting ? 'rgba(217,119,6,0.20)' : 'rgba(5,150,105,0.18)',
+  };
+  const gatewayConnectedDotStyle = {
+    backgroundColor: isReconnecting ? SEMANTIC.amber : SEMANTIC.green,
+  };
+  const gatewayConnectedHintTextStyle = {
+    color: isReconnecting ? SEMANTIC.amber : SEMANTIC.green,
+  };
 
   return (
     <View
@@ -60,22 +70,14 @@ export default function GatewaySettingsCard({
         <View
           style={[
             styles.gatewayConnectedHint,
-            {
-              backgroundColor: isReconnecting ? SEMANTIC.amberSoft : SEMANTIC.greenSoft,
-              borderColor: isReconnecting ? 'rgba(217,119,6,0.20)' : 'rgba(5,150,105,0.18)',
-            },
+            gatewayConnectedHintStyle,
           ]}
         >
-          <View
-            style={[
-              styles.gatewayConnectedDot,
-              { backgroundColor: isReconnecting ? SEMANTIC.amber : SEMANTIC.green },
-            ]}
-          />
+          <View style={[styles.gatewayConnectedDot, gatewayConnectedDotStyle]} />
           <Text
             style={[
               styles.gatewayConnectedHintText,
-              { color: isReconnecting ? SEMANTIC.amber : SEMANTIC.green },
+              gatewayConnectedHintTextStyle,
             ]}
           >
             {isReconnecting
