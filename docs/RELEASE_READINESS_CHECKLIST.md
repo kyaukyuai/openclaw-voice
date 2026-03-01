@@ -55,7 +55,7 @@ Run it in order from top to bottom.
 
 ### 2.2 Dependency and leak checks
 
-- [ ] `npm audit --omit=dev` reviewed (no unresolved high/critical for release target).
+- [ ] `npm audit --omit=dev --audit-level=high` reviewed (no unresolved high/critical for release target).
 - [ ] Secret scanning enabled in CI (or run equivalent scanner pre-release).
 - [ ] Release logs/artifacts do not expose credentials.
 

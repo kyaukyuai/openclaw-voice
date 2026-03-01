@@ -400,7 +400,7 @@ git push --tags
 Verify gate includes:
 
 - `gitleaks detect --source . --redact`
-- `npm audit --omit=dev`
+- `npm audit --omit=dev --audit-level=high`
 - `typecheck`, `lint`, `test`, `smoke:pack-install`
 - `npm --prefix apps/macos-native run test:e2e`
 
