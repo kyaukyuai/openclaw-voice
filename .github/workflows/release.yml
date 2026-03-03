@@ -67,6 +67,9 @@ jobs:
       - name: Dependency audit (prod only)
         run: npm audit --omit=dev --audit-level=high
 
+      - name: Dependency audit (prod only, macOS native)
+        run: npm audit --omit=dev --audit-level=high --prefix apps/macos-native
+
       - name: Verify tag matches package version
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
