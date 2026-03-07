@@ -92,6 +92,12 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Lint (macOS native)
+        run: npm --prefix apps/macos-native run lint
+
+      - name: Test (macOS native)
+        run: npm --prefix apps/macos-native run test -- --watch=false
+
       - name: Runtime E2E (macOS native gateway flow)
         run: npm --prefix apps/macos-native run test:e2e
 
